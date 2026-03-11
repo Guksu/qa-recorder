@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QA Recorder - Demo</title>
+  <style>
+    body { font-family: sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; }
+    h1 { color: #e53e3e; }
+    .section { margin: 32px 0; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px; }
+    button {
+      padding: 8px 16px; margin: 4px; border: none; border-radius: 6px;
+      cursor: pointer; background: #4a5568; color: white; font-size: 14px;
+    }
+    button:hover { background: #2d3748; }
+    pre {
+      background: #f7fafc; padding: 12px; border-radius: 6px;
+      overflow: auto; max-height: 300px; font-size: 12px;
+    }
+    .badge {
+      display: inline-block; padding: 2px 8px; border-radius: 12px;
+      font-size: 12px; font-weight: bold;
+    }
+    .badge-green { background: #c6f6d5; color: #276749; }
+    .badge-red { background: #fed7d7; color: #9b2c2c; }
+  </style>
+</head>
+<body>
+  <h1>QA Recorder Demo</h1>
+  <p>우측 하단의 빨간 버튼이 QA Recorder입니다. 클릭하면 저장 확인 팝업이 나타납니다.</p>
+
+  <div class="section">
+    <h2>네트워크 요청 발생시키기</h2>
+    <p>아래 버튼으로 네트워크 요청을 발생시킨 후 QA Recorder 버튼을 눌러보세요.</p>
+    <button onclick="fetchTest()">fetch() 테스트</button>
+    <button onclick="xhrTest()">XHR 테스트</button>
+    <button onclick="fetchError()">fetch() 에러 테스트</button>
+    <div id="request-log">
+      <h3>요청 로그</h3>
+      <pre id="log-output">요청 버튼을 클릭하세요...</pre>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>캡처된 네트워크 버퍼 확인</h2>
+    <button onclick="showBuffer()">현재 버퍼 보기</button>
+    <pre id="buffer-output">버튼을 눌러 확인하세요.</pre>
+  </div>
+
+  <div class="section">
+    <h2>local 모드 테스트 (서버 없이)</h2>
+    <p>storage: 'local' 설정으로 파일을 직접 다운로드합니다.</p>
+    <button onclick="initLocalMode()">local 모드로 초기화</button>
+    <span id="mode-badge"></span>
+  </div>
+
+  <script type="module">
+    import { QARecorder } from '../src/index.ts';
+
+    // 기본 remote 모드 초기화 (서버 없이 테스트 시 local 모드 사용)
+    window.__QA_RECORDER_CONFIG__ = {
+      storage: 'local',
+      maxRequests: 100,
+      maskHeaders: ['Authorization', 'Cookie'],
+    };
+
+    const recorder = new QARecorder();
+    window.__recorder = recorder;
+
+    try {
+      await recorder.init();
+      document.getElementById('mode-badge').innerHTML =
+        '<span class="badge badge-green">초기화 완료</span>';
+    } catch (e) {
+      document.getElementById('mode-badge').innerHTML =
+        '<span class="badge badge-red">초기화 실패: ' + e.message + '</span>';
+      console.error(e);
+    }
+
+    // 네트워크 요청 테스트
+    window.fetchTest = async () => {
+      const log = document.getElementById('log-output');
+      try {
+        const res = await fetch('https://jsonplaceholder.typicode.com/posts/1');
+        const data = await res.json();
+        log.textContent = '[fetch] GET /posts/1\n' + JSON.stringify(data, null, 2);
+      } catch (e) {
+        log.textContent = '[fetch] 에러: ' + e.message;
+      }
+    };
+
+    window.xhrTest = () => {
+      const log = document.getElementById('log-output');
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', 'https://jsonplaceholder.typicode.com/posts');
+      xhr.setRequestHeader('Content-Type', 'application/json');
+      xhr.onload = () => {
+        log.textContent = '[XHR] POST /posts\n' + xhr.responseText;
+      };
+      xhr.send(JSON.stringify({ title: 'test', body: 'hello', userId: 1 }));
+    };
+
+    window.fetchError = async () => {
+      const log = document.getElementById('log-output');
+      try {
+        await fetch('https://jsonplaceholder.typicode.com/nonexistent/999');
+        log.textContent = '[fetch] 404 응답 (캡처됨)';
+      } catch (e) {
+        log.textContent = '[fetch] 에러: ' + e.message;
+      }
+    };
+
+    window.showBuffer = () => {
+      const entries = recorder.getNetworkEntries();
+      document.getElementById('buffer-output').textContent =
+        `총 ${entries.length}건\n\n` +
+        entries.map((e, i) =>
+          `[${i + 1}] ${e.request.method} ${e.request.url}\n    → ${e.response.status} (${Math.round(e.time)}ms)`
+        ).join('\n');
+    };
+
+    window.initLocalMode = async () => {
+      console.log('local 모드 활성화됨 - 우측 하단 버튼을 클릭하세요');
+    };
+  </script>
+</body>
+</html>

@@ -1,0 +1,24 @@
+node_modules/
+dist/
+.turbo/
+*.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+
+# Editor
+.vscode/settings.json
+.idea/
+
+# Claude Code
+.claude/
+CLAUDE.md
+
+# Logs
+*.log
+npm-debug.log*
+
+# Build
+*.tsbuildinfo
