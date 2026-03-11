@@ -3,9 +3,6 @@ import { NetworkCapture } from '../network/NetworkCapture.js';
 import { ScreenRecorder } from '../recorder/ScreenRecorder.js';
 import { FloatingButton } from '../ui/FloatingButton.js';
 import { ConfirmModal } from '../ui/ConfirmModal.js';
-import { ProgressBar } from '../ui/ProgressBar.js';
-import { ShareLinkPanel } from '../ui/ShareLinkPanel.js';
-import { RemoteStorage } from '../storage/RemoteStorage.js';
 import { LocalStorage } from '../storage/LocalStorage.js';
 import { HARBuilder } from '../network/HARBuilder.js';
 
@@ -33,32 +30,12 @@ export class QARecorder {
     const confirmed = await ConfirmModal.show('현재까지의 내용을 저장하시겠습니까?');
     if (!confirmed) return;
 
-    // 녹화 중지 및 데이터 스냅샷
     await this.screenRecorder.stop();
     const videoBlob = this.screenRecorder.getBlob();
     const networkEntries = this.networkCapture.snapshot();
     const harLog = HARBuilder.build(networkEntries);
 
-    if (this.config.storage === 'local') {
-      await LocalStorage.save(videoBlob, harLog);
-      return;
-    }
-
-    // remote 모드: 업로드
-    const progressBar = new ProgressBar();
-    progressBar.show();
-
-    try {
-      const storage = new RemoteStorage(this.config.endpoint, this.config.apiKey);
-      const shareUrl = await storage.upload(videoBlob, harLog, (progress) => {
-        progressBar.update(progress);
-      });
-      progressBar.hide();
-      ShareLinkPanel.show(shareUrl);
-    } catch (err) {
-      progressBar.hide();
-      console.error('[QARecorder] Upload failed:', err);
-    }
+    await LocalStorage.save(videoBlob, harLog);
   }
 
   /** 수동으로 녹화 중지 및 리소스 정리 */

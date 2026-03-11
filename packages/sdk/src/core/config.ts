@@ -1,17 +1,11 @@
 export interface QARecorderConfig {
-  endpoint?: string;
-  apiKey?: string;
   maxRequests?: number;
   maskHeaders?: string[];
-  storage?: 'remote' | 'local';
 }
 
 const DEFAULT_CONFIG: Required<QARecorderConfig> = {
-  endpoint: '',
-  apiKey: '',
   maxRequests: 100,
   maskHeaders: ['Authorization', 'Cookie', 'Set-Cookie'],
-  storage: 'remote',
 };
 
 export function resolveConfig(overrides?: QARecorderConfig): Required<QARecorderConfig> {

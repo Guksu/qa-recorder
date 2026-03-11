@@ -116,7 +116,7 @@ export class NetworkCapture {
       const originalSend = xhr.send.bind(xhr);
 
       (this as XMLHttpRequest & { open: typeof xhr.open }).open = function (
-        m: string, u: string | URL, async = true, user?: string | null, password?: string | null
+        m: string, u: string | URL, async: boolean = true, user?: string | null, password?: string | null
       ) {
         method = m;
         url = typeof u === 'string' ? u : u.toString();
