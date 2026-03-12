@@ -15,7 +15,7 @@ export class NetworkCapture {
     private readonly maxRequests: number,
     private readonly maskHeaders: string[],
   ) {
-    this.originalFetch = window.fetch.bind(window);
+    this.originalFetch = window.fetch;
     this.originalXHROpen = XMLHttpRequest.prototype.open;
   }
 
@@ -52,7 +52,7 @@ export class NetworkCapture {
       const request = new Request(input, init);
       const startTime = performance.now();
 
-      const response = await self.originalFetch(input, init);
+      const response = await self.originalFetch.call(window, input, init);
       const elapsed = performance.now() - startTime;
       const cloned = response.clone();
       const bodyText = await cloned.text().catch(() => '');
