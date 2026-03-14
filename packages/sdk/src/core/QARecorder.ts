@@ -3,6 +3,8 @@ import { NetworkCapture } from '../network/NetworkCapture.js';
 import { ScreenRecorder } from '../recorder/ScreenRecorder.js';
 import { FloatingButton } from '../ui/FloatingButton.js';
 import { ConfirmModal } from '../ui/ConfirmModal.js';
+import { ProgressBar } from '../ui/ProgressBar.js';
+import { SharePanel } from '../ui/SharePanel.js';
 import { LocalStorage } from '../storage/LocalStorage.js';
 import { RemoteDelivery } from '../storage/RemoteDelivery.js';
 import { HARBuilder } from '../network/HARBuilder.js';
@@ -36,7 +38,15 @@ export class QARecorder {
     const harLog = HARBuilder.build(this.networkCapture.snapshot());
 
     if (this.config.endpoint) {
-      await new RemoteDelivery(this.config.endpoint).send(videoBlob, harLog);
+      ProgressBar.show('업로드 중...');
+      try {
+        const url = await new RemoteDelivery(this.config.endpoint).send(videoBlob, harLog);
+        ProgressBar.hide();
+        if (url) SharePanel.show(url);
+      } catch (err) {
+        ProgressBar.hide();
+        alert(`업로드 실패: ${err instanceof Error ? err.message : String(err)}`);
+      }
     } else {
       await LocalStorage.save(videoBlob, harLog);
     }

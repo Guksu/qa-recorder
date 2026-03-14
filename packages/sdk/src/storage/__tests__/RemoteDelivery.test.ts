@@ -79,4 +79,29 @@ describe('RemoteDelivery.send', () => {
       delivery.send(new Blob(['video'], { type: 'video/webm' }), makeHARLog()),
     ).rejects.toThrow('Upload failed: 500');
   });
+
+  it('서버 응답 JSON에 url이 있으면 반환한다', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ url: 'https://example.com/share/abc123' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    );
+    const delivery = new RemoteDelivery('https://example.com/upload');
+    const url = await delivery.send(new Blob(['video'], { type: 'video/webm' }), makeHARLog());
+    expect(url).toBe('https://example.com/share/abc123');
+  });
+
+  it('서버 응답 JSON에 url이 없으면 undefined를 반환한다', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response('ok', { status: 200 })),
+    );
+    const delivery = new RemoteDelivery('https://example.com/upload');
+    const url = await delivery.send(new Blob(['video'], { type: 'video/webm' }), makeHARLog());
+    expect(url).toBeUndefined();
+  });
 });
