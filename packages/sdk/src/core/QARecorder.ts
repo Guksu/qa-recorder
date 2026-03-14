@@ -4,6 +4,7 @@ import { ScreenRecorder } from '../recorder/ScreenRecorder.js';
 import { FloatingButton } from '../ui/FloatingButton.js';
 import { ConfirmModal } from '../ui/ConfirmModal.js';
 import { LocalStorage } from '../storage/LocalStorage.js';
+import { RemoteDelivery } from '../storage/RemoteDelivery.js';
 import { HARBuilder } from '../network/HARBuilder.js';
 
 export class QARecorder {
@@ -32,10 +33,13 @@ export class QARecorder {
 
     await this.screenRecorder.stop();
     const videoBlob = this.screenRecorder.getBlob();
-    const networkEntries = this.networkCapture.snapshot();
-    const harLog = HARBuilder.build(networkEntries);
+    const harLog = HARBuilder.build(this.networkCapture.snapshot());
 
-    await LocalStorage.save(videoBlob, harLog);
+    if (this.config.endpoint) {
+      await new RemoteDelivery(this.config.endpoint).send(videoBlob, harLog);
+    } else {
+      await LocalStorage.save(videoBlob, harLog);
+    }
   }
 
   /** 수동으로 녹화 중지 및 리소스 정리 */

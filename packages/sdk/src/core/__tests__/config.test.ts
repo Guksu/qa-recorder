@@ -8,8 +8,14 @@ describe('resolveConfig', () => {
 
   it('기본값을 반환한다', () => {
     const config = resolveConfig();
+    expect(config.endpoint).toBe('');
     expect(config.maxRequests).toBe(100);
     expect(config.maskHeaders).toEqual(['Authorization', 'Cookie', 'Set-Cookie']);
+  });
+
+  it('overrides로 endpoint를 설정한다', () => {
+    const config = resolveConfig({ endpoint: 'https://my-server.com/upload' });
+    expect(config.endpoint).toBe('https://my-server.com/upload');
   });
 
   it('overrides로 maxRequests를 덮어쓴다', () => {

@@ -1,9 +1,11 @@
 export interface QARecorderConfig {
+  endpoint?: string;
   maxRequests?: number;
   maskHeaders?: string[];
 }
 
 const DEFAULT_CONFIG: Required<QARecorderConfig> = {
+  endpoint: '',
   maxRequests: 100,
   maskHeaders: ['Authorization', 'Cookie', 'Set-Cookie'],
 };

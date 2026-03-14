@@ -22,7 +22,7 @@ function makeMockStream(trackStop = vi.fn()): MediaStream {
 describe('ScreenRecorder', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    Object.defineProperty(global.navigator, 'mediaDevices', {
+    Object.defineProperty(globalThis.navigator, 'mediaDevices', {
       value: { getDisplayMedia: vi.fn().mockResolvedValue(makeMockStream()) },
       configurable: true,
     });
@@ -52,7 +52,7 @@ describe('ScreenRecorder', () => {
 
   it('stop()은 녹화를 중지하고 스트림 트랙을 종료한다', async () => {
     const mockTrackStop = vi.fn();
-    Object.defineProperty(global.navigator, 'mediaDevices', {
+    Object.defineProperty(globalThis.navigator, 'mediaDevices', {
       value: { getDisplayMedia: vi.fn().mockResolvedValue(makeMockStream(mockTrackStop)) },
       configurable: true,
     });
