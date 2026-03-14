@@ -46,10 +46,17 @@ describe('LocalStorage.save', () => {
     expect(harLink).toBeDefined();
   });
 
-  it('정확히 2개의 파일이 다운로드된다', async () => {
+  it('뷰어 HTML 파일 다운로드가 트리거된다 (.html)', async () => {
     const videoBlob = new Blob(['video'], { type: 'video/webm' });
     await LocalStorage.save(videoBlob, makeHARLog());
-    expect(clickedLinks).toHaveLength(2);
+    const htmlLink = clickedLinks.find((l) => l.download.endsWith('.html'));
+    expect(htmlLink).toBeDefined();
+  });
+
+  it('정확히 3개의 파일이 다운로드된다', async () => {
+    const videoBlob = new Blob(['video'], { type: 'video/webm' });
+    await LocalStorage.save(videoBlob, makeHARLog());
+    expect(clickedLinks).toHaveLength(3);
   });
 
   it('파일명에 타임스탬프가 포함된다', async () => {
@@ -57,6 +64,7 @@ describe('LocalStorage.save', () => {
     await LocalStorage.save(videoBlob, makeHARLog());
     expect(clickedLinks[0].download).toMatch(/qa-recording-\d{4}/);
     expect(clickedLinks[1].download).toMatch(/qa-network-\d{4}/);
+    expect(clickedLinks[2].download).toMatch(/qa-network-\d{4}/);
   });
 
   it('HAR 파일에 올바른 JSON이 담긴다', async () => {
@@ -71,9 +79,19 @@ describe('LocalStorage.save', () => {
     expect(JSON.parse(text)).toEqual(harLog);
   });
 
+  it('뷰어 HTML은 <!DOCTYPE html>을 포함한다', async () => {
+    const videoBlob = new Blob(['video'], { type: 'video/webm' });
+    await LocalStorage.save(videoBlob, makeHARLog());
+
+    const createObjectURL = URL.createObjectURL as ReturnType<typeof vi.fn>;
+    const htmlBlob: Blob = createObjectURL.mock.calls[2][0];
+    const text = await htmlBlob.text();
+    expect(text).toContain('<!DOCTYPE html>');
+  });
+
   it('다운로드 후 Object URL이 해제된다', async () => {
     const videoBlob = new Blob(['video'], { type: 'video/webm' });
     await LocalStorage.save(videoBlob, makeHARLog());
-    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(2);
+    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(3);
   });
 });
