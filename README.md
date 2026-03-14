@@ -1,6 +1,11 @@
 # qa-recorder
 
-A lightweight QA recording library for web applications. Capture network activity and screen video simultaneously, then download the results — making it easy to reproduce bugs and report issues.
+[![npm version](https://img.shields.io/npm/v/qa-recorder?color=crimson)](https://www.npmjs.com/package/qa-recorder)
+[![license](https://img.shields.io/npm/l/qa-recorder?color=blue)](./LICENSE)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![test](https://img.shields.io/badge/tests-72%20passing-brightgreen)](./packages/sdk)
+
+**One-click QA recording for web apps — screen video + network activity, all in the browser.**
 
 [한국어](./README.ko.md)
 
@@ -8,43 +13,62 @@ A lightweight QA recording library for web applications. Capture network activit
 
 ## Why qa-recorder?
 
-Reproducing bugs in web applications is hard. qa-recorder runs silently in the background, capturing the last 100 network requests and a continuous screen recording. When something goes wrong, your QA team hits one button — and everything is saved to their device.
+Reproducing bugs in web applications is hard. When a QA engineer clicks a button and an error appears, the developer needs two things to debug it: **what was on screen** and **what network requests were made**. A screenshot and a text description are rarely enough.
+
+`qa-recorder` runs silently in the background from the moment the page loads. When something goes wrong, your QA team clicks one floating button — and three files are saved instantly:
+
+- A **screen recording** of the session
+- A **HAR network log** of the last 100 requests
+- A **standalone HTML viewer** (Chrome DevTools-style UI, no server needed)
+
+No backend required. No browser extension. Just add one script tag.
+
+---
 
 ## Features
 
-- **Floating button** — always-visible trigger in the bottom-right corner
-- **Network capture** — intercepts `fetch` and `XHR`, stores up to 100 entries in a circular buffer (HAR 1.2 format)
-- **Screen recording** — continuous video capture via `MediaStream` (RecordRTC)
-- **Sensitive data masking** — automatically redacts headers like `Authorization` and `Cookie`
-- **Local download** — downloads `.webm` video + `.har` file directly to the user's machine
-- **Shadow DOM isolation** — the UI never conflicts with the host application's styles
-- **Zero backend required** — works entirely in the browser, no server setup needed
+| | Feature | Description |
+|---|---|---|
+| 🎥 | **Screen recording** | Continuous capture via `MediaStream` (RecordRTC). Starts automatically on page load. |
+| 🌐 | **Network capture** | Intercepts `fetch` and `XHR`. Circular buffer, up to 100 entries in HAR 1.2 format. |
+| 🔍 | **HAR viewer** | Self-contained HTML file with a Chrome DevTools-style network inspector. |
+| 🔒 | **Header masking** | `Authorization`, `Cookie`, and custom headers are automatically redacted. |
+| 📦 | **Local save** | Downloads `.webm` + `.har` + `.html` directly — no backend needed. |
+| ☁️ | **Remote upload** | Optionally POST files to your own server. Shows a share-link copy button on success. |
+| 🧩 | **Shadow DOM UI** | Floating button and modals are fully isolated from the host page's styles. |
+
+---
 
 ## Installation
 
 ```bash
 npm install qa-recorder
+# or
+pnpm add qa-recorder
 ```
 
-Or include directly via script tag (UMD build):
+Or drop it in via `<script>` tag (UMD build, no bundler required):
 
 ```html
 <script src="https://unpkg.com/qa-recorder/dist/qa-recorder.umd.js"></script>
 ```
 
+---
+
 ## Quick Start
 
-### npm / ESM
+### ESM / npm
 
-```js
+```ts
 import { QARecorder } from 'qa-recorder';
 
 const recorder = new QARecorder();
 await recorder.init();
-// Clicking the button downloads .webm + .har files directly
+// A red floating button appears in the bottom-right corner.
+// Click it → confirm → three files download automatically.
 ```
 
-### Script tag (auto-init)
+### Script tag
 
 ```html
 <script>
@@ -53,74 +77,135 @@ await recorder.init();
     maskHeaders: ['Authorization', 'Cookie'],
   };
 </script>
-<script type="module" src="https://unpkg.com/qa-recorder/dist/qa-recorder.esm.js"></script>
+<script src="https://unpkg.com/qa-recorder/dist/qa-recorder.umd.js"></script>
 ```
+
+---
+
+## Save Modes
+
+### Local (default)
+
+When no `endpoint` is configured, three files are downloaded to the user's device:
+
+| File | Contents |
+|---|---|
+| `qa-recording-{timestamp}.webm` | Screen recording video |
+| `qa-network-{timestamp}.har` | Network log (HAR 1.2) |
+| `qa-network-{timestamp}.html` | Standalone HAR viewer (open in browser) |
+
+### Remote upload
+
+Set an `endpoint` to POST files to your server instead. On success, if the server returns a `url` field, a share-link copy button is shown automatically.
+
+```ts
+const recorder = new QARecorder({
+  endpoint: 'https://your-server.com/upload',
+});
+await recorder.init();
+```
+
+Expected server response (optional):
+
+```json
+{ "url": "https://your-server.com/share/abc123" }
+```
+
+The files are sent as `multipart/form-data`:
+
+```
+POST /upload
+  video  →  qa-recording-{timestamp}.webm
+  har    →  qa-network-{timestamp}.har
+```
+
+---
 
 ## Configuration
 
+All options can be set via `window.__QA_RECORDER_CONFIG__` or passed as constructor arguments. Constructor arguments take precedence.
+
+```ts
+window.__QA_RECORDER_CONFIG__ = {
+  endpoint: '',           // Remote upload URL. Leave empty for local save (default).
+  maxRequests: 100,       // Max network entries in the circular buffer (default: 100).
+  maskHeaders: [          // Headers to redact before saving (default shown).
+    'Authorization',
+    'Cookie',
+    'Set-Cookie',
+  ],
+};
+```
+
 | Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `maxRequests` | `number` | `100` | Maximum network entries to keep (circular buffer) |
-| `maskHeaders` | `string[]` | `['Authorization', 'Cookie', 'Set-Cookie']` | Headers to redact before saving |
+|---|---|---|---|
+| `endpoint` | `string` | `''` | Remote upload URL. Empty = local download. |
+| `maxRequests` | `number` | `100` | Max network entries to keep. |
+| `maskHeaders` | `string[]` | `['Authorization', 'Cookie', 'Set-Cookie']` | Headers to redact. |
+
+---
 
 ## How It Works
 
 ```
 Page load
-  └─ NetworkCapture.start()   → intercepts fetch / XHR (circular buffer, max 100)
-  └─ ScreenRecorder.start()   → requests screen share permission, records continuously
+  ├─ NetworkCapture.start()   → patches window.fetch + XHR (circular buffer)
+  ├─ ScreenRecorder.start()   → requests getDisplayMedia, starts recording
   └─ FloatingButton.mount()   → injects button via Shadow DOM
 
-User clicks button
+User clicks the floating button
   └─ ConfirmModal             → "Save current session?"
   └─ [Confirm]
-      └─ ScreenRecorder.stop()
-      └─ NetworkCapture.snapshot() → HAR 1.2 JSON
-      └─ MaskingFilter.apply()     → redact sensitive headers
-      └─ download .webm + .har
+      ├─ ScreenRecorder.stop()
+      ├─ NetworkCapture.snapshot()  → HAR 1.2 JSON
+      ├─ MaskingFilter.apply()      → redact sensitive headers
+      │
+      ├─ [endpoint set]
+      │   ├─ ProgressBar.show()     → "업로드 중..."
+      │   ├─ RemoteDelivery.send()  → POST multipart/form-data
+      │   ├─ ProgressBar.hide()
+      │   └─ SharePanel.show(url)   → copy-link button (if server returns url)
+      │
+      └─ [no endpoint]
+          └─ LocalStorage.save()    → downloads .webm + .har + .html
 ```
 
-## Output Files
+---
 
-When the user clicks the button and confirms:
+## HAR Viewer
 
-- **`qa-recording-{timestamp}.webm`** — screen recording video
-- **`qa-network-{timestamp}.har`** — network activity in HAR 1.2 format
+The `.html` file downloaded with each local save is a fully self-contained network inspector — no server, no extension, no internet connection needed.
 
-The `.har` file can be imported into Chrome DevTools (Network tab → Import) or any HAR viewer to inspect all captured requests.
+- Request and response headers, body, status code
+- Response time (ms) for each entry
+- Masked headers shown as `[MASKED]`
 
-## Project Structure
+---
 
-```
-qa-recorder/
-├── packages/
-│   ├── sdk/        # Frontend library (this package)
-│   └── shared/     # Shared TypeScript types (HAR)
-```
+## Browser Support
+
+| Browser | Support |
+|---|---|
+| Chrome 72+ | ✅ Full support |
+| Edge 79+ | ✅ Full support |
+| Firefox 66+ | ⚠️ Screen share permission prompt required |
+| Safari | ❌ `MediaRecorder` not fully supported |
+
+> Screen capture requires **HTTPS** in production. `localhost` works over HTTP.
+
+---
 
 ## Development
 
 ```bash
-# Install dependencies
 pnpm install
 
-# Run demo page
-cd packages/sdk && pnpm demo
-
-# Build
-cd packages/sdk && pnpm build
+pnpm -F qa-recorder test      # run 72 tests (Vitest + jsdom)
+pnpm -F qa-recorder build     # build ESM + UMD to dist/
+pnpm -F qa-recorder dev       # watch mode
 ```
 
-## Browser Support
-
-Requires browsers that support:
-- `MediaDevices.getDisplayMedia` (screen capture)
-- `MediaRecorder` API
-- ES2017+
-
-Chrome 72+, Edge 79+, Firefox 66+
-
-> **Note:** Screen capture requires HTTPS in production.
+---
 
 ## License
 
