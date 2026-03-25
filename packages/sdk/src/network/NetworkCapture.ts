@@ -30,6 +30,12 @@ export class NetworkCapture {
     XMLHttpRequest.prototype.open = this.originalXHROpen;
   }
 
+  /** 버퍼를 비우고 기록 시작 시점을 현재로 재설정 */
+  clearBuffer(): void {
+    this.buffer = [];
+    this.recordingStartedAt = new Date();
+  }
+
   /** 현재 버퍼의 복사본 반환 (저장 시점 스냅샷) */
   snapshot(): HAREntry[] {
     return [...this.buffer];

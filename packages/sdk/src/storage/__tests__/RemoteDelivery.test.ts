@@ -17,7 +17,7 @@ describe('RemoteDelivery.send', () => {
 
   it('지정된 endpoint로 POST 요청을 전송한다', async () => {
     const delivery = new RemoteDelivery('https://example.com/upload');
-    await delivery.send(new Blob(['video'], { type: 'video/webm' }), makeHARLog());
+    await delivery.send(new Blob(['[]'], { type: 'application/json' }), makeHARLog());
 
     expect(fetch).toHaveBeenCalledWith(
       'https://example.com/upload',
@@ -25,28 +25,28 @@ describe('RemoteDelivery.send', () => {
     );
   });
 
-  it('video와 har 필드를 multipart/form-data로 전송한다', async () => {
+  it('session과 har 필드를 multipart/form-data로 전송한다', async () => {
     const delivery = new RemoteDelivery('https://example.com/upload');
-    await delivery.send(new Blob(['video'], { type: 'video/webm' }), makeHARLog());
+    await delivery.send(new Blob(['[]'], { type: 'application/json' }), makeHARLog());
 
     const body: FormData = (fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body;
     expect(body).toBeInstanceOf(FormData);
-    expect(body.get('video')).toBeInstanceOf(Blob);
+    expect(body.get('session')).toBeInstanceOf(Blob);
     expect(body.get('har')).toBeInstanceOf(Blob);
   });
 
-  it('video 파일명은 .webm 확장자를 가진다', async () => {
+  it('session 파일명은 .rr.json 확장자를 가진다', async () => {
     const delivery = new RemoteDelivery('https://example.com/upload');
-    await delivery.send(new Blob(['video'], { type: 'video/webm' }), makeHARLog());
+    await delivery.send(new Blob(['[]'], { type: 'application/json' }), makeHARLog());
 
     const body: FormData = (fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body;
-    const videoFile = body.get('video') as File;
-    expect(videoFile.name).toMatch(/\.webm$/);
+    const sessionFile = body.get('session') as File;
+    expect(sessionFile.name).toMatch(/\.rr\.json$/);
   });
 
   it('har 파일명은 .har 확장자를 가진다', async () => {
     const delivery = new RemoteDelivery('https://example.com/upload');
-    await delivery.send(new Blob(['video'], { type: 'video/webm' }), makeHARLog());
+    await delivery.send(new Blob(['[]'], { type: 'application/json' }), makeHARLog());
 
     const body: FormData = (fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body;
     const harFile = body.get('har') as File;
@@ -56,7 +56,7 @@ describe('RemoteDelivery.send', () => {
   it('har 파일에 올바른 JSON이 담긴다', async () => {
     const delivery = new RemoteDelivery('https://example.com/upload');
     const harLog = makeHARLog();
-    await delivery.send(new Blob(['video'], { type: 'video/webm' }), harLog);
+    await delivery.send(new Blob(['[]'], { type: 'application/json' }), harLog);
 
     const body: FormData = (fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body;
     const harFile = body.get('har') as File;
@@ -68,7 +68,7 @@ describe('RemoteDelivery.send', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('Not Found', { status: 404 })));
     const delivery = new RemoteDelivery('https://example.com/upload');
     await expect(
-      delivery.send(new Blob(['video'], { type: 'video/webm' }), makeHARLog()),
+      delivery.send(new Blob(['[]'], { type: 'application/json' }), makeHARLog()),
     ).rejects.toThrow('Upload failed: 404');
   });
 
@@ -76,7 +76,7 @@ describe('RemoteDelivery.send', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('Error', { status: 500 })));
     const delivery = new RemoteDelivery('https://example.com/upload');
     await expect(
-      delivery.send(new Blob(['video'], { type: 'video/webm' }), makeHARLog()),
+      delivery.send(new Blob(['[]'], { type: 'application/json' }), makeHARLog()),
     ).rejects.toThrow('Upload failed: 500');
   });
 
@@ -91,7 +91,7 @@ describe('RemoteDelivery.send', () => {
       ),
     );
     const delivery = new RemoteDelivery('https://example.com/upload');
-    const url = await delivery.send(new Blob(['video'], { type: 'video/webm' }), makeHARLog());
+    const url = await delivery.send(new Blob(['[]'], { type: 'application/json' }), makeHARLog());
     expect(url).toBe('https://example.com/share/abc123');
   });
 
@@ -101,7 +101,16 @@ describe('RemoteDelivery.send', () => {
       vi.fn().mockResolvedValue(new Response('ok', { status: 200 })),
     );
     const delivery = new RemoteDelivery('https://example.com/upload');
-    const url = await delivery.send(new Blob(['video'], { type: 'video/webm' }), makeHARLog());
+    const url = await delivery.send(new Blob(['[]'], { type: 'application/json' }), makeHARLog());
     expect(url).toBeUndefined();
+  });
+
+  it('sessionBlob이 null이면 session 필드 없이 har만 전송한다', async () => {
+    const delivery = new RemoteDelivery('https://example.com/upload');
+    await delivery.send(null, makeHARLog());
+
+    const body: FormData = (fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body;
+    expect(body.get('session')).toBeNull();
+    expect(body.get('har')).toBeInstanceOf(Blob);
   });
 });

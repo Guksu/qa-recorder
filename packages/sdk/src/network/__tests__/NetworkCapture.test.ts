@@ -198,4 +198,34 @@ describe('NetworkCapture', () => {
       capture.stop();
     });
   });
+
+  describe('clearBuffer()', () => {
+    it('clearBuffer() 호출 후 버퍼가 비워진다', async () => {
+      vi.stubGlobal('fetch', makeMockFetch());
+      const capture = new NetworkCapture(100, []);
+      capture.start();
+
+      await window.fetch('https://example.com/before');
+      expect(capture.snapshot()).toHaveLength(1);
+
+      capture.clearBuffer();
+      expect(capture.snapshot()).toHaveLength(0);
+      capture.stop();
+    });
+
+    it('clearBuffer() 이후 추가된 요청만 버퍼에 남는다', async () => {
+      vi.stubGlobal('fetch', makeMockFetch());
+      const capture = new NetworkCapture(100, []);
+      capture.start();
+
+      await window.fetch('https://example.com/before');
+      capture.clearBuffer();
+      await window.fetch('https://example.com/after');
+
+      const entries = capture.snapshot();
+      expect(entries).toHaveLength(1);
+      expect(entries[0].request.url).toBe('https://example.com/after');
+      capture.stop();
+    });
+  });
 });

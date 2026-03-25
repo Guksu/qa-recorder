@@ -3,10 +3,10 @@ import type { HARLog } from '@qa-recorder/shared';
 export class RemoteDelivery {
   constructor(private readonly endpoint: string) {}
 
-  async send(videoBlob: Blob, harLog: HARLog): Promise<string | undefined> {
+  async send(sessionBlob: Blob | null, harLog: HARLog): Promise<string | undefined> {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const form = new FormData();
-    form.append('video', videoBlob, `qa-recording-${timestamp}.webm`);
+    if (sessionBlob) form.append('session', sessionBlob, `qa-session-${timestamp}.rr.json`);
     form.append(
       'har',
       new Blob([JSON.stringify(harLog)], { type: 'application/json' }),

@@ -1,16 +1,34 @@
 import type { HARLog } from '@qa-recorder/shared';
 import { HARViewer } from '../viewer/HARViewer.js';
+import { SessionViewer } from '../viewer/SessionViewer.js';
 
 export class LocalStorage {
-  static async save(videoBlob: Blob, harLog: HARLog): Promise<void> {
+  static async save(sessionEvents: unknown[] | null, harLog: HARLog): Promise<void> {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    LocalStorage.downloadBlob(videoBlob, `qa-recording-${timestamp}.webm`);
+
+    if (sessionEvents) {
+      const sessionJson = JSON.stringify(sessionEvents);
+      LocalStorage.downloadBlob(
+        new Blob([sessionJson], { type: 'application/json' }),
+        `qa-session-${timestamp}.rr.json`,
+      );
+      const sessionHtml = SessionViewer.generate(sessionEvents);
+      LocalStorage.downloadBlob(
+        new Blob([sessionHtml], { type: 'text/html' }),
+        `qa-session-${timestamp}.html`,
+      );
+    }
+
     const harJson = JSON.stringify(harLog, null, 2);
-    const harBlob = new Blob([harJson], { type: 'application/json' });
-    LocalStorage.downloadBlob(harBlob, `qa-network-${timestamp}.har`);
+    LocalStorage.downloadBlob(
+      new Blob([harJson], { type: 'application/json' }),
+      `qa-network-${timestamp}.har`,
+    );
     const viewerHtml = HARViewer.generate(harLog);
-    const viewerBlob = new Blob([viewerHtml], { type: 'text/html' });
-    LocalStorage.downloadBlob(viewerBlob, `qa-network-${timestamp}.html`);
+    LocalStorage.downloadBlob(
+      new Blob([viewerHtml], { type: 'text/html' }),
+      `qa-network-${timestamp}.html`,
+    );
   }
 
   private static downloadBlob(blob: Blob, filename: string): void {

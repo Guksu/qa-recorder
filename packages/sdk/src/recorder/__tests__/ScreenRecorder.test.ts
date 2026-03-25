@@ -2,83 +2,94 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ScreenRecorder } from '../ScreenRecorder.js';
 
 const mocks = vi.hoisted(() => ({
-  startRecording: vi.fn(),
-  stopRecording: vi.fn((cb: () => void) => cb()),
-  getBlob: vi.fn().mockReturnValue(new Blob(['video-data'], { type: 'video/webm' })),
+  stopFn: vi.fn(),
+  record: vi.fn(),
 }));
 
-vi.mock('recordrtc', () => ({
-  default: class MockRecordRTC {
-    startRecording = mocks.startRecording;
-    stopRecording = mocks.stopRecording;
-    getBlob = mocks.getBlob;
-  },
+vi.mock('rrweb', () => ({
+  record: mocks.record,
 }));
-
-function makeMockStream(trackStop = vi.fn()): MediaStream {
-  return { getTracks: () => [{ stop: trackStop }] } as unknown as MediaStream;
-}
 
 describe('ScreenRecorder', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    Object.defineProperty(globalThis.navigator, 'mediaDevices', {
-      value: { getDisplayMedia: vi.fn().mockResolvedValue(makeMockStream()) },
-      configurable: true,
+    mocks.record.mockImplementation(({ emit }: { emit: (event: unknown) => void }) => {
+      emit({ type: 2, data: {}, timestamp: 1000 });
+      return mocks.stopFn;
     });
   });
 
-  it('start()는 getDisplayMedia로 스트림을 요청한다', async () => {
+  it('start()는 rrweb.record()를 호출한다', () => {
     const recorder = new ScreenRecorder();
-    await recorder.start();
-    expect(navigator.mediaDevices.getDisplayMedia).toHaveBeenCalledWith({
-      video: { frameRate: 30 },
-      audio: false,
-    });
+    recorder.start();
+    expect(mocks.record).toHaveBeenCalledOnce();
   });
 
-  it('start()는 RecordRTC 녹화를 시작한다', async () => {
+  it('start()를 중복 호출해도 record는 한 번만 호출된다', () => {
     const recorder = new ScreenRecorder();
-    await recorder.start();
-    expect(mocks.startRecording).toHaveBeenCalledOnce();
+    recorder.start();
+    recorder.start();
+    expect(mocks.record).toHaveBeenCalledOnce();
   });
 
-  it('start()를 중복 호출해도 녹화는 한 번만 시작된다', async () => {
+  it('stop()은 record()가 반환한 stop 함수를 호출한다', () => {
     const recorder = new ScreenRecorder();
-    await recorder.start();
-    await recorder.start();
-    expect(mocks.startRecording).toHaveBeenCalledOnce();
+    recorder.start();
+    recorder.stop();
+    expect(mocks.stopFn).toHaveBeenCalledOnce();
   });
 
-  it('stop()은 녹화를 중지하고 스트림 트랙을 종료한다', async () => {
-    const mockTrackStop = vi.fn();
-    Object.defineProperty(globalThis.navigator, 'mediaDevices', {
-      value: { getDisplayMedia: vi.fn().mockResolvedValue(makeMockStream(mockTrackStop)) },
-      configurable: true,
-    });
+  it('stop()을 recording 시작 전에 호출해도 에러가 발생하지 않는다', () => {
     const recorder = new ScreenRecorder();
-    await recorder.start();
-    await recorder.stop();
-    expect(mocks.stopRecording).toHaveBeenCalledOnce();
-    expect(mockTrackStop).toHaveBeenCalledOnce();
+    expect(() => recorder.stop()).not.toThrow();
   });
 
-  it('stop()을 녹화 시작 전에 호출해도 에러가 발생하지 않는다', async () => {
+  it('getBlob()은 수집된 이벤트를 JSON으로 담은 Blob을 반환한다', async () => {
     const recorder = new ScreenRecorder();
-    await expect(recorder.stop()).resolves.toBeUndefined();
-  });
-
-  it('getBlob()은 녹화된 Blob을 반환한다', async () => {
-    const recorder = new ScreenRecorder();
-    await recorder.start();
-    await recorder.stop();
+    recorder.start();
+    recorder.stop();
     const blob = recorder.getBlob();
     expect(blob).toBeInstanceOf(Blob);
-    expect(blob.type).toBe('video/webm');
+    expect(blob.type).toBe('application/json');
+    const text = await blob.text();
+    const events = JSON.parse(text);
+    expect(Array.isArray(events)).toBe(true);
+    expect(events.length).toBeGreaterThan(0);
   });
 
   it('getBlob()을 start() 전에 호출하면 에러를 던진다', () => {
     const recorder = new ScreenRecorder();
     expect(() => recorder.getBlob()).toThrow('No recording available');
+  });
+
+  it('reset()은 stopped 상태에서 idle로 되돌려 start()를 다시 호출할 수 있다', () => {
+    const recorder = new ScreenRecorder();
+    recorder.start();
+    recorder.stop();
+    recorder.reset();
+    recorder.start();
+    expect(mocks.record).toHaveBeenCalledTimes(2);
+  });
+
+  it('reset()은 recording 중에는 동작하지 않는다', () => {
+    const recorder = new ScreenRecorder();
+    recorder.start();
+    recorder.reset();
+    recorder.start();
+    expect(mocks.record).toHaveBeenCalledOnce();
+  });
+
+  it('getEvents()는 수집된 이벤트 배열을 반환한다', () => {
+    const recorder = new ScreenRecorder();
+    recorder.start();
+    recorder.stop();
+    const events = recorder.getEvents();
+    expect(Array.isArray(events)).toBe(true);
+    expect(events.length).toBeGreaterThan(0);
+  });
+
+  it('getEvents()를 start() 전에 호출하면 에러를 던진다', () => {
+    const recorder = new ScreenRecorder();
+    expect(() => recorder.getEvents()).toThrow('No recording available');
   });
 });

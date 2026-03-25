@@ -1,5 +1,7 @@
 import { BASE_STYLES } from './styles.js';
 
+export type ButtonState = 'idle' | 'recording';
+
 export class FloatingButton {
   private host: HTMLElement | null = null;
   private shadow: ShadowRoot | null = null;
@@ -9,14 +11,14 @@ export class FloatingButton {
   mount(): void {
     this.host = document.createElement('div');
     this.host.setAttribute('id', 'qa-recorder-root');
-    this.shadow = this.host.attachShadow({ mode: 'closed' });
+    this.shadow = this.host.attachShadow({ mode: 'open' });
 
     const style = document.createElement('style');
     style.textContent = BASE_STYLES;
 
     const btn = document.createElement('button');
     btn.className = 'qa-floating-btn';
-    btn.title = 'QA 녹화 저장';
+    btn.title = 'QA 녹화 시작';
     btn.innerHTML = `
       <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
         <circle cx="12" cy="12" r="8"/>
@@ -26,6 +28,18 @@ export class FloatingButton {
 
     this.shadow.append(style, btn);
     document.body.appendChild(this.host);
+  }
+
+  setState(state: ButtonState): void {
+    const btn = this.shadow?.querySelector('button');
+    if (!btn) return;
+    if (state === 'recording') {
+      btn.title = '녹화 중지 및 저장';
+      btn.classList.add('qa-floating-btn--recording');
+    } else {
+      btn.title = 'QA 녹화 시작';
+      btn.classList.remove('qa-floating-btn--recording');
+    }
   }
 
   unmount(): void {

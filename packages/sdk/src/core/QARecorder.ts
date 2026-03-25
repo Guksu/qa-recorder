@@ -22,25 +22,39 @@ export class QARecorder {
     this.floatingButton = new FloatingButton(this.onButtonClick.bind(this));
   }
 
-  /** 페이지 로드 후 자동 시작 */
+  private isRecording = false;
+
+  /** 페이지 로드 후 초기화 — 버튼 노출 및 네트워크 캡처 시작 */
   async init(): Promise<void> {
     this.networkCapture.start();
     this.floatingButton.mount();
-    await this.screenRecorder.start();
   }
 
   private async onButtonClick(): Promise<void> {
+    if (!this.isRecording) {
+      this.networkCapture.clearBuffer();
+      this.screenRecorder.start();
+      this.isRecording = true;
+      this.floatingButton.setState('recording');
+      return;
+    }
+
     const confirmed = await ConfirmModal.show('현재까지의 내용을 저장하시겠습니까?');
     if (!confirmed) return;
 
-    await this.screenRecorder.stop();
-    const videoBlob = this.screenRecorder.getBlob();
+    this.screenRecorder.stop();
+    this.isRecording = false;
+    this.floatingButton.setState('idle');
+
     const harLog = HARBuilder.build(this.networkCapture.snapshot());
 
     if (this.config.endpoint) {
       ProgressBar.show('업로드 중...');
       try {
-        const url = await new RemoteDelivery(this.config.endpoint).send(videoBlob, harLog);
+        const url = await new RemoteDelivery(this.config.endpoint).send(
+          this.screenRecorder.getBlob(),
+          harLog,
+        );
         ProgressBar.hide();
         if (url) SharePanel.show(url);
       } catch (err) {
@@ -48,8 +62,10 @@ export class QARecorder {
         alert(`업로드 실패: ${err instanceof Error ? err.message : String(err)}`);
       }
     } else {
-      await LocalStorage.save(videoBlob, harLog);
+      await LocalStorage.save(this.screenRecorder.getEvents(), harLog);
     }
+
+    this.screenRecorder.reset();
   }
 
   /** 수동으로 녹화 중지 및 리소스 정리 */

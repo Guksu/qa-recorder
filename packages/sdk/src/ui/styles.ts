@@ -23,6 +23,11 @@ export const BASE_STYLES = `
   }
   .qa-floating-btn:hover { transform: scale(1.1); }
   .qa-floating-btn svg { width: 24px; height: 24px; fill: white; }
+  .qa-floating-btn--recording { animation: qa-pulse 1.5s ease-in-out infinite; }
+  @keyframes qa-pulse {
+    0%, 100% { box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+    50% { box-shadow: 0 4px 20px rgba(229,62,62,0.8); }
+  }
 
   .qa-modal-overlay {
     position: fixed;
