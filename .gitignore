@@ -22,3 +22,6 @@ npm-debug.log*
 
 # Build
 *.tsbuildinfo
+
+# Demo upload artifacts
+packages/sdk/demo/uploads/

@@ -124,6 +124,8 @@ POST /upload
   har      →  qa-network-{timestamp}.har
 ```
 
+> **Why no HTML viewer files?** The standalone HTML viewers are derived from the raw data and can always be regenerated. In remote mode, your server receives the source-of-truth files (`.rr.json` and `.har`) and renders its own viewer — using `SessionViewer.generate()` and `HARViewer.generate()` from this package if needed. Sending pre-generated HTML would be redundant and add unnecessary upload size.
+
 ---
 
 ## Configuration

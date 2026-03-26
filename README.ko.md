@@ -128,6 +128,8 @@ POST /upload
   har      →  qa-network-{timestamp}.har
 ```
 
+> **HTML 뷰어 파일은 왜 전송하지 않나요?** 독립 실행형 HTML 뷰어는 원본 데이터로 언제든 재생성할 수 있는 파생 파일입니다. 원격 업로드에서는 서버가 원본 데이터(`.rr.json`, `.har`)를 받아 자체 뷰어 페이지를 렌더링합니다. 필요하다면 이 패키지의 `SessionViewer.generate()`와 `HARViewer.generate()`를 서버에서도 그대로 사용할 수 있습니다. 이미 생성된 HTML을 함께 전송하는 것은 중복이며 업로드 용량만 늘어납니다.
+
 ---
 
 ## 설정 옵션

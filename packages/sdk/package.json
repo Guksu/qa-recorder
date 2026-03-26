@@ -1,6 +1,6 @@
 {
   "name": "qa-recorder",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "One-click QA recording for web apps — screen video + network activity, all in the browser.",
   "keywords": [
     "qa",
@@ -40,7 +40,7 @@
   "scripts": {
     "build": "rollup -c rollup.config.ts --configPlugin typescript",
     "dev": "rollup -c rollup.config.ts --configPlugin typescript --watch",
-    "demo": "vite demo --host",
+    "demo": "vite demo --host --config vite.config.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -55,7 +55,9 @@
     "@rollup/plugin-commonjs": "^29.0.2",
     "@rollup/plugin-node-resolve": "^15.0.0",
     "@rollup/plugin-typescript": "^11.0.0",
+    "@types/busboy": "^1.5.4",
     "@vitest/coverage-v8": "^4.0.18",
+    "busboy": "^1.6.0",
     "jsdom": "^28.1.0",
     "rollup": "^4.0.0",
     "tslib": "^2.6.0",

@@ -15,6 +15,15 @@
       cursor: pointer; background: #fff; color: #4a5568; font-size: 13px;
     }
     .lang-toggle button.active { background: #e53e3e; border-color: #e53e3e; color: #fff; font-weight: 600; }
+    .mode-toggle-wrap { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+    .mode-toggle-label { font-size: 13px; font-weight: 500; color: #64748b; }
+    .mode-toggle { display: flex; background: #f1f5f9; border-radius: 8px; padding: 3px; gap: 2px; }
+    .mode-toggle button {
+      padding: 6px 16px; border: none; border-radius: 6px;
+      cursor: pointer; background: transparent; color: #64748b; font-size: 13px; font-weight: 500;
+      transition: background 0.15s, color 0.15s;
+    }
+    .mode-toggle button.active { background: #fff; color: #0f172a; box-shadow: 0 1px 3px rgba(0,0,0,0.1); font-weight: 600; }
     .subtitle { color: #718096; margin: 0 0 28px; font-size: 14px; line-height: 1.6; }
     .section { margin: 24px 0; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px; }
     .section h2 { margin: 0 0 8px; font-size: 16px; }
@@ -31,8 +40,12 @@
       border: 1px solid #e2e8f0;
     }
     .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; background: #c6f6d5; color: #276749; margin-left: 8px; vertical-align: middle; }
+    .badge.remote { background: #e0f2fe; color: #0369a1; }
     .flow { background: #f7fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px 20px; font-size: 13px; line-height: 1.8; color: #4a5568; font-family: monospace; white-space: pre-wrap; }
-    .flow .highlight { color: #e53e3e; font-weight: 600; }
+    .mode-info { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border-radius: 8px; font-size: 13px; line-height: 1.5; margin-bottom: 0; }
+    .mode-info.local { background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534; }
+    .mode-info.remote { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; }
+    .mode-info .mode-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
   </style>
 </head>
 <body>
@@ -45,10 +58,21 @@
   </header>
   <p class="subtitle" id="subtitle"></p>
 
+  <div class="mode-toggle-wrap">
+    <span class="mode-toggle-label" id="mode-label"></span>
+    <div class="mode-toggle">
+      <button id="btn-local" class="active" onclick="setMode('local')">📦 Local</button>
+      <button id="btn-remote" onclick="setMode('remote')">☁️ Remote</button>
+    </div>
+  </div>
+
   <div class="section">
     <h2 id="section1-title"></h2>
-    <p id="section1-desc"></p>
-    <div class="flow" id="flow-box"></div>
+    <div class="mode-info local" id="mode-info-box">
+      <span class="mode-icon">📦</span>
+      <span id="mode-info-text"></span>
+    </div>
+    <div style="margin-top:12px;" class="flow" id="flow-box"></div>
   </div>
 
   <div class="section">
@@ -74,21 +98,29 @@
   <script>
     const i18n = {
       ko: {
-        subtitle: '우측 하단의 빨간 버튼이 QA Recorder입니다. 페이지가 열린 순간부터 <strong>자동으로 녹화</strong>가 시작됩니다 (최근 20분 유지). 버튼을 클릭하면 확인 후 파일 4종이 저장되고, 녹화는 자동으로 재시작됩니다.',
+        subtitle: '우측 하단의 버튼이 QA Recorder입니다. 페이지가 열린 순간부터 <strong>자동으로 녹화</strong>가 시작됩니다 (최근 20분 유지). 버튼을 클릭하면 확인 후 저장되고, 녹화는 자동으로 재시작됩니다.',
         section1Title: '동작 흐름',
-        flow: `페이지 로드
-  ├─ NetworkCapture.start()   → fetch / XHR 인터셉트 시작 (순환 버퍼)
-  ├─ ScreenRecorder.start()   → rrweb.record() 즉시 시작 (최근 20분 유지)
-  └─ FloatingButton.mount()   → 우측 하단 버튼 삽입 (🔴 녹화 중)
+        modeLabel: '저장 방식',
+        modeLocal: '파일 4종이 브라우저에 다운로드됩니다.',
+        modeRemote: '<code>POST /upload</code> (목 서버)로 전송됩니다. 저장 후 링크 복사 버튼이 나타납니다.',
+        flowLocal: `페이지 로드 → rrweb 즉시 녹화 시작 (최근 20분 유지)
 
-플로팅 버튼 클릭 → 확인
-  ├─ 최근 20분 DOM 이벤트 저장  →  qa-session-*.rr.json
-  ├─ 독립 실행형 리플레이 뷰어  →  qa-session-*.html
-  ├─ 네트워크 로그 (HAR 1.2)    →  qa-network-*.har
-  └─ 독립 실행형 HAR 뷰어       →  qa-network-*.html
+버튼 클릭 → 확인 → 파일 4종 다운로드:
+  qa-session-*.rr.json  ← DOM 이벤트 원본
+  qa-session-*.html     ← 리플레이 뷰어
+  qa-network-*.har      ← 네트워크 로그
+  qa-network-*.html     ← HAR 뷰어
 
 저장 후 → 녹화 자동 재시작`,
-        section1Desc: '',
+        flowRemote: `페이지 로드 → rrweb 즉시 녹화 시작 (최근 20분 유지)
+
+버튼 클릭 → 확인 → POST /upload (multipart/form-data):
+  session  →  qa-session-*.rr.json
+  har      →  qa-network-*.har
+
+서버 응답 { url: "..." } → 링크 복사 버튼 표시
+
+저장 후 → 녹화 자동 재시작`,
         section2Title: '네트워크 요청 발생시키기',
         section2Desc: '아래 버튼으로 네트워크 요청을 발생시킨 후 우측 하단 버튼을 눌러 저장해보세요.',
         btnFetch: 'fetch() 테스트',
@@ -99,29 +131,33 @@
         section3Desc: '현재 메모리에 쌓인 네트워크 요청 목록을 확인합니다.',
         btnBuffer: '현재 버퍼 보기',
         bufferPlaceholder: '버튼을 눌러 확인하세요.',
-        fetchLabel: '[fetch] GET /posts/1',
-        xhrLabel: '[XHR] POST /posts',
-        fetchErrLabel: '[fetch] 404 응답 (캡처됨)',
-        fetchErrFail: '[fetch] 에러: ',
         bufferEmpty: '요청 없음',
         bufferTotal: (n) => `총 ${n}건`,
       },
       en: {
-        subtitle: 'The red button in the bottom-right is QA Recorder. <strong>Recording starts automatically</strong> when the page loads — no click needed. It keeps the last 20 minutes in memory. Click the button once to save and recording resumes automatically.',
+        subtitle: 'The button in the bottom-right is QA Recorder. <strong>Recording starts automatically</strong> when the page loads — no click needed. It keeps the last 20 minutes in memory. Click the button once to save, and recording resumes automatically.',
         section1Title: 'How it works',
-        flow: `Page load
-  ├─ NetworkCapture.start()   → intercepts fetch / XHR (circular buffer)
-  ├─ ScreenRecorder.start()   → rrweb.record() starts immediately (last 20 min)
-  └─ FloatingButton.mount()   → injects button bottom-right (🔴 recording)
+        modeLabel: 'Save mode',
+        modeLocal: 'Files are downloaded directly to your browser.',
+        modeRemote: 'Files are POSTed to <code>/upload</code> (mock server). A copy-link button appears on success.',
+        flowLocal: `Page load → rrweb starts recording immediately (last 20 min)
 
-Click floating button → confirm
-  ├─ Last 20 min DOM events   →  qa-session-*.rr.json
-  ├─ Standalone replay viewer →  qa-session-*.html
-  ├─ Network log (HAR 1.2)    →  qa-network-*.har
-  └─ Standalone HAR viewer    →  qa-network-*.html
+Click button → confirm → 4 files download:
+  qa-session-*.rr.json  ← DOM events
+  qa-session-*.html     ← replay viewer
+  qa-network-*.har      ← network log
+  qa-network-*.html     ← HAR viewer
 
-After save → recording resumes automatically`,
-        section1Desc: '',
+After save → recording resumes`,
+        flowRemote: `Page load → rrweb starts recording immediately (last 20 min)
+
+Click button → confirm → POST /upload (multipart/form-data):
+  session  →  qa-session-*.rr.json
+  har      →  qa-network-*.har
+
+Server responds { url: "..." } → copy-link button shown
+
+After save → recording resumes`,
         section2Title: 'Generate network requests',
         section2Desc: 'Trigger some requests below, then click the floating button to save.',
         btnFetch: 'fetch() test',
@@ -132,27 +168,47 @@ After save → recording resumes automatically`,
         section3Desc: 'Inspect the network entries currently held in memory.',
         btnBuffer: 'Show current buffer',
         bufferPlaceholder: 'Click the button to inspect.',
-        fetchLabel: '[fetch] GET /posts/1',
-        xhrLabel: '[XHR] POST /posts',
-        fetchErrLabel: '[fetch] 404 response (captured)',
-        fetchErrFail: '[fetch] Error: ',
         bufferEmpty: 'No requests yet',
         bufferTotal: (n) => `${n} request${n !== 1 ? 's' : ''} captured`,
       },
     };
 
     let lang = 'ko';
+    let mode = 'local';
 
     function setLang(l) {
       lang = l;
       document.documentElement.lang = l;
       document.getElementById('btn-ko').classList.toggle('active', l === 'ko');
       document.getElementById('btn-en').classList.toggle('active', l === 'en');
-      const t = i18n[l];
+      render();
+    }
+
+    function setMode(m) {
+      mode = m;
+      document.getElementById('btn-local').classList.toggle('active', m === 'local');
+      document.getElementById('btn-remote').classList.toggle('active', m === 'remote');
+      render();
+      if (window.__reinitRecorder) window.__reinitRecorder(m);
+    }
+
+    function render() {
+      const t = i18n[lang];
+      const isRemote = mode === 'remote';
+
       document.getElementById('subtitle').innerHTML = t.subtitle;
+      document.getElementById('mode-label').textContent = t.modeLabel;
+
+      const badge = document.getElementById('badge-live');
+      badge.textContent = isRemote ? '● REMOTE' : '● LIVE';
+      badge.className = isRemote ? 'badge remote' : 'badge';
+
+      const box = document.getElementById('mode-info-box');
+      box.className = isRemote ? 'mode-info remote' : 'mode-info local';
+      document.getElementById('mode-info-text').innerHTML = isRemote ? t.modeRemote : t.modeLocal;
+
       document.getElementById('section1-title').textContent = t.section1Title;
-      document.getElementById('section1-desc').textContent = t.section1Desc;
-      document.getElementById('flow-box').textContent = t.flow;
+      document.getElementById('flow-box').textContent = isRemote ? t.flowRemote : t.flowLocal;
       document.getElementById('section2-title').textContent = t.section2Title;
       document.getElementById('section2-desc').textContent = t.section2Desc;
       document.getElementById('btn-fetch').textContent = t.btnFetch;
@@ -161,7 +217,6 @@ After save → recording resumes automatically`,
       document.getElementById('section3-title').textContent = t.section3Title;
       document.getElementById('section3-desc').textContent = t.section3Desc;
       document.getElementById('btn-buffer').textContent = t.btnBuffer;
-      // Reset placeholders only if outputs are still at default
       if (document.getElementById('log-output').dataset.userContent !== 'true') {
         document.getElementById('log-output').textContent = t.logPlaceholder;
       }
@@ -170,19 +225,27 @@ After save → recording resumes automatically`,
       }
     }
 
-    setLang('ko');
+    render();
   </script>
 
   <script type="module">
     import { QARecorder } from '../src/index.ts';
 
-    const recorder = new QARecorder({
-      maxRequests: 100,
-      maskHeaders: ['Authorization', 'Cookie'],
-    });
-    window.__recorder = recorder;
+    let recorder = null;
 
-    await recorder.init();
+    async function initRecorder(m) {
+      if (recorder) recorder.destroy();
+      recorder = new QARecorder({
+        maxRequests: 100,
+        maskHeaders: ['Authorization', 'Cookie'],
+        ...(m === 'remote' ? { endpoint: '/upload' } : {}),
+      });
+      window.__recorder = recorder;
+      await recorder.init();
+    }
+
+    window.__reinitRecorder = initRecorder;
+    await initRecorder('local');
 
     window.fetchTest = async () => {
       const log = document.getElementById('log-output');
@@ -190,9 +253,9 @@ After save → recording resumes automatically`,
       try {
         const res = await fetch('https://jsonplaceholder.typicode.com/posts/1');
         const data = await res.json();
-        log.textContent = i18n[lang].fetchLabel + '\n' + JSON.stringify(data, null, 2);
+        log.textContent = '[fetch] GET /posts/1\n' + JSON.stringify(data, null, 2);
       } catch (e) {
-        log.textContent = i18n[lang].fetchErrFail + e.message;
+        log.textContent = '[fetch] Error: ' + e.message;
       }
     };
 
@@ -203,7 +266,7 @@ After save → recording resumes automatically`,
       xhr.open('POST', 'https://jsonplaceholder.typicode.com/posts');
       xhr.setRequestHeader('Content-Type', 'application/json');
       xhr.onload = () => {
-        log.textContent = i18n[lang].xhrLabel + '\n' + xhr.responseText;
+        log.textContent = '[XHR] POST /posts\n' + xhr.responseText;
       };
       xhr.send(JSON.stringify({ title: 'test', body: 'hello', userId: 1 }));
     };
@@ -213,9 +276,9 @@ After save → recording resumes automatically`,
       log.dataset.userContent = 'true';
       try {
         await fetch('https://jsonplaceholder.typicode.com/nonexistent/999');
-        log.textContent = i18n[lang].fetchErrLabel;
+        log.textContent = '[fetch] 404 response (captured)';
       } catch (e) {
-        log.textContent = i18n[lang].fetchErrFail + e.message;
+        log.textContent = '[fetch] Error: ' + e.message;
       }
     };
 
