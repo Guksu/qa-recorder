@@ -16,8 +16,9 @@ export class SharePanel {
     const panel = document.createElement('div');
     panel.className = 'qa-share-panel';
     panel.innerHTML = `
+      <div class="qa-share-title">Saved</div>
       <div class="qa-share-url">${url}</div>
-      <button class="qa-copy-btn">링크 복사</button>
+      <button class="qa-copy-btn">Copy link</button>
     `;
 
     panel.querySelector('.qa-copy-btn')!.addEventListener('click', () => {

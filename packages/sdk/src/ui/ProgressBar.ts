@@ -4,7 +4,7 @@ export class ProgressBar {
   private static host: HTMLElement | null = null;
   private static shadow: ShadowRoot | null = null;
 
-  static show(label = '저장 중...'): void {
+  static show(label = 'Uploading...'): void {
     if (this.host) return;
 
     this.host = document.createElement('div');

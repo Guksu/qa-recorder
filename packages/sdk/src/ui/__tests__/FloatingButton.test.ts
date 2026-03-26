@@ -27,7 +27,7 @@ describe('FloatingButton', () => {
     btn.setState('recording');
     const host = document.getElementById('qa-recorder-root')!;
     const button = host.shadowRoot!.querySelector('button')!;
-    expect(button.title).toBe('녹화 중지 및 저장');
+    expect(button.title).toBe('Stop and save recording');
   });
 
   it('setState("idle")은 버튼 title을 녹화 시작으로 변경한다', () => {
@@ -37,6 +37,6 @@ describe('FloatingButton', () => {
     btn.setState('idle');
     const host = document.getElementById('qa-recorder-root')!;
     const button = host.shadowRoot!.querySelector('button')!;
-    expect(button.title).toBe('QA 녹화 시작');
+    expect(button.title).toBe('Start QA recording');
   });
 });

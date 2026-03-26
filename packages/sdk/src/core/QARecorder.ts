@@ -31,7 +31,7 @@ export class QARecorder {
   }
 
   private async onButtonClick(): Promise<void> {
-    const confirmed = await ConfirmModal.show('현재까지의 내용을 저장하시겠습니까?');
+    const confirmed = await ConfirmModal.show('Save this session?');
     if (!confirmed) return;
 
     this.screenRecorder.stop();
@@ -39,7 +39,7 @@ export class QARecorder {
     const harLog = HARBuilder.build(this.networkCapture.snapshot());
 
     if (this.config.endpoint) {
-      ProgressBar.show('업로드 중...');
+      ProgressBar.show('Uploading...');
       try {
         const url = await new RemoteDelivery(this.config.endpoint).send(
           this.screenRecorder.getBlob(),

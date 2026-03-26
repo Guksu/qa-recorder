@@ -14,9 +14,10 @@ export class ConfirmModal {
       overlay.innerHTML = `
         <div class="qa-modal">
           <h3>${message}</h3>
+          <p>The last 20 minutes of DOM session and network log will be downloaded.</p>
           <div class="qa-modal-actions">
-            <button class="qa-btn qa-btn-secondary" id="cancel">취소</button>
-            <button class="qa-btn qa-btn-primary" id="confirm">확인</button>
+            <button class="qa-btn qa-btn-secondary" id="cancel">Cancel</button>
+            <button class="qa-btn qa-btn-primary" id="confirm">Save</button>
           </div>
         </div>
       `;

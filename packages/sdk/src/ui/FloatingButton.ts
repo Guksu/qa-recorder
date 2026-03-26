@@ -18,12 +18,8 @@ export class FloatingButton {
 
     const btn = document.createElement('button');
     btn.className = 'qa-floating-btn';
-    btn.title = 'QA 녹화 시작';
-    btn.innerHTML = `
-      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="12" cy="12" r="8"/>
-      </svg>
-    `;
+    btn.title = 'Start QA recording';
+    btn.innerHTML = this._idleHTML();
     btn.addEventListener('click', this.onClick);
 
     this.shadow.append(style, btn);
@@ -34,11 +30,13 @@ export class FloatingButton {
     const btn = this.shadow?.querySelector('button');
     if (!btn) return;
     if (state === 'recording') {
-      btn.title = '녹화 중지 및 저장';
+      btn.title = 'Stop and save recording';
       btn.classList.add('qa-floating-btn--recording');
+      btn.innerHTML = this._recordingHTML();
     } else {
-      btn.title = 'QA 녹화 시작';
+      btn.title = 'Start QA recording';
       btn.classList.remove('qa-floating-btn--recording');
+      btn.innerHTML = this._idleHTML();
     }
   }
 
@@ -46,5 +44,23 @@ export class FloatingButton {
     this.host?.remove();
     this.host = null;
     this.shadow = null;
+  }
+
+  private _idleHTML(): string {
+    return `
+      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="12" cy="12" r="8"/>
+      </svg>
+      <span class="qa-idle-label">QA Recorder</span>
+    `;
+  }
+
+  private _recordingHTML(): string {
+    return `
+      <span class="qa-rec-dot"></span>
+      <span class="qa-rec-label">REC</span>
+      <span class="qa-rec-divider"></span>
+      <span class="qa-save-label">Save</span>
+    `;
   }
 }

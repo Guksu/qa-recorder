@@ -38,7 +38,7 @@ describe('QARecorder', () => {
     await recorder.init();
     const host = document.getElementById('qa-recorder-root')!;
     const btn = host.shadowRoot!.querySelector('button')!;
-    expect(btn.title).toBe('녹화 중지 및 저장');
+    expect(btn.title).toBe('Stop and save recording');
     recorder.destroy();
   });
 
@@ -81,7 +81,7 @@ describe('QARecorder', () => {
     await vi.waitFor(() =>
       expect(mocks.record).toHaveBeenCalledTimes(2)
     );
-    expect(btn.title).toBe('녹화 중지 및 저장');
+    expect(btn.title).toBe('Stop and save recording');
     recorder.destroy();
   });
 
