@@ -5,38 +5,173 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>QA Recorder - Demo</title>
   <style>
-    body { font-family: sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; }
-    h1 { color: #e53e3e; }
-    .section { margin: 32px 0; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px; }
-    button {
-      padding: 8px 16px; margin: 4px; border: none; border-radius: 6px;
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 820px; margin: 40px auto; padding: 0 20px; color: #1a202c; }
+    header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+    h1 { color: #e53e3e; margin: 0; font-size: 24px; }
+    .lang-toggle { display: flex; gap: 4px; }
+    .lang-toggle button {
+      padding: 4px 12px; border: 1px solid #cbd5e0; border-radius: 6px;
+      cursor: pointer; background: #fff; color: #4a5568; font-size: 13px;
+    }
+    .lang-toggle button.active { background: #e53e3e; border-color: #e53e3e; color: #fff; font-weight: 600; }
+    .subtitle { color: #718096; margin: 0 0 28px; font-size: 14px; line-height: 1.6; }
+    .section { margin: 24px 0; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px; }
+    .section h2 { margin: 0 0 8px; font-size: 16px; }
+    .section p { margin: 0 0 12px; color: #4a5568; font-size: 14px; }
+    .btn-row { display: flex; flex-wrap: wrap; gap: 8px; }
+    button.action {
+      padding: 8px 16px; border: none; border-radius: 6px;
       cursor: pointer; background: #4a5568; color: white; font-size: 14px;
     }
-    button:hover { background: #2d3748; }
+    button.action:hover { background: #2d3748; }
     pre {
       background: #f7fafc; padding: 12px; border-radius: 6px;
-      overflow: auto; max-height: 300px; font-size: 12px;
+      overflow: auto; max-height: 260px; font-size: 12px; margin: 12px 0 0;
+      border: 1px solid #e2e8f0;
     }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; background: #c6f6d5; color: #276749; margin-left: 8px; vertical-align: middle; }
+    .flow { background: #f7fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px 20px; font-size: 13px; line-height: 1.8; color: #4a5568; font-family: monospace; white-space: pre-wrap; }
+    .flow .highlight { color: #e53e3e; font-weight: 600; }
   </style>
 </head>
 <body>
-  <h1>QA Recorder Demo</h1>
-  <p>우측 하단의 빨간 버튼이 QA Recorder입니다. <strong>첫 클릭</strong>에 권한 요청 없이 즉시 DOM 녹화를 시작합니다. <strong>두 번째 클릭</strong>에 녹화를 중지하고 <code>.rr.json</code> + <code>.har</code> + <code>.html</code> 파일이 다운로드됩니다. 이후 다시 녹화할 수 있습니다.</p>
+  <header>
+    <h1>QA Recorder <span class="badge" id="badge-live">● LIVE</span></h1>
+    <div class="lang-toggle">
+      <button id="btn-ko" class="active" onclick="setLang('ko')">한국어</button>
+      <button id="btn-en" onclick="setLang('en')">English</button>
+    </div>
+  </header>
+  <p class="subtitle" id="subtitle"></p>
 
   <div class="section">
-    <h2>네트워크 요청 발생시키기</h2>
-    <p>아래 버튼으로 네트워크 요청을 발생시킨 후 QA Recorder 버튼을 눌러보세요.</p>
-    <button onclick="fetchTest()">fetch() 테스트</button>
-    <button onclick="xhrTest()">XHR 테스트</button>
-    <button onclick="fetchError()">fetch() 에러 테스트</button>
-    <pre id="log-output">요청 버튼을 클릭하세요...</pre>
+    <h2 id="section1-title"></h2>
+    <p id="section1-desc"></p>
+    <div class="flow" id="flow-box"></div>
   </div>
 
   <div class="section">
-    <h2>캡처된 네트워크 버퍼 확인</h2>
-    <button onclick="showBuffer()">현재 버퍼 보기</button>
-    <pre id="buffer-output">버튼을 눌러 확인하세요.</pre>
+    <h2 id="section2-title"></h2>
+    <p id="section2-desc"></p>
+    <div class="btn-row">
+      <button class="action" onclick="fetchTest()" id="btn-fetch"></button>
+      <button class="action" onclick="xhrTest()" id="btn-xhr"></button>
+      <button class="action" onclick="fetchError()" id="btn-fetch-err"></button>
+    </div>
+    <pre id="log-output"></pre>
   </div>
+
+  <div class="section">
+    <h2 id="section3-title"></h2>
+    <p id="section3-desc"></p>
+    <div class="btn-row">
+      <button class="action" onclick="showBuffer()" id="btn-buffer"></button>
+    </div>
+    <pre id="buffer-output"></pre>
+  </div>
+
+  <script>
+    const i18n = {
+      ko: {
+        subtitle: '우측 하단의 빨간 버튼이 QA Recorder입니다. 페이지가 열린 순간부터 <strong>자동으로 녹화</strong>가 시작됩니다 (최근 20분 유지). 버튼을 클릭하면 확인 후 파일 4종이 저장되고, 녹화는 자동으로 재시작됩니다.',
+        section1Title: '동작 흐름',
+        flow: `페이지 로드
+  ├─ NetworkCapture.start()   → fetch / XHR 인터셉트 시작 (순환 버퍼)
+  ├─ ScreenRecorder.start()   → rrweb.record() 즉시 시작 (최근 20분 유지)
+  └─ FloatingButton.mount()   → 우측 하단 버튼 삽입 (🔴 녹화 중)
+
+플로팅 버튼 클릭 → 확인
+  ├─ 최근 20분 DOM 이벤트 저장  →  qa-session-*.rr.json
+  ├─ 독립 실행형 리플레이 뷰어  →  qa-session-*.html
+  ├─ 네트워크 로그 (HAR 1.2)    →  qa-network-*.har
+  └─ 독립 실행형 HAR 뷰어       →  qa-network-*.html
+
+저장 후 → 녹화 자동 재시작`,
+        section1Desc: '',
+        section2Title: '네트워크 요청 발생시키기',
+        section2Desc: '아래 버튼으로 네트워크 요청을 발생시킨 후 우측 하단 버튼을 눌러 저장해보세요.',
+        btnFetch: 'fetch() 테스트',
+        btnXhr: 'XHR 테스트',
+        btnFetchErr: 'fetch() 에러 테스트',
+        logPlaceholder: '요청 버튼을 클릭하세요...',
+        section3Title: '캡처된 네트워크 버퍼',
+        section3Desc: '현재 메모리에 쌓인 네트워크 요청 목록을 확인합니다.',
+        btnBuffer: '현재 버퍼 보기',
+        bufferPlaceholder: '버튼을 눌러 확인하세요.',
+        fetchLabel: '[fetch] GET /posts/1',
+        xhrLabel: '[XHR] POST /posts',
+        fetchErrLabel: '[fetch] 404 응답 (캡처됨)',
+        fetchErrFail: '[fetch] 에러: ',
+        bufferEmpty: '요청 없음',
+        bufferTotal: (n) => `총 ${n}건`,
+      },
+      en: {
+        subtitle: 'The red button in the bottom-right is QA Recorder. <strong>Recording starts automatically</strong> when the page loads — no click needed. It keeps the last 20 minutes in memory. Click the button once to save and recording resumes automatically.',
+        section1Title: 'How it works',
+        flow: `Page load
+  ├─ NetworkCapture.start()   → intercepts fetch / XHR (circular buffer)
+  ├─ ScreenRecorder.start()   → rrweb.record() starts immediately (last 20 min)
+  └─ FloatingButton.mount()   → injects button bottom-right (🔴 recording)
+
+Click floating button → confirm
+  ├─ Last 20 min DOM events   →  qa-session-*.rr.json
+  ├─ Standalone replay viewer →  qa-session-*.html
+  ├─ Network log (HAR 1.2)    →  qa-network-*.har
+  └─ Standalone HAR viewer    →  qa-network-*.html
+
+After save → recording resumes automatically`,
+        section1Desc: '',
+        section2Title: 'Generate network requests',
+        section2Desc: 'Trigger some requests below, then click the floating button to save.',
+        btnFetch: 'fetch() test',
+        btnXhr: 'XHR test',
+        btnFetchErr: 'fetch() error test',
+        logPlaceholder: 'Click a request button...',
+        section3Title: 'Captured network buffer',
+        section3Desc: 'Inspect the network entries currently held in memory.',
+        btnBuffer: 'Show current buffer',
+        bufferPlaceholder: 'Click the button to inspect.',
+        fetchLabel: '[fetch] GET /posts/1',
+        xhrLabel: '[XHR] POST /posts',
+        fetchErrLabel: '[fetch] 404 response (captured)',
+        fetchErrFail: '[fetch] Error: ',
+        bufferEmpty: 'No requests yet',
+        bufferTotal: (n) => `${n} request${n !== 1 ? 's' : ''} captured`,
+      },
+    };
+
+    let lang = 'ko';
+
+    function setLang(l) {
+      lang = l;
+      document.documentElement.lang = l;
+      document.getElementById('btn-ko').classList.toggle('active', l === 'ko');
+      document.getElementById('btn-en').classList.toggle('active', l === 'en');
+      const t = i18n[l];
+      document.getElementById('subtitle').innerHTML = t.subtitle;
+      document.getElementById('section1-title').textContent = t.section1Title;
+      document.getElementById('section1-desc').textContent = t.section1Desc;
+      document.getElementById('flow-box').textContent = t.flow;
+      document.getElementById('section2-title').textContent = t.section2Title;
+      document.getElementById('section2-desc').textContent = t.section2Desc;
+      document.getElementById('btn-fetch').textContent = t.btnFetch;
+      document.getElementById('btn-xhr').textContent = t.btnXhr;
+      document.getElementById('btn-fetch-err').textContent = t.btnFetchErr;
+      document.getElementById('section3-title').textContent = t.section3Title;
+      document.getElementById('section3-desc').textContent = t.section3Desc;
+      document.getElementById('btn-buffer').textContent = t.btnBuffer;
+      // Reset placeholders only if outputs are still at default
+      if (document.getElementById('log-output').dataset.userContent !== 'true') {
+        document.getElementById('log-output').textContent = t.logPlaceholder;
+      }
+      if (document.getElementById('buffer-output').dataset.userContent !== 'true') {
+        document.getElementById('buffer-output').textContent = t.bufferPlaceholder;
+      }
+    }
+
+    setLang('ko');
+  </script>
 
   <script type="module">
     import { QARecorder } from '../src/index.ts';
@@ -51,40 +186,49 @@
 
     window.fetchTest = async () => {
       const log = document.getElementById('log-output');
+      log.dataset.userContent = 'true';
       try {
         const res = await fetch('https://jsonplaceholder.typicode.com/posts/1');
         const data = await res.json();
-        log.textContent = '[fetch] GET /posts/1\n' + JSON.stringify(data, null, 2);
+        log.textContent = i18n[lang].fetchLabel + '\n' + JSON.stringify(data, null, 2);
       } catch (e) {
-        log.textContent = '[fetch] 에러: ' + e.message;
+        log.textContent = i18n[lang].fetchErrFail + e.message;
       }
     };
 
     window.xhrTest = () => {
       const log = document.getElementById('log-output');
+      log.dataset.userContent = 'true';
       const xhr = new XMLHttpRequest();
       xhr.open('POST', 'https://jsonplaceholder.typicode.com/posts');
       xhr.setRequestHeader('Content-Type', 'application/json');
       xhr.onload = () => {
-        log.textContent = '[XHR] POST /posts\n' + xhr.responseText;
+        log.textContent = i18n[lang].xhrLabel + '\n' + xhr.responseText;
       };
       xhr.send(JSON.stringify({ title: 'test', body: 'hello', userId: 1 }));
     };
 
     window.fetchError = async () => {
       const log = document.getElementById('log-output');
+      log.dataset.userContent = 'true';
       try {
         await fetch('https://jsonplaceholder.typicode.com/nonexistent/999');
-        log.textContent = '[fetch] 404 응답 (캡처됨)';
+        log.textContent = i18n[lang].fetchErrLabel;
       } catch (e) {
-        log.textContent = '[fetch] 에러: ' + e.message;
+        log.textContent = i18n[lang].fetchErrFail + e.message;
       }
     };
 
     window.showBuffer = () => {
+      const out = document.getElementById('buffer-output');
+      out.dataset.userContent = 'true';
       const entries = recorder.getNetworkEntries();
-      document.getElementById('buffer-output').textContent =
-        `총 ${entries.length}건\n\n` +
+      if (entries.length === 0) {
+        out.textContent = i18n[lang].bufferEmpty;
+        return;
+      }
+      out.textContent =
+        i18n[lang].bufferTotal(entries.length) + '\n\n' +
         entries.map((e, i) =>
           `[${i + 1}] ${e.request.method} ${e.request.url}\n    → ${e.response.status} (${Math.round(e.time)}ms)`
         ).join('\n');

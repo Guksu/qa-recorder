@@ -18,12 +18,22 @@ export class ScreenRecorder {
     this.events = [];
     this.stopFn =
       record({
-        emit: (event) => {
-          this.events.push(event);
+        emit: (event, isCheckout) => {
+          if (isCheckout) {
+            this.events = [event];
+          } else {
+            this.events.push(event);
+          }
         },
+        checkoutEveryNms: 20 * 60 * 1000,
       }) ?? null;
 
     this.state = 'recording';
+  }
+
+  clearBuffer(): void {
+    this.events = [];
+    record.takeFullSnapshot();
   }
 
   stop(): void {

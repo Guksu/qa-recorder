@@ -22,29 +22,19 @@ export class QARecorder {
     this.floatingButton = new FloatingButton(this.onButtonClick.bind(this));
   }
 
-  private isRecording = false;
-
-  /** 페이지 로드 후 초기화 — 버튼 노출 및 네트워크 캡처 시작 */
+  /** 페이지 로드 후 초기화 — 즉시 녹화 시작 + 버튼 노출 */
   async init(): Promise<void> {
     this.networkCapture.start();
+    this.screenRecorder.start();
     this.floatingButton.mount();
+    this.floatingButton.setState('recording');
   }
 
   private async onButtonClick(): Promise<void> {
-    if (!this.isRecording) {
-      this.networkCapture.clearBuffer();
-      this.screenRecorder.start();
-      this.isRecording = true;
-      this.floatingButton.setState('recording');
-      return;
-    }
-
     const confirmed = await ConfirmModal.show('현재까지의 내용을 저장하시겠습니까?');
     if (!confirmed) return;
 
     this.screenRecorder.stop();
-    this.isRecording = false;
-    this.floatingButton.setState('idle');
 
     const harLog = HARBuilder.build(this.networkCapture.snapshot());
 
@@ -66,6 +56,9 @@ export class QARecorder {
     }
 
     this.screenRecorder.reset();
+    this.networkCapture.clearBuffer();
+    this.screenRecorder.start();
+    this.floatingButton.setState('recording');
   }
 
   /** 수동으로 녹화 중지 및 리소스 정리 */

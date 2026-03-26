@@ -3,7 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/qa-recorder?color=crimson)](https://www.npmjs.com/package/qa-recorder)
 [![license](https://img.shields.io/npm/l/qa-recorder?color=blue)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![test](https://img.shields.io/badge/tests-99%20passing-brightgreen)](./packages/sdk)
+[![test](https://img.shields.io/badge/tests-102%20passing-brightgreen)](./packages/sdk)
 
 **버튼 하나로 DOM 세션 리플레이 + 네트워크 기록을 저장하는 웹 QA 라이브러리**
 
@@ -19,7 +19,7 @@
 
 개발자가 버그를 찾으려면 두 가지가 필요합니다: **그 순간의 화면**과 **그 순간의 네트워크 요청**. 스크린샷 한 장과 텍스트 재현 절차로는 충분하지 않은 경우가 많습니다.
 
-`qa-recorder`는 페이지 로드 시점에 플로팅 버튼을 삽입합니다. QA 담당자가 원하는 시점에 버튼을 클릭하면 녹화가 시작되고, 다시 클릭하면 녹화가 중지되면서 네 가지 파일이 즉시 저장됩니다:
+`qa-recorder`는 페이지 로드 시점에 즉시 녹화를 시작합니다 — 별도 클릭 불필요. 최근 20분 분량을 메모리에 유지합니다 (영상 파일 없음, 디스크 용량 부담 없음). QA 담당자가 플로팅 버튼을 클릭하면 최근 20분이 저장되며, 네 가지 파일이 즉시 생성됩니다:
 
 - **DOM 세션 리플레이** 원본 (rrweb 이벤트 스트림)
 - **독립 실행형 리플레이 뷰어** — 브라우저에서 바로 재생
@@ -70,10 +70,10 @@ import { QARecorder } from 'qa-recorder';
 
 const recorder = new QARecorder();
 await recorder.init();
+// 권한 요청 없이 즉시 녹화 시작 — 최근 20분을 항상 메모리에 유지.
 // 화면 우측 하단에 빨간 플로팅 버튼이 나타납니다.
-// 1번 클릭 → 권한 요청 없이 즉시 녹화 시작 (버튼 펄스 애니메이션).
-// 2번 클릭 → 확인 → 파일 4종이 자동 다운로드됩니다.
-// 저장 후 다시 클릭하면 새 녹화를 시작할 수 있습니다.
+// 1번 클릭 → 확인 → 파일 4종이 자동 다운로드됩니다.
+// 저장 후 녹화가 자동으로 재시작됩니다.
 ```
 
 ### Script 태그
@@ -159,21 +159,15 @@ window.__QA_RECORDER_CONFIG__ = {
 ```
 페이지 로드
   ├─ NetworkCapture.start()   → window.fetch + XHR 패치 (순환 버퍼)
-  └─ FloatingButton.mount()   → Shadow DOM으로 버튼 삽입 (idle 상태)
+  ├─ ScreenRecorder.start()   → rrweb.record() 즉시 시작 (최근 20분 유지)
+  └─ FloatingButton.mount()   → Shadow DOM으로 버튼 삽입 (recording 상태)
 
-플로팅 버튼 클릭 (1번째 — 녹화 시작)
-  ├─ NetworkCapture.clearBuffer()  → 이 시점부터 네트워크 기록 초기화
-  ├─ ScreenRecorder.start()        → rrweb.record()로 DOM 이벤트 수집 시작
-  └─ FloatingButton.setState('recording')  → 버튼 펄스 애니메이션
-
-플로팅 버튼 클릭 (2번째 — 중지 및 저장)
+플로팅 버튼 클릭 (최근 20분 저장)
   └─ ConfirmModal             → "현재까지의 내용을 저장하시겠습니까?"
   └─ [확인]
       ├─ ScreenRecorder.stop()
-      ├─ FloatingButton.setState('idle')
       ├─ NetworkCapture.snapshot()  → HAR 1.2 JSON 생성
       ├─ MaskingFilter.apply()      → 민감 헤더 마스킹
-      ├─ ScreenRecorder.reset()     → 다음 녹화 준비
       │
       ├─ [endpoint 설정된 경우]
       │   ├─ ProgressBar.show()     → "업로드 중..."
@@ -187,6 +181,9 @@ window.__QA_RECORDER_CONFIG__ = {
                                        qa-session-*.html  ← 리플레이 뷰어
                                        qa-network-*.har
                                        qa-network-*.html  ← HAR 뷰어
+      │
+      └─ ScreenRecorder.reset() + start()  → 녹화 자동 재시작
+         NetworkCapture.clearBuffer()      → 네트워크 로그 초기화
 ```
 
 ---
@@ -236,7 +233,7 @@ window.__QA_RECORDER_CONFIG__ = {
 ```bash
 pnpm install
 
-pnpm -F qa-recorder test      # 테스트 실행 (Vitest + jsdom, 99개)
+pnpm -F qa-recorder test      # 테스트 실행 (Vitest + jsdom, 102개)
 pnpm -F qa-recorder build     # ESM + UMD 빌드
 pnpm -F qa-recorder dev       # watch 모드
 pnpm -F qa-recorder demo      # 로컬 데모 서버 (http://localhost:5173)

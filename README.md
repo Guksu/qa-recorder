@@ -3,7 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/qa-recorder?color=crimson)](https://www.npmjs.com/package/qa-recorder)
 [![license](https://img.shields.io/npm/l/qa-recorder?color=blue)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![test](https://img.shields.io/badge/tests-99%20passing-brightgreen)](./packages/sdk)
+[![test](https://img.shields.io/badge/tests-102%20passing-brightgreen)](./packages/sdk)
 
 **One-click QA recording for web apps — DOM session replay + network activity, all in the browser.**
 
@@ -15,7 +15,7 @@
 
 Reproducing bugs in web applications is hard. When a QA engineer clicks a button and an error appears, the developer needs two things to debug it: **what was on screen** and **what network requests were made**. A screenshot and a text description are rarely enough.
 
-`qa-recorder` mounts a floating button the moment the page loads. When your QA team is ready to capture a session, they click the button to start recording. When something goes wrong — or they've captured enough — they click it again to stop, and four files are saved instantly:
+`qa-recorder` starts recording the moment the page loads — no interaction needed. It keeps a rolling 20-minute window in memory (no video files, no disk usage). When your QA team wants to capture a session, they click the floating button once to save the last 20 minutes, and four files are saved instantly:
 
 - A **DOM session replay** of the entire interaction (rrweb format)
 - A **standalone replay viewer** — open in any browser, no setup needed
@@ -66,10 +66,10 @@ import { QARecorder } from 'qa-recorder';
 
 const recorder = new QARecorder();
 await recorder.init();
+// Recording starts immediately — no permission prompt, no click needed.
 // A red floating button appears in the bottom-right corner.
-// 1st click → recording starts immediately. No permission prompt.
-// 2nd click → confirm → four files download automatically.
-// After saving, click again to start a new recording.
+// The last 20 minutes are always available in memory.
+// 1 click → confirm → four files download automatically → recording continues.
 ```
 
 ### Script tag
@@ -155,21 +155,15 @@ window.__QA_RECORDER_CONFIG__ = {
 ```
 Page load
   ├─ NetworkCapture.start()   → patches window.fetch + XHR (circular buffer)
-  └─ FloatingButton.mount()   → injects button via Shadow DOM (idle state)
+  ├─ ScreenRecorder.start()   → rrweb.record() begins immediately (20-min rolling window)
+  └─ FloatingButton.mount()   → injects button via Shadow DOM (recording state)
 
-User clicks the button (1st click — start)
-  ├─ NetworkCapture.clearBuffer()  → reset network log to this moment
-  ├─ ScreenRecorder.start()        → rrweb.record() begins capturing DOM events
-  └─ FloatingButton.setState('recording')  → button pulses red
-
-User clicks the button (2nd click — stop & save)
+User clicks the button (save the last 20 minutes)
   └─ ConfirmModal             → "Save current session?"
   └─ [Confirm]
       ├─ ScreenRecorder.stop()
-      ├─ FloatingButton.setState('idle')
       ├─ NetworkCapture.snapshot()  → HAR 1.2 JSON
       ├─ MaskingFilter.apply()      → redact sensitive headers
-      ├─ ScreenRecorder.reset()     → ready for next recording
       │
       ├─ [endpoint set]
       │   ├─ ProgressBar.show()     → "업로드 중..."
@@ -183,6 +177,9 @@ User clicks the button (2nd click — stop & save)
                                        qa-session-*.html  ← replay viewer
                                        qa-network-*.har
                                        qa-network-*.html  ← HAR viewer
+      │
+      └─ ScreenRecorder.reset() + start()  → recording resumes immediately
+         NetworkCapture.clearBuffer()      → network log reset
 ```
 
 ---
@@ -232,7 +229,7 @@ The `qa-network-*.html` file is a fully self-contained network inspector — no 
 ```bash
 pnpm install
 
-pnpm -F qa-recorder test      # run 99 tests (Vitest + jsdom)
+pnpm -F qa-recorder test      # run 102 tests (Vitest + jsdom)
 pnpm -F qa-recorder build     # build ESM + UMD to dist/
 pnpm -F qa-recorder dev       # watch mode
 pnpm -F qa-recorder demo      # local demo server (http://localhost:5173)
