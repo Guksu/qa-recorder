@@ -95,6 +95,15 @@
     <pre id="buffer-output"></pre>
   </div>
 
+  <div class="section" style="border-color:#fbbf24; background:#fffbeb;">
+    <h2 style="color:#92400e;">🧪 UI Test (temporary)</h2>
+    <p style="color:#78350f; margin-bottom:12px;">진행 중인 UI 컴포넌트를 직접 확인합니다.</p>
+    <div class="btn-row">
+      <button class="action" onclick="testProgressBar()">Progress Bar (2.5s)</button>
+      <button class="action" onclick="testSharePanel()">Share Panel</button>
+    </div>
+  </div>
+
   <script>
     const i18n = {
       ko: {
@@ -280,6 +289,20 @@ After save → recording resumes`,
       } catch (e) {
         log.textContent = '[fetch] Error: ' + e.message;
       }
+    };
+
+    // ── UI 테스트용 임시 함수 ──
+    import { ProgressBar } from '../src/ui/ProgressBar.ts';
+    import { SharePanel } from '../src/ui/SharePanel.ts';
+
+    window.testProgressBar = async () => {
+      ProgressBar.show('Saving...');
+      await new Promise(r => setTimeout(r, 2500));
+      ProgressBar.hide();
+    };
+
+    window.testSharePanel = () => {
+      SharePanel.show('https://example.com/share/qa-session-demo');
     };
 
     window.showBuffer = () => {

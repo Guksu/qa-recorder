@@ -1,10 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { QARecorder } from '../QARecorder.js';
 
-vi.mock('../../ui/ConfirmModal.js', () => ({
-  ConfirmModal: { show: vi.fn().mockResolvedValue(true) },
-}));
-
 const mocks = vi.hoisted(() => ({
   stopFn: vi.fn(),
   record: vi.fn(),
@@ -33,7 +29,7 @@ describe('QARecorder', () => {
     recorder.destroy();
   });
 
-  it('init()은 플로팅 버튼을 recording 상태로 마운트한다', async () => {
+  it('init()은 버튼을 recording 상태로 마운트한다', async () => {
     const recorder = new QARecorder();
     await recorder.init();
     const host = document.getElementById('qa-recorder-root')!;
@@ -42,14 +38,13 @@ describe('QARecorder', () => {
     recorder.destroy();
   });
 
-  it('버튼 클릭 후 확인하면 파일이 저장된다', async () => {
+  it('버튼 클릭 시 확인 없이 바로 파일이 저장된다', async () => {
     const recorder = new QARecorder();
     await recorder.init();
 
     const host = document.getElementById('qa-recorder-root')!;
-    const btn = host.shadowRoot!.querySelector('button')!;
+    host.shadowRoot!.querySelector('button')!.click();
 
-    btn.click();
     await vi.waitFor(() =>
       expect(URL.createObjectURL).toHaveBeenCalled()
     );
@@ -61,9 +56,8 @@ describe('QARecorder', () => {
     await recorder.init();
 
     const host = document.getElementById('qa-recorder-root')!;
-    const btn = host.shadowRoot!.querySelector('button')!;
+    host.shadowRoot!.querySelector('button')!.click();
 
-    btn.click();
     await vi.waitFor(() =>
       expect(mocks.record).toHaveBeenCalledTimes(2)
     );
@@ -76,28 +70,10 @@ describe('QARecorder', () => {
 
     const host = document.getElementById('qa-recorder-root')!;
     const btn = host.shadowRoot!.querySelector('button')!;
-
     btn.click();
-    await vi.waitFor(() =>
-      expect(mocks.record).toHaveBeenCalledTimes(2)
-    );
+
+    await vi.waitFor(() => expect(mocks.record).toHaveBeenCalledTimes(2));
     expect(btn.title).toBe('Stop and save recording');
-    recorder.destroy();
-  });
-
-  it('확인 취소 시 저장하지 않는다', async () => {
-    const { ConfirmModal } = await import('../../ui/ConfirmModal.js');
-    vi.mocked(ConfirmModal.show).mockResolvedValueOnce(false);
-
-    const recorder = new QARecorder();
-    await recorder.init();
-
-    const host = document.getElementById('qa-recorder-root')!;
-    host.shadowRoot!.querySelector('button')!.click();
-
-    await vi.waitFor(() => expect(ConfirmModal.show).toHaveBeenCalled());
-    await new Promise((r) => setTimeout(r, 50));
-    expect(URL.createObjectURL).not.toHaveBeenCalled();
     recorder.destroy();
   });
 });

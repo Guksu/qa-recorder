@@ -26,9 +26,9 @@ export const BASE_STYLES = `
   .qa-floating-btn:hover {
     background: #0f172a;
     box-shadow: 0 6px 24px rgba(0,0,0,0.5);
-    transform: translateY(-1px);
   }
-  .qa-floating-btn:active { transform: translateY(0); }
+  .qa-floating-btn { cursor: grab; }
+  .qa-floating-btn:active { cursor: grabbing; }
 
   /* idle 아이콘 */
   .qa-floating-btn svg {
@@ -63,19 +63,6 @@ export const BASE_STYLES = `
     color: #ef4444;
     letter-spacing: 0.08em;
   }
-  .qa-rec-divider {
-    width: 1px;
-    height: 14px;
-    background: rgba(255,255,255,0.15);
-    flex-shrink: 0;
-  }
-  .qa-save-label {
-    font-size: 13px;
-    font-weight: 500;
-    color: #f1f5f9;
-    letter-spacing: 0.01em;
-  }
-
   /* ── Modal ── */
   .qa-modal-overlay {
     position: fixed;

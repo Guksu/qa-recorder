@@ -2,7 +2,6 @@ import { resolveConfig, type QARecorderConfig } from './config.js';
 import { NetworkCapture } from '../network/NetworkCapture.js';
 import { ScreenRecorder } from '../recorder/ScreenRecorder.js';
 import { FloatingButton } from '../ui/FloatingButton.js';
-import { ConfirmModal } from '../ui/ConfirmModal.js';
 import { ProgressBar } from '../ui/ProgressBar.js';
 import { SharePanel } from '../ui/SharePanel.js';
 import { LocalStorage } from '../storage/LocalStorage.js';
@@ -31,15 +30,13 @@ export class QARecorder {
   }
 
   private async onButtonClick(): Promise<void> {
-    const confirmed = await ConfirmModal.show('Save this session?');
-    if (!confirmed) return;
-
     this.screenRecorder.stop();
 
     const harLog = HARBuilder.build(this.networkCapture.snapshot());
 
+    ProgressBar.show('Saving...');
+
     if (this.config.endpoint) {
-      ProgressBar.show('Uploading...');
       try {
         const url = await new RemoteDelivery(this.config.endpoint).send(
           this.screenRecorder.getBlob(),
@@ -49,10 +46,11 @@ export class QARecorder {
         if (url) SharePanel.show(url);
       } catch (err) {
         ProgressBar.hide();
-        alert(`업로드 실패: ${err instanceof Error ? err.message : String(err)}`);
+        alert(`Upload failed: ${err instanceof Error ? err.message : String(err)}`);
       }
     } else {
       await LocalStorage.save(this.screenRecorder.getEvents(), harLog);
+      ProgressBar.hide();
     }
 
     this.screenRecorder.reset();

@@ -20,7 +20,8 @@ export class FloatingButton {
     btn.className = 'qa-floating-btn';
     btn.title = 'Start QA recording';
     btn.innerHTML = this._idleHTML();
-    btn.addEventListener('click', this.onClick);
+
+    this._attachDrag(btn);
 
     this.shadow.append(style, btn);
     document.body.appendChild(this.host);
@@ -46,6 +47,58 @@ export class FloatingButton {
     this.shadow = null;
   }
 
+  private _attachDrag(btn: HTMLButtonElement): void {
+    let wasDragged = false;
+
+    btn.addEventListener('click', () => {
+      if (wasDragged) { wasDragged = false; return; }
+      this.onClick();
+    });
+
+    btn.addEventListener('mousedown', (e: MouseEvent) => {
+      if (e.button !== 0) return;
+
+      // Snapshot current position before switching to top/left.
+      // Must use 'auto' (not '') to override bottom/right from the CSS class.
+      const rect = btn.getBoundingClientRect();
+      btn.style.bottom = 'auto';
+      btn.style.right  = 'auto';
+      btn.style.left   = rect.left + 'px';
+      btn.style.top    = rect.top  + 'px';
+
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const origX  = rect.left;
+      const origY  = rect.top;
+      let dragged  = false;
+
+      e.preventDefault(); // prevent text selection while dragging
+
+      const onMove = (ev: MouseEvent) => {
+        const dx = ev.clientX - startX;
+        const dy = ev.clientY - startY;
+        if (!dragged && Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
+        dragged = true;
+        btn.style.cursor = 'grabbing';
+
+        const newX = Math.max(0, Math.min(window.innerWidth  - rect.width,  origX + dx));
+        const newY = Math.max(0, Math.min(window.innerHeight - rect.height, origY + dy));
+        btn.style.left = newX + 'px';
+        btn.style.top  = newY + 'px';
+      };
+
+      const onUp = () => {
+        if (dragged) wasDragged = true;
+        btn.style.cursor = '';
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+      };
+
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+  }
+
   private _idleHTML(): string {
     return `
       <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -59,8 +112,6 @@ export class FloatingButton {
     return `
       <span class="qa-rec-dot"></span>
       <span class="qa-rec-label">REC</span>
-      <span class="qa-rec-divider"></span>
-      <span class="qa-save-label">Save</span>
     `;
   }
 }
