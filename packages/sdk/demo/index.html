@@ -104,6 +104,17 @@
     </div>
   </div>
 
+  <div class="section" style="border-color:#a78bfa; background:#f5f3ff;">
+    <h2 style="color:#5b21b6;">🖥️ Console Capture Test</h2>
+    <p style="color:#6d28d9; margin-bottom:12px;">콘솔 로그를 발생시킨 후 저장하면 HAR 뷰어의 Console 패널에서 확인할 수 있습니다.</p>
+    <div class="btn-row">
+      <button class="action" onclick="console.error('Test error: something went wrong', { code: 404 })">console.error()</button>
+      <button class="action" onclick="console.warn('Test warning: deprecated API usage')">console.warn()</button>
+      <button class="action" onclick="throwUncaught()">Uncaught Error</button>
+      <button class="action" onclick="rejectUnhandled()">Unhandled Promise</button>
+    </div>
+  </div>
+
   <script>
     const i18n = {
       ko: {
@@ -303,6 +314,14 @@ After save → recording resumes`,
 
     window.testSharePanel = () => {
       SharePanel.show('https://example.com/share/qa-session-demo');
+    };
+
+    window.throwUncaught = () => {
+      setTimeout(() => { throw new Error('Intentional uncaught error for testing'); }, 0);
+    };
+
+    window.rejectUnhandled = () => {
+      Promise.reject(new Error('Intentional unhandled promise rejection'));
     };
 
     window.showBuffer = () => {

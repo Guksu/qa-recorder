@@ -1,6 +1,7 @@
 import { resolveConfig, type QARecorderConfig } from './config.js';
 import { NetworkCapture } from '../network/NetworkCapture.js';
 import { ScreenRecorder } from '../recorder/ScreenRecorder.js';
+import { ConsoleCapture } from '../console/ConsoleCapture.js';
 import { FloatingButton } from '../ui/FloatingButton.js';
 import { ProgressBar } from '../ui/ProgressBar.js';
 import { SharePanel } from '../ui/SharePanel.js';
@@ -12,12 +13,14 @@ export class QARecorder {
   private config: Required<QARecorderConfig>;
   private networkCapture: NetworkCapture;
   private screenRecorder: ScreenRecorder;
+  private consoleCapture: ConsoleCapture;
   private floatingButton: FloatingButton;
 
   constructor(overrides?: QARecorderConfig) {
     this.config = resolveConfig(overrides);
     this.networkCapture = new NetworkCapture(this.config.maxRequests, this.config.maskHeaders);
     this.screenRecorder = new ScreenRecorder();
+    this.consoleCapture = new ConsoleCapture(this.config.maxConsoleEntries, this.config.consoleLevels);
     this.floatingButton = new FloatingButton(this.onButtonClick.bind(this), this.config.zIndex);
   }
 
@@ -25,6 +28,7 @@ export class QARecorder {
   async init(): Promise<void> {
     this.networkCapture.start();
     this.screenRecorder.start();
+    this.consoleCapture.start();
     this.floatingButton.mount();
     this.floatingButton.setState('recording');
   }
@@ -33,6 +37,7 @@ export class QARecorder {
     this.screenRecorder.stop();
 
     const harLog = HARBuilder.build(this.networkCapture.snapshot());
+    const consoleLogs = this.consoleCapture.snapshot();
 
     ProgressBar.show('Saving...', this.config.zIndex);
 
@@ -49,12 +54,13 @@ export class QARecorder {
         alert(`Upload failed: ${err instanceof Error ? err.message : String(err)}`);
       }
     } else {
-      await LocalStorage.save(this.screenRecorder.getEvents(), harLog);
+      await LocalStorage.save(this.screenRecorder.getEvents(), harLog, consoleLogs);
       ProgressBar.hide();
     }
 
     this.screenRecorder.reset();
     this.networkCapture.clearBuffer();
+    this.consoleCapture.clearBuffer();
     this.screenRecorder.start();
     this.floatingButton.setState('recording');
   }
@@ -63,6 +69,7 @@ export class QARecorder {
   destroy(): void {
     this.networkCapture.stop();
     this.screenRecorder.stop();
+    this.consoleCapture.stop();
     this.floatingButton.unmount();
   }
 

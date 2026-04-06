@@ -1,8 +1,12 @@
+import type { ConsoleLevel } from '../console/ConsoleCapture.js';
+
 export interface QARecorderConfig {
   endpoint?: string;
   maxRequests?: number;
   maskHeaders?: string[];
   zIndex?: number;
+  consoleLevels?: ConsoleLevel[];
+  maxConsoleEntries?: number;
 }
 
 const DEFAULT_CONFIG: Required<QARecorderConfig> = {
@@ -10,6 +14,8 @@ const DEFAULT_CONFIG: Required<QARecorderConfig> = {
   maxRequests: 100,
   maskHeaders: ['Authorization', 'Cookie', 'Set-Cookie'],
   zIndex: 2147483647,
+  consoleLevels: ['error', 'warn'],
+  maxConsoleEntries: 200,
 };
 
 export function resolveConfig(overrides?: QARecorderConfig): Required<QARecorderConfig> {

@@ -1,8 +1,10 @@
 import type { HARLog } from '@qa-recorder/shared';
+import type { ConsoleEntry } from '../console/ConsoleCapture.js';
 
 export class HARViewer {
-  static generate(harLog: HARLog): string {
+  static generate(harLog: HARLog, consoleLogs: ConsoleEntry[] = []): string {
     const entriesJson = JSON.stringify(harLog.entries);
+    const consoleJson = JSON.stringify(consoleLogs);
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -283,6 +285,72 @@ export class HARViewer {
       border-radius: 3px;
     }
     .copy-raw:hover { background: #e8f0fe; }
+
+    /* ── Console panel ── */
+    #console-panel {
+      flex-shrink: 0;
+      border-top: 2px solid #dadce0;
+      display: flex;
+      flex-direction: column;
+      height: 220px;
+      min-height: 80px;
+      background: #fff;
+    }
+    #console-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 0 12px;
+      height: 28px;
+      min-height: 28px;
+      background: #f1f3f4;
+      border-bottom: 1px solid #dadce0;
+      font-size: 11px;
+      flex-shrink: 0;
+    }
+    #console-title { font-weight: 600; color: #3c4043; }
+    #console-count { color: #80868b; }
+    #console-list { overflow: auto; flex: 1; }
+    .con-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 3px 12px;
+      border-bottom: 1px solid #f8f9fa;
+      font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+      font-size: 11px;
+      line-height: 1.5;
+    }
+    .con-row:hover { background: #f8f9fa; }
+    .con-row.con-error { background: #fff0f0; border-left: 3px solid #c5221f; }
+    .con-row.con-warn  { background: #fffbe6; border-left: 3px solid #b06000; }
+    .con-row.con-error:hover { background: #ffe8e8; }
+    .con-row.con-warn:hover  { background: #fff5cc; }
+    .con-time { color: #80868b; flex-shrink: 0; width: 56px; }
+    .con-level {
+      flex-shrink: 0;
+      width: 40px;
+      font-weight: 600;
+      font-size: 10px;
+      letter-spacing: 0.03em;
+    }
+    .con-level.lvl-error { color: #c5221f; }
+    .con-level.lvl-warn  { color: #b06000; }
+    .con-level.lvl-log   { color: #5f6368; }
+    .con-level.lvl-info  { color: #1967d2; }
+    .con-msg { flex: 1; word-break: break-all; white-space: pre-wrap; color: #202124; }
+    .con-stack {
+      display: none;
+      margin-top: 2px;
+      color: #80868b;
+      font-size: 10px;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    .con-row.expanded .con-stack { display: block; }
+    .con-expand { color: #80868b; cursor: pointer; flex-shrink: 0; font-size: 10px; }
+    .con-expand:hover { color: #202124; }
+    #console-empty { padding: 16px; color: #80868b; font-size: 12px; font-style: italic; }
   </style>
 </head>
 <body>
@@ -324,10 +392,28 @@ export class HARViewer {
       <div id="response" class="detail-panel"></div>
       <div id="timing" class="detail-panel"></div>
     </div>
+
+    <div id="console-panel">
+      <div id="console-toolbar">
+        <span id="console-title">Console</span>
+        <span id="console-count"></span>
+        <label style="margin-left:auto;display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="chk-error" checked onchange="renderConsole()"> <span style="color:#c5221f">Errors</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="chk-warn" checked onchange="renderConsole()"> <span style="color:#b06000">Warnings</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="chk-log" checked onchange="renderConsole()"> <span style="color:#5f6368">Logs</span>
+        </label>
+      </div>
+      <div id="console-list"></div>
+    </div>
   </div>
 
   <script>
     const ENTRIES = ${entriesJson};
+    const CONSOLE_LOGS = ${consoleJson};
     let selectedTr = null;
     let selectedIdx = -1;
 
@@ -552,6 +638,57 @@ export class HARViewer {
         tr.classList.toggle('hidden', q && !tr.dataset.url.includes(q));
       });
     });
+
+    /* ── Console ── */
+    function fmtOffset(ms) {
+      const s = Math.floor(ms / 1000);
+      const m = Math.floor(s / 60);
+      return m > 0
+        ? m + ':' + String(s % 60).padStart(2, '0') + '.' + String(Math.floor((ms % 1000) / 10)).padStart(2, '0')
+        : s + '.' + String(Math.floor((ms % 1000) / 10)).padStart(2, '0') + 's';
+    }
+
+    function renderConsole() {
+      const showError = document.getElementById('chk-error').checked;
+      const showWarn  = document.getElementById('chk-warn').checked;
+      const showLog   = document.getElementById('chk-log').checked;
+      const list = document.getElementById('console-list');
+
+      const filtered = CONSOLE_LOGS.filter(e => {
+        if (e.level === 'error') return showError;
+        if (e.level === 'warn')  return showWarn;
+        return showLog;
+      });
+
+      document.getElementById('console-count').textContent =
+        CONSOLE_LOGS.length + ' entries';
+
+      if (!filtered.length) {
+        list.innerHTML = '<div id="console-empty">No console entries</div>';
+        return;
+      }
+
+      list.innerHTML = filtered.map((e, i) => {
+        const hasStack = !!e.stack;
+        return '<div class="con-row con-' + e.level + '" id="clog-' + i + '">' +
+          '<span class="con-time">' + fmtOffset(e._offsetMs) + '</span>' +
+          '<span class="con-level lvl-' + e.level + '">' + e.level.toUpperCase() + '</span>' +
+          '<span class="con-msg">' + esc(e.message) +
+            (hasStack ? '<div class="con-stack">' + esc(e.stack) + '</div>' : '') +
+          '</span>' +
+          (hasStack ? '<span class="con-expand" onclick="toggleStack(' + i + ')">▶ stack</span>' : '') +
+        '</div>';
+      }).join('');
+    }
+
+    window.toggleStack = function(i) {
+      const row = document.getElementById('clog-' + i);
+      row.classList.toggle('expanded');
+      const btn = row.querySelector('.con-expand');
+      btn.textContent = row.classList.contains('expanded') ? '▼ stack' : '▶ stack';
+    };
+
+    renderConsole();
 
     /* ── Resize ── */
     (function() {

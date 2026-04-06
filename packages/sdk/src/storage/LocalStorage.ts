@@ -1,9 +1,10 @@
 import type { HARLog } from '@qa-recorder/shared';
+import type { ConsoleEntry } from '../console/ConsoleCapture.js';
 import { HARViewer } from '../viewer/HARViewer.js';
 import { SessionViewer } from '../viewer/SessionViewer.js';
 
 export class LocalStorage {
-  static async save(sessionEvents: unknown[] | null, harLog: HARLog): Promise<void> {
+  static async save(sessionEvents: unknown[] | null, harLog: HARLog, consoleLogs: ConsoleEntry[] = []): Promise<void> {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
 
     if (sessionEvents) {
@@ -24,7 +25,7 @@ export class LocalStorage {
       new Blob([harJson], { type: 'application/json' }),
       `qa-network-${timestamp}.har`,
     );
-    const viewerHtml = HARViewer.generate(harLog);
+    const viewerHtml = HARViewer.generate(harLog, consoleLogs);
     LocalStorage.downloadBlob(
       new Blob([viewerHtml], { type: 'text/html' }),
       `qa-network-${timestamp}.html`,
