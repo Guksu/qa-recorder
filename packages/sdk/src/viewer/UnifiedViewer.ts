@@ -283,6 +283,74 @@ export class UnifiedViewer {
     tr.net-row.net-past td { opacity: 0.45; }
     tr.net-row.net-future td { opacity: 0.7; }
     tr.net-row.net-hidden { display: none; }
+    tr.net-row.net-selected td { background: #e8f0fe !important; outline: 1px solid #4285f4; }
+
+    /* Network detail panel */
+    #net-detail {
+      border-top: 1px solid #e2e8f0;
+      background: #fff;
+      flex-shrink: 0;
+      height: 260px;
+      display: none;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    #net-detail.visible { display: flex; }
+    .detail-tabs {
+      display: flex;
+      border-bottom: 1px solid #e2e8f0;
+      background: #f8f9fa;
+      flex-shrink: 0;
+      align-items: center;
+    }
+    .detail-tab {
+      padding: 7px 14px;
+      cursor: pointer;
+      font-size: 11px;
+      color: #5f6368;
+      border-bottom: 2px solid transparent;
+      user-select: none;
+    }
+    .detail-tab:hover { color: #202124; }
+    .detail-tab.active { color: #1a73e8; border-bottom-color: #1a73e8; font-weight: 500; }
+    .detail-close {
+      margin-left: auto;
+      padding: 4px 12px;
+      cursor: pointer;
+      color: #80868b;
+      font-size: 18px;
+      line-height: 1;
+    }
+    .detail-close:hover { color: #202124; }
+    .detail-body { flex: 1; overflow: auto; }
+    .detail-pane { display: none; }
+    .detail-pane.active { display: block; }
+    .kv-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    .kv-table td { padding: 3px 12px; border-bottom: 1px solid #f1f3f4; vertical-align: top; word-break: break-all; }
+    .kv-table td:first-child { width: 200px; font-weight: 500; color: #5f6368; }
+    .kv-section-head {
+      padding: 4px 12px;
+      background: #f1f3f4;
+      font-weight: 600;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #5f6368;
+    }
+    .body-pre {
+      padding: 10px 12px;
+      font-family: 'Menlo', 'Monaco', monospace;
+      font-size: 11px;
+      white-space: pre-wrap;
+      word-break: break-all;
+      color: #202124;
+      margin: 0;
+    }
+    .timing-row { display: flex; align-items: center; gap: 12px; padding: 5px 12px; font-size: 11px; }
+    .timing-label { width: 100px; color: #5f6368; }
+    .timing-bar-wrap { flex: 1; background: #f1f3f4; border-radius: 2px; height: 8px; }
+    .timing-bar { height: 100%; background: #4285f4; border-radius: 2px; min-width: 2px; }
+    .timing-val { width: 60px; text-align: right; color: #202124; font-variant-numeric: tabular-nums; }
 
     /* Console panel */
     #con-toolbar {
@@ -393,6 +461,21 @@ export class UnifiedViewer {
             </thead>
             <tbody id="net-tbody"></tbody>
           </table>
+        </div>
+        <div id="net-detail">
+          <div class="detail-tabs">
+            <div class="detail-tab active" data-pane="pane-headers">Headers</div>
+            <div class="detail-tab" data-pane="pane-payload">Payload</div>
+            <div class="detail-tab" data-pane="pane-response">Response</div>
+            <div class="detail-tab" data-pane="pane-timing">Timing</div>
+            <span class="detail-close" id="detail-close">&#x2715;</span>
+          </div>
+          <div class="detail-body">
+            <div id="pane-headers" class="detail-pane active"></div>
+            <div id="pane-payload" class="detail-pane"></div>
+            <div id="pane-response" class="detail-pane"></div>
+            <div id="pane-timing" class="detail-pane"></div>
+          </div>
         </div>
       </div>
 
@@ -569,7 +652,7 @@ export class UnifiedViewer {
         '<td class="col-status ' + statusClass(e.response.status) + '">' + e.response.status + '</td>' +
         '<td class="col-time">' + Math.round(e.time) + ' ms</td>';
 
-      tr.addEventListener('click', () => seekToOffset(parseFloat(tr.dataset.start)));
+      tr.addEventListener('click', () => { showNetDetail(i, tr); seekToOffset(parseFloat(tr.dataset.start)); });
       netTbody.appendChild(tr);
     });
 
@@ -636,6 +719,87 @@ export class UnifiedViewer {
         row.classList.toggle('con-future', ms < offset);
       });
     }
+
+    /* ── Network detail panel ── */
+    const netDetail = document.getElementById('net-detail');
+    let selectedRow = null;
+
+    function renderKV(pairs) {
+      if (!pairs || !pairs.length) return '<p style="padding:8px 12px;color:#80868b;font-size:11px">None</p>';
+      return '<table class="kv-table">' +
+        pairs.map(p => '<tr><td>' + esc(String(p.name)) + '</td><td>' + esc(String(p.value)) + '</td></tr>').join('') +
+        '</table>';
+    }
+
+    function tryPrettyJson(s) {
+      try { return JSON.stringify(JSON.parse(s), null, 2); } catch(e) { return s; }
+    }
+
+    function showNetDetail(idx, tr) {
+      if (selectedRow) selectedRow.classList.remove('net-selected');
+      selectedRow = tr;
+      tr.classList.add('net-selected');
+
+      const e = NET_ENTRIES[idx];
+
+      /* Headers pane */
+      document.getElementById('pane-headers').innerHTML =
+        '<div class="kv-section-head">General</div>' +
+        '<table class="kv-table">' +
+        '<tr><td>URL</td><td>' + esc(e.request.url) + '</td></tr>' +
+        '<tr><td>Method</td><td>' + esc(e.request.method) + '</td></tr>' +
+        '<tr><td>Status</td><td>' + e.response.status + ' ' + esc(e.response.statusText || '') + '</td></tr>' +
+        '</table>' +
+        '<div class="kv-section-head">Request Headers</div>' + renderKV(e.request.headers) +
+        '<div class="kv-section-head">Response Headers</div>' + renderKV(e.response.headers);
+
+      /* Payload pane */
+      const body = e.request.postData;
+      document.getElementById('pane-payload').innerHTML = body
+        ? '<pre class="body-pre">' + esc(tryPrettyJson(body.text || '')) + '</pre>'
+        : '<p style="padding:10px 12px;color:#80868b;font-size:11px">No request body</p>';
+
+      /* Response pane */
+      const resText = e.response.content && e.response.content.text;
+      document.getElementById('pane-response').innerHTML = resText
+        ? '<pre class="body-pre">' + esc(tryPrettyJson(resText)) + '</pre>'
+        : '<p style="padding:10px 12px;color:#80868b;font-size:11px">No response body</p>';
+
+      /* Timing pane */
+      const t = e.timings || {};
+      const total = e.time || 0;
+      document.getElementById('pane-timing').innerHTML =
+        [['Send', t.send || 0], ['Wait (TTFB)', t.wait || 0], ['Receive', t.receive || 0], ['Total', total]]
+          .map(([label, ms]) =>
+            '<div class="timing-row">' +
+            '<span class="timing-label">' + label + '</span>' +
+            '<div class="timing-bar-wrap"><div class="timing-bar" style="width:' +
+              (total > 0 ? Math.round(ms / total * 100) : 0) + '%"></div></div>' +
+            '<span class="timing-val">' + Math.round(ms) + ' ms</span>' +
+            '</div>'
+          ).join('');
+
+      /* Show panel & reset to Headers tab */
+      netDetail.classList.add('visible');
+      document.querySelectorAll('.detail-tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.detail-pane').forEach(p => p.classList.remove('active'));
+      document.querySelector('.detail-tab[data-pane="pane-headers"]').classList.add('active');
+      document.getElementById('pane-headers').classList.add('active');
+    }
+
+    document.getElementById('detail-close').addEventListener('click', () => {
+      netDetail.classList.remove('visible');
+      if (selectedRow) { selectedRow.classList.remove('net-selected'); selectedRow = null; }
+    });
+
+    document.querySelectorAll('.detail-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.detail-tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.detail-pane').forEach(p => p.classList.remove('active'));
+        tab.classList.add('active');
+        document.getElementById(tab.dataset.pane).classList.add('active');
+      });
+    });
 
     /* Seek replay to a specific _offsetMs */
     function seekToOffset(offsetMs) {

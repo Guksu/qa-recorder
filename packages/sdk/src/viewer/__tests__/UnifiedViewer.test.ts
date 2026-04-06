@@ -75,4 +75,32 @@ describe('UnifiedViewer.generate', () => {
   it('세션 이벤트가 없어도 오류 없이 동작한다', () => {
     expect(() => UnifiedViewer.generate([], makeHARLog(), [])).not.toThrow();
   });
+
+  it('네트워크 상세 패널(#net-detail)이 HTML에 포함된다', () => {
+    const html = UnifiedViewer.generate(EVENTS, makeHARLog([makeEntry()]), []);
+    expect(html).toContain('net-detail');
+  });
+
+  it('상세 패널에 Headers/Payload/Response/Timing 탭이 있다', () => {
+    const html = UnifiedViewer.generate(EVENTS, makeHARLog([makeEntry()]), []);
+    expect(html).toContain('pane-headers');
+    expect(html).toContain('pane-payload');
+    expect(html).toContain('pane-response');
+    expect(html).toContain('pane-timing');
+  });
+
+  it('showNetDetail 함수가 스크립트에 포함된다', () => {
+    const html = UnifiedViewer.generate(EVENTS, makeHARLog([makeEntry()]), []);
+    expect(html).toContain('showNetDetail');
+  });
+
+  it('상세 패널 닫기 버튼(detail-close)이 포함된다', () => {
+    const html = UnifiedViewer.generate(EVENTS, makeHARLog([makeEntry()]), []);
+    expect(html).toContain('detail-close');
+  });
+
+  it('네트워크 행 클릭 핸들러가 showNetDetail을 호출한다', () => {
+    const html = UnifiedViewer.generate(EVENTS, makeHARLog([makeEntry()]), []);
+    expect(html).toMatch(/showNetDetail\(i,\s*tr\)/);
+  });
 });
