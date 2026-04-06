@@ -86,4 +86,48 @@ describe('HARViewer.generate', () => {
     const html = HARViewer.generate(harLog);
     expect(html).toContain('120');
   });
+
+  it('Payload 탭이 존재한다', () => {
+    const html = HARViewer.generate(makeHARLog());
+    expect(html).toContain('data-tab="payload"');
+  });
+
+  it('postData가 있는 엔트리의 Request Body가 HTML에 포함된다', () => {
+    const entry = makeEntry({
+      request: {
+        ...makeEntry().request,
+        method: 'POST',
+        postData: { mimeType: 'application/json', text: 'requestBodyContent' },
+      },
+    });
+    const html = HARViewer.generate(makeHARLog([entry]));
+    expect(html).toContain('requestBodyContent');
+  });
+
+  it('queryString 파라미터가 HTML에 포함된다', () => {
+    const entry = makeEntry({
+      request: {
+        ...makeEntry().request,
+        queryString: [{ name: 'pageParam', value: '42' }],
+      },
+    });
+    const html = HARViewer.generate(makeHARLog([entry]));
+    expect(html).toContain('"name":"pageParam"');
+    expect(html).toContain('"value":"42"');
+  });
+
+  it('General 섹션에 Request URL이 포함된다', () => {
+    const html = HARViewer.generate(makeHARLog([makeEntry()]));
+    expect(html).toContain('Request URL');
+  });
+
+  it('Response 탭이 존재한다', () => {
+    const html = HARViewer.generate(makeHARLog());
+    expect(html).toContain('data-tab="response"');
+  });
+
+  it('Name 컬럼에 pathname만 표시된다', () => {
+    const html = HARViewer.generate(makeHARLog([makeEntry()]));
+    expect(html).toContain('/users');
+  });
 });
