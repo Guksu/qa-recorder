@@ -3,7 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/qa-recorder?color=crimson)](https://www.npmjs.com/package/qa-recorder)
 [![license](https://img.shields.io/npm/l/qa-recorder?color=blue)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![test](https://img.shields.io/badge/tests-102%20passing-brightgreen)](./packages/sdk)
+[![test](https://img.shields.io/badge/tests-109%20passing-brightgreen)](./packages/sdk)
 
 **One-click QA recording for web apps — DOM session replay + network activity, all in the browser.**
 
@@ -33,7 +33,7 @@ No backend required. No browser extension. No screen share permission. Just add 
 | 🎥 | **DOM session replay** | Captures every DOM change via `MutationObserver` (rrweb). Works on mobile, WebView, and any browser — no `getDisplayMedia` needed. |
 | 🌐 | **Network capture** | Intercepts `fetch` and `XHR`. Circular buffer, up to 100 entries in HAR 1.2 format. |
 | ▶️ | **Replay viewer** | Self-contained HTML file with play/pause and 1x/2x speed controls. Open in any browser, no internet needed at record time. |
-| 🔍 | **HAR viewer** | Self-contained HTML file with a Chrome DevTools-style network inspector. |
+| 🔍 | **HAR viewer** | Self-contained HTML file with a Chrome DevTools-style network inspector — Headers, Payload, Response, and Timing tabs. |
 | 🔒 | **Header masking** | `Authorization`, `Cookie`, and custom headers are automatically redacted. |
 | 📦 | **Local save** | Downloads 4 files directly — no backend needed. |
 | ☁️ | **Remote upload** | Optionally POST files to your own server. Shows a share-link copy button on success. |
@@ -141,6 +141,7 @@ window.__QA_RECORDER_CONFIG__ = {
     'Cookie',
     'Set-Cookie',
   ],
+  zIndex: 2147483647,     // z-index for all UI elements (default: max int).
 };
 ```
 
@@ -149,6 +150,7 @@ window.__QA_RECORDER_CONFIG__ = {
 | `endpoint` | `string` | `''` | Remote upload URL. Empty = local download. |
 | `maxRequests` | `number` | `100` | Max network entries to keep. |
 | `maskHeaders` | `string[]` | `['Authorization', 'Cookie', 'Set-Cookie']` | Headers to redact. |
+| `zIndex` | `number` | `2147483647` | z-index for all UI elements (button, progress bar, share panel). |
 
 ---
 
@@ -161,17 +163,15 @@ Page load
   └─ FloatingButton.mount()   → injects button via Shadow DOM (recording state)
 
 User clicks the button (save the last 20 minutes)
-  └─ ConfirmModal             → "Save current session?"
-  └─ [Confirm]
-      ├─ ScreenRecorder.stop()
-      ├─ NetworkCapture.snapshot()  → HAR 1.2 JSON
-      ├─ MaskingFilter.apply()      → redact sensitive headers
-      │
-      ├─ [endpoint set]
-      │   ├─ ProgressBar.show()     → "업로드 중..."
-      │   ├─ RemoteDelivery.send()  → POST multipart/form-data
+  ├─ ScreenRecorder.stop()
+  ├─ NetworkCapture.snapshot()  → HAR 1.2 JSON
+  ├─ MaskingFilter.apply()      → redact sensitive headers
+  ├─ ProgressBar.show()         → "Saving..."
+  │
+  ├─ [endpoint set]
+  │   ├─ RemoteDelivery.send()  → POST multipart/form-data
       │   ├─ ProgressBar.hide()
-      │   └─ SharePanel.show(url)   → copy-link button (if server returns url)
+      │   └─ SharePanel.show(url)  → copy-link button (if server returns url)
       │
       └─ [no endpoint]
           └─ LocalStorage.save()    → downloads 4 files:
@@ -191,7 +191,7 @@ User clicks the button (save the last 20 minutes)
 The `qa-session-*.html` file downloaded with each local save is a fully self-contained replay viewer.
 
 - **Play / Pause** button
-- **1x / 2x** playback speed
+- **1× / 2× / 4×** playback speed
 - Mouse cursor and interaction replay
 - No server, no extension, no additional software needed
 
@@ -205,8 +205,15 @@ To replay without internet, use [rrweb-player](https://github.com/rrweb-io/rrweb
 
 The `qa-network-*.html` file is a fully self-contained network inspector — no server, no extension, no internet connection needed.
 
-- Request and response headers, body, status code
-- Response time (ms) for each entry
+| Tab | Contents |
+|---|---|
+| **Headers** | General (URL, Method, Status) · Request Headers · Response Headers |
+| **Payload** | Query String Parameters · Request Body |
+| **Response** | Raw response body with JSON pretty-printing |
+| **Timing** | Wait (TTFB) and content download breakdown |
+
+- URL filter bar to narrow down entries
+- Waterfall bar per request
 - Masked headers shown as `[MASKED]`
 
 ---
@@ -231,7 +238,7 @@ The `qa-network-*.html` file is a fully self-contained network inspector — no 
 ```bash
 pnpm install
 
-pnpm -F qa-recorder test      # run 102 tests (Vitest + jsdom)
+pnpm -F qa-recorder test      # run 109 tests (Vitest + jsdom)
 pnpm -F qa-recorder build     # build ESM + UMD to dist/
 pnpm -F qa-recorder dev       # watch mode
 pnpm -F qa-recorder demo      # local demo server (http://localhost:5173)

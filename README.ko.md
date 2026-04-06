@@ -3,7 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/qa-recorder?color=crimson)](https://www.npmjs.com/package/qa-recorder)
 [![license](https://img.shields.io/npm/l/qa-recorder?color=blue)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![test](https://img.shields.io/badge/tests-102%20passing-brightgreen)](./packages/sdk)
+[![test](https://img.shields.io/badge/tests-109%20passing-brightgreen)](./packages/sdk)
 
 **버튼 하나로 DOM 세션 리플레이 + 네트워크 기록을 저장하는 웹 QA 라이브러리**
 
@@ -36,8 +36,8 @@
 |---|---|---|
 | 🎥 | **DOM 세션 리플레이** | `MutationObserver` 기반 DOM 변화 캡처 (rrweb). 모바일, WebView, 모든 브라우저 지원 — `getDisplayMedia` 불필요. |
 | 🌐 | **네트워크 캡처** | `fetch`와 `XHR` 인터셉트. 최대 100건 순환 버퍼, HAR 1.2 포맷. |
-| ▶️ | **리플레이 뷰어** | 재생/일시정지, 1x/2x 속도 버튼이 포함된 독립 실행형 HTML 뷰어. |
-| 🔍 | **HAR 뷰어** | Chrome 개발자도구 스타일의 독립 HTML 뷰어 자동 생성. |
+| ▶️ | **리플레이 뷰어** | 재생/일시정지, 1×/2×/4× 속도 버튼이 포함된 독립 실행형 HTML 뷰어. |
+| 🔍 | **HAR 뷰어** | Chrome 개발자도구 스타일의 독립 HTML 뷰어 — Headers, Payload, Response, Timing 탭 제공. |
 | 🔒 | **헤더 마스킹** | `Authorization`, `Cookie` 등 민감 헤더 자동 마스킹. |
 | 📦 | **로컬 저장** | 파일 4종을 로컬에 다운로드 — 백엔드 불필요. |
 | ☁️ | **원격 업로드** | 서버 endpoint 설정 시 POST 업로드. 응답 URL이 있으면 링크 복사 버튼 노출. |
@@ -145,6 +145,7 @@ window.__QA_RECORDER_CONFIG__ = {
     'Cookie',
     'Set-Cookie',
   ],
+  zIndex: 2147483647,     // UI 요소의 z-index (기본값: 최대 정수).
 };
 ```
 
@@ -153,6 +154,7 @@ window.__QA_RECORDER_CONFIG__ = {
 | `endpoint` | `string` | `''` | 원격 업로드 URL. 비어있으면 로컬 다운로드. |
 | `maxRequests` | `number` | `100` | 순환 버퍼에 유지할 최대 기록 수. |
 | `maskHeaders` | `string[]` | `['Authorization', 'Cookie', 'Set-Cookie']` | 마스킹할 헤더 이름 목록. |
+| `zIndex` | `number` | `2147483647` | UI 요소(버튼, 프로그레스 바, 공유 패널)의 z-index. |
 
 ---
 
@@ -165,17 +167,15 @@ window.__QA_RECORDER_CONFIG__ = {
   └─ FloatingButton.mount()   → Shadow DOM으로 버튼 삽입 (recording 상태)
 
 플로팅 버튼 클릭 (최근 20분 저장)
-  └─ ConfirmModal             → "현재까지의 내용을 저장하시겠습니까?"
-  └─ [확인]
-      ├─ ScreenRecorder.stop()
-      ├─ NetworkCapture.snapshot()  → HAR 1.2 JSON 생성
-      ├─ MaskingFilter.apply()      → 민감 헤더 마스킹
-      │
-      ├─ [endpoint 설정된 경우]
-      │   ├─ ProgressBar.show()     → "업로드 중..."
-      │   ├─ RemoteDelivery.send()  → POST multipart/form-data
+  ├─ ScreenRecorder.stop()
+  ├─ NetworkCapture.snapshot()  → HAR 1.2 JSON 생성
+  ├─ MaskingFilter.apply()      → 민감 헤더 마스킹
+  ├─ ProgressBar.show()         → "Saving..."
+  │
+  ├─ [endpoint 설정된 경우]
+  │   ├─ RemoteDelivery.send()  → POST multipart/form-data
       │   ├─ ProgressBar.hide()
-      │   └─ SharePanel.show(url)   → 링크 복사 버튼 (서버가 url 반환 시)
+      │   └─ SharePanel.show(url)  → 링크 복사 버튼 (서버가 url 반환 시)
       │
       └─ [endpoint 없는 경우]
           └─ LocalStorage.save()    → 파일 4종 다운로드:
@@ -195,7 +195,7 @@ window.__QA_RECORDER_CONFIG__ = {
 로컬 저장 시 함께 다운로드되는 `qa-session-*.html`을 브라우저에서 열면 됩니다.
 
 - **재생 / 일시정지** 버튼
-- **1x / 2x** 배속 전환
+- **1× / 2× / 4×** 배속 전환
 - 마우스 커서 및 인터랙션 재현
 - 서버, 확장 프로그램, 별도 소프트웨어 불필요
 
@@ -209,8 +209,15 @@ window.__QA_RECORDER_CONFIG__ = {
 
 로컬 저장 시 함께 다운로드되는 `qa-network-*.html`은 완전히 독립 실행형입니다. 서버, 확장 프로그램, 인터넷 연결 없이 브라우저에서 바로 열 수 있습니다.
 
-- 요청/응답 헤더, 바디, 상태 코드 확인
-- 각 항목의 응답 시간(ms) 확인
+| 탭 | 내용 |
+|---|---|
+| **Headers** | General (URL, 메서드, 상태) · 요청 헤더 · 응답 헤더 |
+| **Payload** | Query String 파라미터 · 요청 본문 |
+| **Response** | 응답 본문 (JSON pretty-print 포함) |
+| **Timing** | Wait(TTFB) / Content Download 시간 차트 |
+
+- URL 필터 검색으로 요청 빠르게 찾기
+- 요청별 Waterfall 바 시각화
 - 마스킹된 헤더는 `[MASKED]`로 표시
 
 ---
@@ -235,7 +242,7 @@ window.__QA_RECORDER_CONFIG__ = {
 ```bash
 pnpm install
 
-pnpm -F qa-recorder test      # 테스트 실행 (Vitest + jsdom, 102개)
+pnpm -F qa-recorder test      # 테스트 실행 (Vitest + jsdom, 109개)
 pnpm -F qa-recorder build     # ESM + UMD 빌드
 pnpm -F qa-recorder dev       # watch 모드
 pnpm -F qa-recorder demo      # 로컬 데모 서버 (http://localhost:5173)
