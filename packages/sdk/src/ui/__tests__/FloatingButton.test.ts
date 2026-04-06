@@ -39,4 +39,20 @@ describe('FloatingButton', () => {
     const button = host.shadowRoot!.querySelector('button')!;
     expect(button.title).toBe('Start QA recording');
   });
+
+  it('zIndex 옵션을 설정하면 Shadow DOM 스타일에 적용된다', () => {
+    const btn = new FloatingButton(vi.fn(), 999);
+    btn.mount();
+    const host = document.getElementById('qa-recorder-root')!;
+    const style = host.shadowRoot!.querySelector('style')!;
+    expect(style.textContent).toContain('z-index: 999');
+  });
+
+  it('zIndex 미설정 시 기본값(2147483647)이 적용된다', () => {
+    const btn = new FloatingButton(vi.fn());
+    btn.mount();
+    const host = document.getElementById('qa-recorder-root')!;
+    const style = host.shadowRoot!.querySelector('style')!;
+    expect(style.textContent).toContain('z-index: 2147483647');
+  });
 });

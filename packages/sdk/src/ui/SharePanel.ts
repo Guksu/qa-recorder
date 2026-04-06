@@ -1,9 +1,9 @@
-import { BASE_STYLES } from './styles.js';
+import { buildStyles } from './styles.js';
 
 export class SharePanel {
   private static host: HTMLElement | null = null;
 
-  static show(url: string): void {
+  static show(url: string, zIndex = 2147483647): void {
     if (this.host) return;
 
     this.host = document.createElement('div');
@@ -11,7 +11,7 @@ export class SharePanel {
     const shadow = this.host.attachShadow({ mode: 'open' });
 
     const style = document.createElement('style');
-    style.textContent = BASE_STYLES;
+    style.textContent = buildStyles(zIndex);
 
     const panel = document.createElement('div');
     panel.className = 'qa-share-panel';

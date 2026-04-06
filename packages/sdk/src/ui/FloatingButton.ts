@@ -1,4 +1,4 @@
-import { BASE_STYLES } from './styles.js';
+import { buildStyles } from './styles.js';
 
 export type ButtonState = 'idle' | 'recording';
 
@@ -6,7 +6,7 @@ export class FloatingButton {
   private host: HTMLElement | null = null;
   private shadow: ShadowRoot | null = null;
 
-  constructor(private readonly onClick: () => void) {}
+  constructor(private readonly onClick: () => void, private readonly zIndex = 2147483647) {}
 
   mount(): void {
     this.host = document.createElement('div');
@@ -14,7 +14,7 @@ export class FloatingButton {
     this.shadow = this.host.attachShadow({ mode: 'open' });
 
     const style = document.createElement('style');
-    style.textContent = BASE_STYLES;
+    style.textContent = buildStyles(this.zIndex);
 
     const btn = document.createElement('button');
     btn.className = 'qa-floating-btn';

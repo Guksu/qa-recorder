@@ -1,10 +1,10 @@
-import { BASE_STYLES } from './styles.js';
+import { buildStyles } from './styles.js';
 
 export class ProgressBar {
   private static host: HTMLElement | null = null;
   private static shadow: ShadowRoot | null = null;
 
-  static show(label = 'Uploading...'): void {
+  static show(label = 'Uploading...', zIndex = 2147483647): void {
     if (this.host) return;
 
     this.host = document.createElement('div');
@@ -12,7 +12,7 @@ export class ProgressBar {
     this.shadow = this.host.attachShadow({ mode: 'open' });
 
     const style = document.createElement('style');
-    style.textContent = BASE_STYLES;
+    style.textContent = buildStyles(zIndex);
 
     const wrap = document.createElement('div');
     wrap.className = 'qa-progress-bar-wrap';

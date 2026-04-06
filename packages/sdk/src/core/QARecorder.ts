@@ -18,7 +18,7 @@ export class QARecorder {
     this.config = resolveConfig(overrides);
     this.networkCapture = new NetworkCapture(this.config.maxRequests, this.config.maskHeaders);
     this.screenRecorder = new ScreenRecorder();
-    this.floatingButton = new FloatingButton(this.onButtonClick.bind(this));
+    this.floatingButton = new FloatingButton(this.onButtonClick.bind(this), this.config.zIndex);
   }
 
   /** 페이지 로드 후 초기화 — 즉시 녹화 시작 + 버튼 노출 */
@@ -34,7 +34,7 @@ export class QARecorder {
 
     const harLog = HARBuilder.build(this.networkCapture.snapshot());
 
-    ProgressBar.show('Saving...');
+    ProgressBar.show('Saving...', this.config.zIndex);
 
     if (this.config.endpoint) {
       try {
@@ -43,7 +43,7 @@ export class QARecorder {
           harLog,
         );
         ProgressBar.hide();
-        if (url) SharePanel.show(url);
+        if (url) SharePanel.show(url, this.config.zIndex);
       } catch (err) {
         ProgressBar.hide();
         alert(`Upload failed: ${err instanceof Error ? err.message : String(err)}`);

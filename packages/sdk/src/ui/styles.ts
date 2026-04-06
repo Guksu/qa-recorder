@@ -1,3 +1,7 @@
+export function buildStyles(zIndex = 2147483647): string {
+  return BASE_STYLES.replace(/z-index: 2147483647/g, `z-index: ${zIndex}`);
+}
+
 export const BASE_STYLES = `
   :host {
     all: initial;
