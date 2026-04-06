@@ -1,7 +1,6 @@
 import type { HARLog } from '@qa-recorder/shared';
 import type { ConsoleEntry } from '../console/ConsoleCapture.js';
-import { HARViewer } from '../viewer/HARViewer.js';
-import { SessionViewer } from '../viewer/SessionViewer.js';
+import { UnifiedViewer } from '../viewer/UnifiedViewer.js';
 
 export class LocalStorage {
   static async save(sessionEvents: unknown[] | null, harLog: HARLog, consoleLogs: ConsoleEntry[] = []): Promise<void> {
@@ -13,11 +12,6 @@ export class LocalStorage {
         new Blob([sessionJson], { type: 'application/json' }),
         `qa-session-${timestamp}.rr.json`,
       );
-      const sessionHtml = SessionViewer.generate(sessionEvents);
-      LocalStorage.downloadBlob(
-        new Blob([sessionHtml], { type: 'text/html' }),
-        `qa-session-${timestamp}.html`,
-      );
     }
 
     const harJson = JSON.stringify(harLog, null, 2);
@@ -25,10 +19,11 @@ export class LocalStorage {
       new Blob([harJson], { type: 'application/json' }),
       `qa-network-${timestamp}.har`,
     );
-    const viewerHtml = HARViewer.generate(harLog, consoleLogs);
+
+    const reportHtml = UnifiedViewer.generate(sessionEvents ?? [], harLog, consoleLogs);
     LocalStorage.downloadBlob(
-      new Blob([viewerHtml], { type: 'text/html' }),
-      `qa-network-${timestamp}.html`,
+      new Blob([reportHtml], { type: 'text/html' }),
+      `qa-report-${timestamp}.html`,
     );
   }
 
