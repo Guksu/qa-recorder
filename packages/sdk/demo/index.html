@@ -95,18 +95,9 @@
     <pre id="buffer-output"></pre>
   </div>
 
-  <div class="section" style="border-color:#fbbf24; background:#fffbeb;">
-    <h2 style="color:#92400e;">🧪 UI Test (temporary)</h2>
-    <p style="color:#78350f; margin-bottom:12px;">진행 중인 UI 컴포넌트를 직접 확인합니다.</p>
-    <div class="btn-row">
-      <button class="action" onclick="testProgressBar()">Progress Bar (2.5s)</button>
-      <button class="action" onclick="testSharePanel()">Share Panel</button>
-    </div>
-  </div>
-
   <div class="section" style="border-color:#a78bfa; background:#f5f3ff;">
     <h2 style="color:#5b21b6;">🖥️ Console Capture Test</h2>
-    <p style="color:#6d28d9; margin-bottom:12px;">콘솔 로그를 발생시킨 후 저장하면 HAR 뷰어의 Console 패널에서 확인할 수 있습니다.</p>
+    <p style="color:#6d28d9; margin-bottom:12px;">콘솔 로그를 발생시킨 후 저장하면 QA 리포트의 Console 패널에서 확인할 수 있습니다.</p>
     <div class="btn-row">
       <button class="action" onclick="console.error('Test error: something went wrong', { code: 404 })">console.error()</button>
       <button class="action" onclick="console.warn('Test warning: deprecated API usage')">console.warn()</button>
@@ -115,46 +106,40 @@
     </div>
   </div>
 
-  <div class="section" style="border-color:#f97316; background:#fff7ed;">
-    <h2 style="color:#9a3412;">💾 IndexedDB Backup Test</h2>
-    <p style="color:#7c2d12; margin-bottom:12px;">
-      크래시 복구를 테스트합니다.<br>
-      <strong>테스트 순서:</strong> ① 네트워크 요청 발생 → ② "지금 백업" 클릭 → ③ 페이지 새로고침 → ④ 복구 팝업 확인
-    </p>
-    <div class="btn-row">
-      <button class="action" style="background:#ea580c;" onclick="triggerBackup()">💾 지금 백업</button>
-      <button class="action" style="background:#78716c;" onclick="checkBackup()">🔍 백업 확인</button>
-      <button class="action" style="background:#dc2626;" onclick="clearBackup()">🗑️ 백업 삭제</button>
-    </div>
-    <pre id="backup-output" style="margin-top:12px;">버튼을 눌러 확인하세요.</pre>
-  </div>
-
   <script>
     const i18n = {
       ko: {
         subtitle: '우측 하단의 버튼이 QA Recorder입니다. 페이지가 열린 순간부터 <strong>자동으로 녹화</strong>가 시작됩니다 (최근 20분 유지). 버튼을 클릭하면 확인 후 저장되고, 녹화는 자동으로 재시작됩니다.',
         section1Title: '동작 흐름',
         modeLabel: '저장 방식',
-        modeLocal: '파일 4종이 브라우저에 다운로드됩니다.',
+        modeLocal: '파일 3종이 브라우저에 다운로드됩니다.',
         modeRemote: '<code>POST /upload</code> (목 서버)로 전송됩니다. 저장 후 링크 복사 버튼이 나타납니다.',
-        flowLocal: `페이지 로드 → rrweb 즉시 녹화 시작 (최근 20분 유지)
+        flowLocal: `페이지 로드
+  ├─ rrweb 즉시 녹화 시작 (최근 20분 롤링 유지)
+  ├─ fetch / XHR 인터셉트 (최대 100건 순환 버퍼)
+  ├─ console.error / warn 캡처
+  └─ 새로고침/이동 시 sessionStorage에 세션 자동 저장 후 복원 (enableBackup: true)
 
-버튼 클릭 → 확인 → 파일 4종 다운로드:
-  qa-session-*.rr.json  ← DOM 이벤트 원본
-  qa-session-*.html     ← 리플레이 뷰어
-  qa-network-*.har      ← 네트워크 로그
-  qa-network-*.html     ← HAR 뷰어
+버튼 클릭 → 메모 입력(선택) → 확인 → 파일 3종 순차 다운로드:
+  qa-session-*.rr.json  ← DOM 이벤트 원본 (rrweb)
+  qa-network-*.har      ← 네트워크 로그 (HAR 1.2)
+  qa-report-*.html      ← 통합 QA 리포트 (세션 리플레이 + 네트워크 + 콘솔)
 
-저장 후 → 녹화 자동 재시작`,
-        flowRemote: `페이지 로드 → rrweb 즉시 녹화 시작 (최근 20분 유지)
+저장 후 → 버퍼 초기화 + 녹화 자동 재시작`,
+        flowRemote: `페이지 로드
+  ├─ rrweb 즉시 녹화 시작 (최근 20분 롤링 유지)
+  ├─ fetch / XHR 인터셉트 (최대 100건 순환 버퍼)
+  ├─ console.error / warn 캡처
+  └─ 새로고침/이동 시 sessionStorage에 세션 자동 저장 후 복원 (enableBackup: true)
 
-버튼 클릭 → 확인 → POST /upload (multipart/form-data):
-  session  →  qa-session-*.rr.json
-  har      →  qa-network-*.har
+버튼 클릭 → 메모 입력(선택) → 확인 → POST /upload (multipart/form-data):
+  session  →  rrweb 이벤트 JSON
+  har      →  네트워크 로그 (HAR 1.2)
+  memo     →  버그 설명 메모 (입력 시)
 
 서버 응답 { url: "..." } → 링크 복사 버튼 표시
 
-저장 후 → 녹화 자동 재시작`,
+저장 후 → 버퍼 초기화 + 녹화 자동 재시작`,
         section2Title: '네트워크 요청 발생시키기',
         section2Desc: '아래 버튼으로 네트워크 요청을 발생시킨 후 우측 하단 버튼을 눌러 저장해보세요.',
         btnFetch: 'fetch() 테스트',
@@ -172,26 +157,34 @@
         subtitle: 'The button in the bottom-right is QA Recorder. <strong>Recording starts automatically</strong> when the page loads — no click needed. It keeps the last 20 minutes in memory. Click the button once to save, and recording resumes automatically.',
         section1Title: 'How it works',
         modeLabel: 'Save mode',
-        modeLocal: 'Files are downloaded directly to your browser.',
+        modeLocal: '3 files are downloaded directly to your browser.',
         modeRemote: 'Files are POSTed to <code>/upload</code> (mock server). A copy-link button appears on success.',
-        flowLocal: `Page load → rrweb starts recording immediately (last 20 min)
+        flowLocal: `Page load
+  ├─ rrweb starts recording immediately (last 20 min rolling window)
+  ├─ fetch / XHR intercepted (circular buffer, up to 100 entries)
+  ├─ console.error / warn captured
+  └─ On refresh/navigate: session auto-saved to sessionStorage and restored (enableBackup: true)
 
-Click button → confirm → 4 files download:
-  qa-session-*.rr.json  ← DOM events
-  qa-session-*.html     ← replay viewer
-  qa-network-*.har      ← network log
-  qa-network-*.html     ← HAR viewer
+Click button → optional memo → confirm → 3 files download sequentially:
+  qa-session-*.rr.json  ← DOM events (rrweb)
+  qa-network-*.har      ← network log (HAR 1.2)
+  qa-report-*.html      ← unified QA report (session replay + network + console)
 
-After save → recording resumes`,
-        flowRemote: `Page load → rrweb starts recording immediately (last 20 min)
+After save → buffers reset + recording resumes`,
+        flowRemote: `Page load
+  ├─ rrweb starts recording immediately (last 20 min rolling window)
+  ├─ fetch / XHR intercepted (circular buffer, up to 100 entries)
+  ├─ console.error / warn captured
+  └─ On refresh/navigate: session auto-saved to sessionStorage and restored (enableBackup: true)
 
-Click button → confirm → POST /upload (multipart/form-data):
-  session  →  qa-session-*.rr.json
-  har      →  qa-network-*.har
+Click button → optional memo → confirm → POST /upload (multipart/form-data):
+  session  →  rrweb events JSON
+  har      →  network log (HAR 1.2)
+  memo     →  bug description memo (if entered)
 
 Server responds { url: "..." } → copy-link button shown
 
-After save → recording resumes`,
+After save → buffers reset + recording resumes`,
         section2Title: 'Generate network requests',
         section2Desc: 'Trigger some requests below, then click the floating button to save.',
         btnFetch: 'fetch() test',
@@ -317,58 +310,12 @@ After save → recording resumes`,
       }
     };
 
-    // ── UI 테스트용 임시 함수 ──
-    import { ProgressBar } from '../src/ui/ProgressBar.ts';
-    import { SharePanel } from '../src/ui/SharePanel.ts';
-
-    window.testProgressBar = async () => {
-      ProgressBar.show('Saving...');
-      await new Promise(r => setTimeout(r, 2500));
-      ProgressBar.hide();
-    };
-
-    window.testSharePanel = () => {
-      SharePanel.show('https://example.com/share/qa-session-demo');
-    };
-
     window.throwUncaught = () => {
       setTimeout(() => { throw new Error('Intentional uncaught error for testing'); }, 0);
     };
 
     window.rejectUnhandled = () => {
       Promise.reject(new Error('Intentional unhandled promise rejection'));
-    };
-
-    // ── Session Backup 테스트 함수 ──
-    window.triggerBackup = () => {
-      const out = document.getElementById('backup-output');
-      try {
-        recorder._saveBackupForDemo();
-        const raw = sessionStorage.getItem('qa-recorder-backup');
-        const data = raw ? JSON.parse(raw) : null;
-        out.textContent = data
-          ? `✅ 백업 완료!\nevents: ${data.events.length}개\nharEntries: ${data.harEntries.length}개\nconsoleLogs: ${data.consoleLogs.length}개\nsavedAt: ${data.savedAt}\n\n👉 이제 페이지를 새로고침하면 자동 복원됩니다.`
-          : '❌ 백업 데이터 없음';
-      } catch(e) {
-        out.textContent = '❌ 오류: ' + e.message;
-      }
-    };
-
-    window.checkBackup = () => {
-      const out = document.getElementById('backup-output');
-      const raw = sessionStorage.getItem('qa-recorder-backup');
-      if (!raw) {
-        out.textContent = '백업 없음';
-      } else {
-        const data = JSON.parse(raw);
-        out.textContent = `📦 백업 존재\nevents: ${data.events.length}개\nharEntries: ${data.harEntries.length}개\nconsoleLogs: ${data.consoleLogs.length}개\nsavedAt: ${data.savedAt}`;
-      }
-    };
-
-    window.clearBackup = () => {
-      const out = document.getElementById('backup-output');
-      sessionStorage.removeItem('qa-recorder-backup');
-      out.textContent = '🗑️ 백업 삭제 완료';
     };
 
     window.showBuffer = () => {
