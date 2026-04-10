@@ -100,6 +100,26 @@ describe('ConsoleCapture', () => {
     expect(typeof capture.snapshot()[0]._offsetMs).toBe('number');
   });
 
+  it('restoreEntries()는 엔트리를 버퍼 앞에 추가한다', () => {
+    capture.start();
+    console.error('after');
+    const old: import('../ConsoleCapture.js').ConsoleEntry = { timestamp: new Date().toISOString(), level: 'error', message: 'before', _offsetMs: 0 };
+    capture.restoreEntries([old]);
+    const entries = capture.snapshot();
+    expect(entries[0].message).toBe('before');
+    expect(entries[1].message).toContain('after');
+  });
+
+  it('restoreEntries() 후 maxEntries 초과 시 오래된 항목이 제거된다', () => {
+    capture = new ConsoleCapture(2);
+    capture.start();
+    const fakeEntries: import('../ConsoleCapture.js').ConsoleEntry[] = [1, 2, 3].map(i => ({
+      timestamp: new Date().toISOString(), level: 'error' as const, message: `entry${i}`, _offsetMs: i * 100,
+    }));
+    capture.restoreEntries(fakeEntries);
+    expect(capture.snapshot()).toHaveLength(2);
+  });
+
   it('consoleLevels 옵션으로 log도 캡처할 수 있다', () => {
     capture = new ConsoleCapture(200, ['error', 'warn', 'log']);
     capture.start();

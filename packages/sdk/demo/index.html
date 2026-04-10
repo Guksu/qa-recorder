@@ -115,6 +115,20 @@
     </div>
   </div>
 
+  <div class="section" style="border-color:#f97316; background:#fff7ed;">
+    <h2 style="color:#9a3412;">💾 IndexedDB Backup Test</h2>
+    <p style="color:#7c2d12; margin-bottom:12px;">
+      크래시 복구를 테스트합니다.<br>
+      <strong>테스트 순서:</strong> ① 네트워크 요청 발생 → ② "지금 백업" 클릭 → ③ 페이지 새로고침 → ④ 복구 팝업 확인
+    </p>
+    <div class="btn-row">
+      <button class="action" style="background:#ea580c;" onclick="triggerBackup()">💾 지금 백업</button>
+      <button class="action" style="background:#78716c;" onclick="checkBackup()">🔍 백업 확인</button>
+      <button class="action" style="background:#dc2626;" onclick="clearBackup()">🗑️ 백업 삭제</button>
+    </div>
+    <pre id="backup-output" style="margin-top:12px;">버튼을 눌러 확인하세요.</pre>
+  </div>
+
   <script>
     const i18n = {
       ko: {
@@ -258,6 +272,7 @@ After save → recording resumes`,
       recorder = new QARecorder({
         maxRequests: 100,
         maskHeaders: ['Authorization', 'Cookie'],
+        enableBackup: true,
         ...(m === 'remote' ? { endpoint: '/upload' } : {}),
       });
       window.__recorder = recorder;
@@ -305,6 +320,7 @@ After save → recording resumes`,
     // ── UI 테스트용 임시 함수 ──
     import { ProgressBar } from '../src/ui/ProgressBar.ts';
     import { SharePanel } from '../src/ui/SharePanel.ts';
+    import { IndexedDBBackup } from '../src/storage/IndexedDBBackup.ts';
 
     window.testProgressBar = async () => {
       ProgressBar.show('Saving...');
@@ -322,6 +338,35 @@ After save → recording resumes`,
 
     window.rejectUnhandled = () => {
       Promise.reject(new Error('Intentional unhandled promise rejection'));
+    };
+
+    // ── IndexedDB Backup 테스트 함수 ──
+    window.triggerBackup = async () => {
+      const out = document.getElementById('backup-output');
+      out.textContent = '백업 중...';
+      try {
+        await recorder._saveBackupForDemo();
+        const data = await IndexedDBBackup.load();
+        out.textContent = `✅ 백업 완료!\nevents: ${data.events.length}개\nharEntries: ${data.harEntries.length}개\nconsoleLogs: ${data.consoleLogs.length}개\nsavedAt: ${data.savedAt}\n\n👉 이제 페이지를 새로고침하면 복구 팝업이 뜹니다.`;
+      } catch(e) {
+        out.textContent = '❌ 오류: ' + e.message;
+      }
+    };
+
+    window.checkBackup = async () => {
+      const out = document.getElementById('backup-output');
+      const data = await IndexedDBBackup.load();
+      if (!data) {
+        out.textContent = '백업 없음';
+      } else {
+        out.textContent = `📦 백업 존재\nevents: ${data.events.length}개\nharEntries: ${data.harEntries.length}개\nconsoleLogs: ${data.consoleLogs.length}개\nsavedAt: ${data.savedAt}`;
+      }
+    };
+
+    window.clearBackup = async () => {
+      const out = document.getElementById('backup-output');
+      await IndexedDBBackup.clear();
+      out.textContent = '🗑️ 백업 삭제 완료';
     };
 
     window.showBuffer = () => {

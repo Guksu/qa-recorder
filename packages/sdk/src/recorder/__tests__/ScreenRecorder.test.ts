@@ -123,4 +123,39 @@ describe('ScreenRecorder', () => {
     recorder.start();
     expect(mocks.record).toHaveBeenCalledOnce();
   });
+
+  it('prependEvents()는 20분 이내 이벤트를 버퍼 앞에 추가한다', () => {
+    const recorder = new ScreenRecorder();
+    recorder.start();
+    const eventsBefore = recorder.getEvents().length;
+    const initial = [{ type: 2, data: {}, timestamp: Date.now() - 1000 }];
+    recorder.prependEvents(initial);
+    expect(recorder.getEvents().length).toBe(eventsBefore + 1);
+    expect((recorder.getEvents()[0] as { timestamp: number }).timestamp).toBe(initial[0].timestamp);
+  });
+
+  it('prependEvents()에서 20분 초과된 이벤트는 필터링된다', () => {
+    const recorder = new ScreenRecorder();
+    recorder.start();
+    const old = { type: 2, data: {}, timestamp: Date.now() - 21 * 60 * 1000 };
+    const recent = { type: 2, data: {}, timestamp: Date.now() - 1000 };
+    recorder.prependEvents([old, recent]);
+    const events = recorder.getEvents();
+    expect(events.some(e => (e as { timestamp: number }).timestamp === old.timestamp)).toBe(false);
+    expect(events.some(e => (e as { timestamp: number }).timestamp === recent.timestamp)).toBe(true);
+  });
+
+  it('prependEvents() 이후 신규 이벤트가 뒤에 추가된다', () => {
+    const recorder = new ScreenRecorder();
+    mocks.record.mockImplementation(({ emit }: { emit: (event: unknown) => void }) => {
+      emit({ type: 3, data: {}, timestamp: Date.now() });
+      return mocks.stopFn;
+    });
+    recorder.start();
+    const initial = [{ type: 2, data: {}, timestamp: Date.now() - 1000 }];
+    recorder.prependEvents(initial);
+    const events = recorder.getEvents();
+    expect((events[0] as { timestamp: number }).timestamp).toBe(initial[0].timestamp);
+    expect((events[events.length - 1] as { type: number }).type).toBe(3);
+  });
 });

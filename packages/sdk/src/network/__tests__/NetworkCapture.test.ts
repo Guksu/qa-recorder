@@ -199,6 +199,41 @@ describe('NetworkCapture', () => {
     });
   });
 
+  describe('restoreEntries()', () => {
+    it('restoreEntries()는 엔트리를 버퍼 앞에 추가한다', async () => {
+      vi.stubGlobal('fetch', makeMockFetch());
+      const capture = new NetworkCapture(100, []);
+      capture.start();
+      await window.fetch('https://example.com/new');
+
+      const old = capture.snapshot()[0];
+      capture.clearBuffer();
+
+      await window.fetch('https://example.com/after');
+      capture.restoreEntries([old]);
+
+      const entries = capture.snapshot();
+      expect(entries[0].request.url).toBe('https://example.com/new');
+      expect(entries[1].request.url).toBe('https://example.com/after');
+      capture.stop();
+    });
+
+    it('restoreEntries() 후 maxRequests를 초과하면 오래된 항목이 제거된다', async () => {
+      const capture = new NetworkCapture(2, []);
+      capture.start();
+      const fakeEntries = [1, 2, 3].map(i => ({
+        startedDateTime: new Date().toISOString(),
+        time: 10, _offsetMs: i * 100,
+        request: { method: 'GET', url: `https://example.com/${i}`, httpVersion: 'HTTP/1.1', headers: [], queryString: [], bodySize: -1, headersSize: -1 },
+        response: { status: 200, statusText: 'OK', httpVersion: 'HTTP/1.1', headers: [], content: { size: 0, mimeType: 'text/plain' }, bodySize: 0, headersSize: -1 },
+        timings: { send: 0, wait: 10, receive: 0 },
+      }));
+      capture.restoreEntries(fakeEntries);
+      expect(capture.snapshot()).toHaveLength(2);
+      capture.stop();
+    });
+  });
+
   describe('clearBuffer()', () => {
     it('clearBuffer() 호출 후 버퍼가 비워진다', async () => {
       vi.stubGlobal('fetch', makeMockFetch());

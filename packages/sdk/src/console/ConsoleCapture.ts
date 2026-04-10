@@ -82,6 +82,11 @@ export class ConsoleCapture {
     return [...this.buffer];
   }
 
+  /** 백업에서 복원된 엔트리를 버퍼 앞에 추가 (maxEntries 초과분 앞에서 제거) */
+  restoreEntries(entries: ConsoleEntry[]): void {
+    this.buffer = [...entries, ...this.buffer].slice(-this.maxEntries);
+  }
+
   private push(level: ConsoleLevel, args: unknown[], stack?: string): void {
     const message = args
       .map((a) => {

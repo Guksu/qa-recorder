@@ -7,6 +7,7 @@ export interface QARecorderConfig {
   zIndex?: number;
   consoleLevels?: ConsoleLevel[];
   maxConsoleEntries?: number;
+  enableBackup?: boolean;
 }
 
 const DEFAULT_CONFIG: Required<QARecorderConfig> = {
@@ -16,6 +17,7 @@ const DEFAULT_CONFIG: Required<QARecorderConfig> = {
   zIndex: 2147483647,
   consoleLevels: ['error', 'warn'],
   maxConsoleEntries: 200,
+  enableBackup: false,
 };
 
 export function resolveConfig(overrides?: QARecorderConfig): Required<QARecorderConfig> {

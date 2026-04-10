@@ -3,7 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/qa-recorder?color=crimson)](https://www.npmjs.com/package/qa-recorder)
 [![license](https://img.shields.io/npm/l/qa-recorder?color=blue)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![test](https://img.shields.io/badge/tests-134%20passing-brightgreen)](./packages/sdk)
+[![test](https://img.shields.io/badge/tests-164%20passing-brightgreen)](./packages/sdk)
 
 **One-click QA recording for web apps — DOM session replay + network activity + console errors, all in the browser.**
 
@@ -37,6 +37,7 @@ No backend required. No browser extension. No screen share permission. Just add 
 | 🔒 | **Header masking** | `Authorization`, `Cookie`, and custom headers are automatically redacted. |
 | 📦 | **Local save** | Downloads 3 files directly — no backend needed. |
 | ☁️ | **Remote upload** | Optionally POST files to your own server. Shows a share-link copy button on success. |
+| 💾 | **Session continuity** | `enableBackup: true` auto-saves the session to IndexedDB on tab hide/close and silently restores it after a page refresh — no prompts, no data loss. |
 | 🧩 | **Shadow DOM UI** | Floating button and modals are fully isolated from the host page's styles. |
 
 ---
@@ -141,6 +142,7 @@ window.__QA_RECORDER_CONFIG__ = {
   zIndex: 2147483647,        // z-index for all UI elements (default: max int).
   consoleLevels: ['error', 'warn'],  // Console levels to capture (default shown).
   maxConsoleEntries: 200,    // Max console entries in the circular buffer (default: 200).
+  enableBackup: false,       // Auto-save session to IndexedDB on tab hide/close and restore after refresh (default: false).
 };
 ```
 
@@ -152,6 +154,7 @@ window.__QA_RECORDER_CONFIG__ = {
 | `zIndex` | `number` | `2147483647` | z-index for all UI elements (button, progress bar, share panel). |
 | `consoleLevels` | `string[]` | `['error', 'warn']` | Console levels to capture. Valid values: `'error'`, `'warn'`, `'log'`, `'info'`. |
 | `maxConsoleEntries` | `number` | `200` | Max console entries to keep in the circular buffer. |
+| `enableBackup` | `boolean` | `false` | When `true`, auto-saves the current session to IndexedDB whenever the tab becomes hidden (refresh, close, navigate). On the next `init()`, the backup is silently restored into the current session buffers before recording continues. The 20-minute rolling window is always respected. |
 
 ---
 
@@ -243,7 +246,7 @@ The `qa-report-{timestamp}.html` file is a fully self-contained QA report — no
 ```bash
 pnpm install
 
-pnpm -F qa-recorder test      # run 134 tests (Vitest + jsdom)
+pnpm -F qa-recorder test      # run 164 tests (Vitest + jsdom)
 pnpm -F qa-recorder build     # build ESM + UMD to dist/
 pnpm -F qa-recorder dev       # watch mode
 pnpm -F qa-recorder demo      # local demo server (http://localhost:5173)

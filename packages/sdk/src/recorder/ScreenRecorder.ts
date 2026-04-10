@@ -53,6 +53,15 @@ export class ScreenRecorder {
     return new Blob([JSON.stringify(this.events)], { type: 'application/json' });
   }
 
+  /** 백업에서 복원된 이벤트를 버퍼 앞에 추가 (20분 초과분 자동 필터링) */
+  prependEvents(events: unknown[]): void {
+    const cutoff = Date.now() - 20 * 60 * 1000;
+    const filtered = events.filter(
+      (e) => ((e as { timestamp: number }).timestamp ?? 0) >= cutoff,
+    );
+    this.events = [...filtered, ...this.events];
+  }
+
   reset(): void {
     if (this.state === 'recording') return;
     this.events = [];

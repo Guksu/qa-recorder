@@ -11,6 +11,7 @@ describe('resolveConfig', () => {
     expect(config.endpoint).toBe('');
     expect(config.maxRequests).toBe(100);
     expect(config.maskHeaders).toEqual(['Authorization', 'Cookie', 'Set-Cookie']);
+    expect(config.enableBackup).toBe(false);
   });
 
   it('overrides로 endpoint를 설정한다', () => {

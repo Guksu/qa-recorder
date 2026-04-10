@@ -3,7 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/qa-recorder?color=crimson)](https://www.npmjs.com/package/qa-recorder)
 [![license](https://img.shields.io/npm/l/qa-recorder?color=blue)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![test](https://img.shields.io/badge/tests-134%20passing-brightgreen)](./packages/sdk)
+[![test](https://img.shields.io/badge/tests-164%20passing-brightgreen)](./packages/sdk)
 
 **버튼 하나로 DOM 세션 리플레이 + 네트워크 기록 + 콘솔 에러를 저장하는 웹 QA 라이브러리**
 
@@ -41,6 +41,7 @@
 | 🔒 | **헤더 마스킹** | `Authorization`, `Cookie` 등 민감 헤더 자동 마스킹. |
 | 📦 | **로컬 저장** | 파일 3종을 로컬에 다운로드 — 백엔드 불필요. |
 | ☁️ | **원격 업로드** | 서버 endpoint 설정 시 POST 업로드. 응답 URL이 있으면 링크 복사 버튼 노출. |
+| 💾 | **세션 연속성** | `enableBackup: true` 설정 시 탭 숨김/닫기 시 세션을 IndexedDB에 자동 저장하고 새로고침 후 조용히 복원 — 팝업 없음, 데이터 손실 없음. |
 | 🧩 | **Shadow DOM UI** | 플로팅 버튼과 팝업이 호스트 페이지 스타일과 완전히 격리. |
 
 ---
@@ -145,6 +146,7 @@ window.__QA_RECORDER_CONFIG__ = {
   zIndex: 2147483647,        // UI 요소의 z-index (기본값: 최대 정수).
   consoleLevels: ['error', 'warn'],  // 캡처할 콘솔 레벨 (기본값 표시).
   maxConsoleEntries: 200,    // 순환 버퍼 최대 콘솔 기록 수 (기본값: 200).
+  enableBackup: false,       // 탭 숨김/닫기 시 세션을 IndexedDB에 자동 저장하고 새로고침 후 복원 (기본값: false).
 };
 ```
 
@@ -156,6 +158,7 @@ window.__QA_RECORDER_CONFIG__ = {
 | `zIndex` | `number` | `2147483647` | UI 요소(버튼, 프로그레스 바, 공유 패널)의 z-index. |
 | `consoleLevels` | `string[]` | `['error', 'warn']` | 캡처할 콘솔 레벨. 유효값: `'error'`, `'warn'`, `'log'`, `'info'`. |
 | `maxConsoleEntries` | `number` | `200` | 순환 버퍼에 유지할 최대 콘솔 기록 수. |
+| `enableBackup` | `boolean` | `false` | `true`로 설정 시, 탭이 숨겨질 때(새로고침·닫기·이동) 현재 세션을 IndexedDB에 자동 저장. 다음 `init()` 호출 시 팝업 없이 현재 세션 버퍼에 조용히 복원. 최근 20분 롤링 윈도우는 항상 적용됨. |
 
 ---
 
@@ -247,7 +250,7 @@ window.__QA_RECORDER_CONFIG__ = {
 ```bash
 pnpm install
 
-pnpm -F qa-recorder test      # 테스트 실행 (Vitest + jsdom, 134개)
+pnpm -F qa-recorder test      # 테스트 실행 (Vitest + jsdom, 164개)
 pnpm -F qa-recorder build     # ESM + UMD 빌드
 pnpm -F qa-recorder dev       # watch 모드
 pnpm -F qa-recorder demo      # 로컬 데모 서버 (http://localhost:5173)

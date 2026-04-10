@@ -1,6 +1,6 @@
 {
   "name": "qa-recorder",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "description": "One-click QA recording for web apps — screen video + network activity, all in the browser.",
   "keywords": [
     "qa",
@@ -58,6 +58,7 @@
     "@types/busboy": "^1.5.4",
     "@vitest/coverage-v8": "^4.0.18",
     "busboy": "^1.6.0",
+    "fake-indexeddb": "^6.2.5",
     "jsdom": "^28.1.0",
     "rollup": "^4.0.0",
     "tslib": "^2.6.0",

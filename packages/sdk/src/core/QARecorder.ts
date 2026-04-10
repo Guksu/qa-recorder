@@ -8,6 +8,7 @@ import { ProgressBar } from '../ui/ProgressBar.js';
 import { SharePanel } from '../ui/SharePanel.js';
 import { LocalStorage } from '../storage/LocalStorage.js';
 import { RemoteDelivery } from '../storage/RemoteDelivery.js';
+import { IndexedDBBackup } from '../storage/IndexedDBBackup.js';
 import { HARBuilder } from '../network/HARBuilder.js';
 
 export class QARecorder {
@@ -16,6 +17,7 @@ export class QARecorder {
   private screenRecorder: ScreenRecorder;
   private consoleCapture: ConsoleCapture;
   private floatingButton: FloatingButton;
+  private visibilityHandler: (() => void) | null = null;
 
   constructor(overrides?: QARecorderConfig) {
     this.config = resolveConfig(overrides);
@@ -25,13 +27,49 @@ export class QARecorder {
     this.floatingButton = new FloatingButton(this.onButtonClick.bind(this), this.config.zIndex);
   }
 
-  /** 페이지 로드 후 초기화 — 즉시 녹화 시작 + 버튼 노출 */
   async init(): Promise<void> {
     this.networkCapture.start();
     this.screenRecorder.start();
     this.consoleCapture.start();
     this.floatingButton.mount();
     this.floatingButton.setState('recording');
+
+    if (this.config.enableBackup) {
+      /* 이전 세션 백업이 있으면 현재 세션 버퍼에 복원 */
+      if (await IndexedDBBackup.hasData()) {
+        await this.restoreFromBackup();
+      }
+
+      /* visibilitychange(hidden) 시 세션을 IDB에 저장 — pagehide보다 먼저 발생하여 async IDB 쓰기 완료 가능 */
+      this.visibilityHandler = () => {
+        if (document.visibilityState === 'hidden') { void this.saveBackup(); }
+      };
+      document.addEventListener('visibilitychange', this.visibilityHandler);
+    }
+  }
+
+  private async restoreFromBackup(): Promise<void> {
+    const backup = await IndexedDBBackup.load();
+    if (!backup) return;
+
+    this.screenRecorder.prependEvents(backup.events);
+    this.networkCapture.restoreEntries(
+      backup.harEntries as Parameters<typeof this.networkCapture.restoreEntries>[0],
+    );
+    this.consoleCapture.restoreEntries(
+      backup.consoleLogs as Parameters<typeof this.consoleCapture.restoreEntries>[0],
+    );
+
+    await IndexedDBBackup.clear();
+  }
+
+  async saveBackup(): Promise<void> {
+    await IndexedDBBackup.save({
+      events:      this.screenRecorder.getEvents() ?? [],
+      harEntries:  this.networkCapture.snapshot(),
+      consoleLogs: this.consoleCapture.snapshot(),
+      savedAt:     new Date().toISOString(),
+    });
   }
 
   private async onButtonClick(): Promise<void> {
@@ -63,6 +101,10 @@ export class QARecorder {
       ProgressBar.hide();
     }
 
+    if (this.config.enableBackup) {
+      await IndexedDBBackup.clear();
+    }
+
     this.screenRecorder.reset();
     this.networkCapture.clearBuffer();
     this.consoleCapture.clearBuffer();
@@ -70,16 +112,23 @@ export class QARecorder {
     this.floatingButton.setState('recording');
   }
 
-  /** 수동으로 녹화 중지 및 리소스 정리 */
   destroy(): void {
     this.networkCapture.stop();
     this.screenRecorder.stop();
     this.consoleCapture.stop();
     this.floatingButton.unmount();
+    if (this.visibilityHandler) {
+      document.removeEventListener('visibilitychange', this.visibilityHandler);
+      this.visibilityHandler = null;
+    }
   }
 
-  /** 디버그용: 현재 캡처된 네트워크 엔트리 반환 */
   getNetworkEntries() {
     return this.networkCapture.snapshot();
+  }
+
+  /** 데모/테스트용: 즉시 IndexedDB 백업 수행 */
+  _saveBackupForDemo(): Promise<void> {
+    return this.saveBackup();
   }
 }

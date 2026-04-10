@@ -41,6 +41,11 @@ export class NetworkCapture {
     return [...this.buffer];
   }
 
+  /** 백업에서 복원된 엔트리를 버퍼 앞에 추가 (maxRequests 초과분 앞에서 제거) */
+  restoreEntries(entries: HAREntry[]): void {
+    this.buffer = [...entries, ...this.buffer].slice(-this.maxRequests);
+  }
+
   private push(entry: HAREntry): void {
     if (this.buffer.length >= this.maxRequests) {
       this.buffer.shift(); // FIFO: 가장 오래된 항목 제거

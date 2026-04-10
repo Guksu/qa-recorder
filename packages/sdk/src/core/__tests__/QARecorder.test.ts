@@ -6,6 +6,10 @@ const mocks = vi.hoisted(() => ({
   record: vi.fn(),
   takeFullSnapshot: vi.fn(),
   confirmModalShow: vi.fn(),
+  idbHasData: vi.fn(),
+  idbSave: vi.fn(),
+  idbLoad: vi.fn(),
+  idbClear: vi.fn(),
 }));
 
 vi.mock('rrweb', () => ({
@@ -14,6 +18,15 @@ vi.mock('rrweb', () => ({
 
 vi.mock('../../ui/ConfirmModal.js', () => ({
   ConfirmModal: { show: mocks.confirmModalShow },
+}));
+
+vi.mock('../../storage/IndexedDBBackup.js', () => ({
+  IndexedDBBackup: {
+    hasData: mocks.idbHasData,
+    save: mocks.idbSave,
+    load: mocks.idbLoad,
+    clear: mocks.idbClear,
+  },
 }));
 
 beforeEach(() => {
@@ -25,6 +38,10 @@ beforeEach(() => {
     return mocks.stopFn;
   });
   mocks.confirmModalShow.mockResolvedValue({ confirmed: true, memo: '' });
+  mocks.idbHasData.mockResolvedValue(false);
+  mocks.idbSave.mockResolvedValue(undefined);
+  mocks.idbLoad.mockResolvedValue(null);
+  mocks.idbClear.mockResolvedValue(undefined);
 });
 
 describe('QARecorder', () => {
@@ -100,6 +117,53 @@ describe('QARecorder', () => {
 
     await vi.waitFor(() => expect(mocks.record).toHaveBeenCalledTimes(2));
     expect(btn.title).toBe('Stop and save recording');
+    recorder.destroy();
+  });
+
+  it('enableBackup: false(기본값)이면 백업 체크를 하지 않는다', async () => {
+    const recorder = new QARecorder();
+    await recorder.init();
+
+    expect(mocks.idbHasData).not.toHaveBeenCalled();
+    recorder.destroy();
+  });
+
+  it('enableBackup: true일 때 백업이 있으면 세션에 복원되고 다운로드는 발생하지 않는다', async () => {
+    mocks.idbHasData.mockResolvedValue(true);
+    mocks.idbLoad.mockResolvedValue({
+      events: [{ type: 2, data: {}, timestamp: Date.now() - 1000 }],
+      harEntries: [],
+      consoleLogs: [],
+      savedAt: new Date().toISOString(),
+    });
+
+    const recorder = new QARecorder({ enableBackup: true });
+    await recorder.init();
+
+    await vi.waitFor(() => expect(mocks.idbClear).toHaveBeenCalledOnce());
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+    recorder.destroy();
+  });
+
+  it('visibilitychange(hidden) 이벤트 시 IndexedDB에 현재 세션이 저장된다', async () => {
+    const recorder = new QARecorder({ enableBackup: true });
+    await recorder.init();
+
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+
+    await vi.waitFor(() => expect(mocks.idbSave).toHaveBeenCalledOnce());
+    recorder.destroy();
+  });
+
+  it('저장 완료 후 IndexedDB 백업이 초기화된다', async () => {
+    const recorder = new QARecorder({ enableBackup: true });
+    await recorder.init();
+
+    const host = document.getElementById('qa-recorder-root')!;
+    host.shadowRoot!.querySelector('button')!.click();
+
+    await vi.waitFor(() => expect(mocks.idbClear).toHaveBeenCalled());
     recorder.destroy();
   });
 });
