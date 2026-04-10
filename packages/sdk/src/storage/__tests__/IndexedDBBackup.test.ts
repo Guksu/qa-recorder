@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import 'fake-indexeddb/auto';
 import { IndexedDBBackup, type BackupData } from '../IndexedDBBackup.js';
 
@@ -13,6 +13,7 @@ function makeBackup(): BackupData {
 
 describe('IndexedDBBackup', () => {
   beforeEach(async () => {
+    /* fake-indexeddb는 모듈 간 상태를 공유하므로 각 테스트 전 데이터만 초기화 */
     await IndexedDBBackup.clear();
   });
 
@@ -62,5 +63,11 @@ describe('IndexedDBBackup', () => {
     await IndexedDBBackup.save({ ...makeBackup(), events: [{ type: 2 }] });
     const loaded = await IndexedDBBackup.load();
     expect((loaded!.events[0] as { type: number }).type).toBe(2);
+  });
+
+  it('warmUp()은 커넥션을 미리 열고 이후 save()가 즉시 실행된다', async () => {
+    await IndexedDBBackup.warmUp();
+    await IndexedDBBackup.save(makeBackup());
+    expect(await IndexedDBBackup.hasData()).toBe(true);
   });
 });

@@ -320,7 +320,6 @@ After save → recording resumes`,
     // ── UI 테스트용 임시 함수 ──
     import { ProgressBar } from '../src/ui/ProgressBar.ts';
     import { SharePanel } from '../src/ui/SharePanel.ts';
-    import { IndexedDBBackup } from '../src/storage/IndexedDBBackup.ts';
 
     window.testProgressBar = async () => {
       ProgressBar.show('Saving...');
@@ -340,32 +339,35 @@ After save → recording resumes`,
       Promise.reject(new Error('Intentional unhandled promise rejection'));
     };
 
-    // ── IndexedDB Backup 테스트 함수 ──
-    window.triggerBackup = async () => {
+    // ── Session Backup 테스트 함수 ──
+    window.triggerBackup = () => {
       const out = document.getElementById('backup-output');
-      out.textContent = '백업 중...';
       try {
-        await recorder._saveBackupForDemo();
-        const data = await IndexedDBBackup.load();
-        out.textContent = `✅ 백업 완료!\nevents: ${data.events.length}개\nharEntries: ${data.harEntries.length}개\nconsoleLogs: ${data.consoleLogs.length}개\nsavedAt: ${data.savedAt}\n\n👉 이제 페이지를 새로고침하면 복구 팝업이 뜹니다.`;
+        recorder._saveBackupForDemo();
+        const raw = sessionStorage.getItem('qa-recorder-backup');
+        const data = raw ? JSON.parse(raw) : null;
+        out.textContent = data
+          ? `✅ 백업 완료!\nevents: ${data.events.length}개\nharEntries: ${data.harEntries.length}개\nconsoleLogs: ${data.consoleLogs.length}개\nsavedAt: ${data.savedAt}\n\n👉 이제 페이지를 새로고침하면 자동 복원됩니다.`
+          : '❌ 백업 데이터 없음';
       } catch(e) {
         out.textContent = '❌ 오류: ' + e.message;
       }
     };
 
-    window.checkBackup = async () => {
+    window.checkBackup = () => {
       const out = document.getElementById('backup-output');
-      const data = await IndexedDBBackup.load();
-      if (!data) {
+      const raw = sessionStorage.getItem('qa-recorder-backup');
+      if (!raw) {
         out.textContent = '백업 없음';
       } else {
+        const data = JSON.parse(raw);
         out.textContent = `📦 백업 존재\nevents: ${data.events.length}개\nharEntries: ${data.harEntries.length}개\nconsoleLogs: ${data.consoleLogs.length}개\nsavedAt: ${data.savedAt}`;
       }
     };
 
-    window.clearBackup = async () => {
+    window.clearBackup = () => {
       const out = document.getElementById('backup-output');
-      await IndexedDBBackup.clear();
+      sessionStorage.removeItem('qa-recorder-backup');
       out.textContent = '🗑️ 백업 삭제 완료';
     };
 

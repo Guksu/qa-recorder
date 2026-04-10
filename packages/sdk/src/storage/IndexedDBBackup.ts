@@ -10,17 +10,26 @@ const STORE_NAME = 'backup';
 const RECORD_KEY = 'session';
 const DB_VERSION = 1;
 
-function openDB(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = () => {
-      if (!req.result.objectStoreNames.contains(STORE_NAME)) {
-        req.result.createObjectStore(STORE_NAME);
-      }
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror   = () => reject(req.error);
-  });
+/** 커넥션 캐시 — 한 번 열면 재사용하여 unload 시 빠른 저장 보장 */
+let dbPromise: Promise<IDBDatabase> | null = null;
+
+function getDB(): Promise<IDBDatabase> {
+  if (!dbPromise) {
+    dbPromise = new Promise((resolve, reject) => {
+      const req = indexedDB.open(DB_NAME, DB_VERSION);
+      req.onupgradeneeded = () => {
+        if (!req.result.objectStoreNames.contains(STORE_NAME)) {
+          req.result.createObjectStore(STORE_NAME);
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror   = () => {
+        dbPromise = null;
+        reject(req.error);
+      };
+    });
+  }
+  return dbPromise;
 }
 
 function txPut(db: IDBDatabase, data: BackupData): Promise<void> {
@@ -54,23 +63,24 @@ function txDelete(db: IDBDatabase): Promise<void> {
 }
 
 export class IndexedDBBackup {
+  /** init() 시점에 호출해 커넥션을 미리 열어둠 — visibilitychange 시 저장 속도 보장 */
+  static warmUp(): Promise<void> {
+    return getDB().then(() => undefined);
+  }
+
   static async save(data: BackupData): Promise<void> {
-    const db = await openDB();
+    const db = await getDB();
     await txPut(db, data);
-    db.close();
   }
 
   static async load(): Promise<BackupData | null> {
-    const db     = await openDB();
-    const result = await txGet(db);
-    db.close();
-    return result;
+    const db = await getDB();
+    return txGet(db);
   }
 
   static async clear(): Promise<void> {
-    const db = await openDB();
+    const db = await getDB();
     await txDelete(db);
-    db.close();
   }
 
   static async hasData(): Promise<boolean> {

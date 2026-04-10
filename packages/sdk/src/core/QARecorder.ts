@@ -8,8 +8,9 @@ import { ProgressBar } from '../ui/ProgressBar.js';
 import { SharePanel } from '../ui/SharePanel.js';
 import { LocalStorage } from '../storage/LocalStorage.js';
 import { RemoteDelivery } from '../storage/RemoteDelivery.js';
-import { IndexedDBBackup } from '../storage/IndexedDBBackup.js';
 import { HARBuilder } from '../network/HARBuilder.js';
+
+const SESSION_KEY = 'qa-recorder-backup';
 
 export class QARecorder {
   private config: Required<QARecorderConfig>;
@@ -17,7 +18,7 @@ export class QARecorder {
   private screenRecorder: ScreenRecorder;
   private consoleCapture: ConsoleCapture;
   private floatingButton: FloatingButton;
-  private visibilityHandler: (() => void) | null = null;
+  private pageHideHandler: (() => void) | null = null;
 
   constructor(overrides?: QARecorderConfig) {
     this.config = resolveConfig(overrides);
@@ -35,41 +36,48 @@ export class QARecorder {
     this.floatingButton.setState('recording');
 
     if (this.config.enableBackup) {
-      /* 이전 세션 백업이 있으면 현재 세션 버퍼에 복원 */
-      if (await IndexedDBBackup.hasData()) {
-        await this.restoreFromBackup();
-      }
+      /* 이전 세션 백업을 현재 세션 버퍼에 복원 (동기) */
+      this.restoreFromSessionStorage();
 
-      /* visibilitychange(hidden) 시 세션을 IDB에 저장 — pagehide보다 먼저 발생하여 async IDB 쓰기 완료 가능 */
-      this.visibilityHandler = () => {
-        if (document.visibilityState === 'hidden') { void this.saveBackup(); }
-      };
-      document.addEventListener('visibilitychange', this.visibilityHandler);
+      /* pagehide(새로고침/닫기/이동) 시 sessionStorage에 동기적으로 저장
+       * — async IDB는 페이지 종료 전 완료 보장 불가. sessionStorage는 동기 API라 항상 완료됨. */
+      this.pageHideHandler = () => { this.saveToSessionStorage(); };
+      window.addEventListener('pagehide', this.pageHideHandler);
     }
   }
 
-  private async restoreFromBackup(): Promise<void> {
-    const backup = await IndexedDBBackup.load();
-    if (!backup) return;
-
-    this.screenRecorder.prependEvents(backup.events);
-    this.networkCapture.restoreEntries(
-      backup.harEntries as Parameters<typeof this.networkCapture.restoreEntries>[0],
-    );
-    this.consoleCapture.restoreEntries(
-      backup.consoleLogs as Parameters<typeof this.consoleCapture.restoreEntries>[0],
-    );
-
-    await IndexedDBBackup.clear();
+  private saveToSessionStorage(): void {
+    try {
+      sessionStorage.setItem(SESSION_KEY, JSON.stringify({
+        events:      this.screenRecorder.getEvents(),
+        harEntries:  this.networkCapture.snapshot(),
+        consoleLogs: this.consoleCapture.snapshot(),
+        savedAt:     new Date().toISOString(),
+      }));
+    } catch {
+      /* sessionStorage 용량 초과 시 무시 */
+    }
   }
 
-  async saveBackup(): Promise<void> {
-    await IndexedDBBackup.save({
-      events:      this.screenRecorder.getEvents() ?? [],
-      harEntries:  this.networkCapture.snapshot(),
-      consoleLogs: this.consoleCapture.snapshot(),
-      savedAt:     new Date().toISOString(),
-    });
+  private restoreFromSessionStorage(): void {
+    try {
+      const raw = sessionStorage.getItem(SESSION_KEY);
+      if (!raw) return;
+
+      const backup = JSON.parse(raw) as {
+        events: unknown[];
+        harEntries: Parameters<typeof this.networkCapture.restoreEntries>[0];
+        consoleLogs: Parameters<typeof this.consoleCapture.restoreEntries>[0];
+      };
+
+      this.screenRecorder.prependEvents(backup.events);
+      this.networkCapture.restoreEntries(backup.harEntries);
+      this.consoleCapture.restoreEntries(backup.consoleLogs);
+    } catch {
+      /* 손상된 데이터 무시 */
+    } finally {
+      sessionStorage.removeItem(SESSION_KEY);
+    }
   }
 
   private async onButtonClick(): Promise<void> {
@@ -102,7 +110,7 @@ export class QARecorder {
     }
 
     if (this.config.enableBackup) {
-      await IndexedDBBackup.clear();
+      sessionStorage.removeItem(SESSION_KEY);
     }
 
     this.screenRecorder.reset();
@@ -117,9 +125,9 @@ export class QARecorder {
     this.screenRecorder.stop();
     this.consoleCapture.stop();
     this.floatingButton.unmount();
-    if (this.visibilityHandler) {
-      document.removeEventListener('visibilitychange', this.visibilityHandler);
-      this.visibilityHandler = null;
+    if (this.pageHideHandler) {
+      window.removeEventListener('pagehide', this.pageHideHandler);
+      this.pageHideHandler = null;
     }
   }
 
@@ -127,8 +135,8 @@ export class QARecorder {
     return this.networkCapture.snapshot();
   }
 
-  /** 데모/테스트용: 즉시 IndexedDB 백업 수행 */
-  _saveBackupForDemo(): Promise<void> {
-    return this.saveBackup();
+  /** 데모/테스트용: 즉시 sessionStorage 백업 수행 */
+  _saveBackupForDemo(): void {
+    this.saveToSessionStorage();
   }
 }
