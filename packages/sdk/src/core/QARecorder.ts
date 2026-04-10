@@ -9,6 +9,8 @@ import { SharePanel } from '../ui/SharePanel.js';
 import { LocalStorage } from '../storage/LocalStorage.js';
 import { RemoteDelivery } from '../storage/RemoteDelivery.js';
 import { HARBuilder } from '../network/HARBuilder.js';
+import type { HAREntry } from '@qa-recorder/shared';
+import type { ConsoleEntry } from '../console/ConsoleCapture.js';
 
 const SESSION_KEY = 'qa-recorder-backup';
 
@@ -66,8 +68,8 @@ export class QARecorder {
 
       const backup = JSON.parse(raw) as {
         events: unknown[];
-        harEntries: Parameters<typeof this.networkCapture.restoreEntries>[0];
-        consoleLogs: Parameters<typeof this.consoleCapture.restoreEntries>[0];
+        harEntries: HAREntry[];
+        consoleLogs: ConsoleEntry[];
       };
 
       this.screenRecorder.prependEvents(backup.events);
