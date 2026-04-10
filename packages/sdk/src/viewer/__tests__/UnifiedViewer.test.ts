@@ -103,4 +103,14 @@ describe('UnifiedViewer.generate', () => {
     const html = UnifiedViewer.generate(EVENTS, makeHARLog([makeEntry()]), []);
     expect(html).toMatch(/showNetDetail\(i,\s*tr\)/);
   });
+
+  it('memo가 있으면 리포트에 포함된다', () => {
+    const html = UnifiedViewer.generate(EVENTS, makeHARLog(), [], '로그인 500 에러 재현');
+    expect(html).toContain('로그인 500 에러 재현');
+  });
+
+  it('memo가 없으면 memo 섹션이 렌더링되지 않는다', () => {
+    const html = UnifiedViewer.generate(EVENTS, makeHARLog(), [], '');
+    expect(html).not.toContain('qa-memo-section');
+  });
 });

@@ -3,7 +3,7 @@ import type { ConsoleEntry } from '../console/ConsoleCapture.js';
 import { UnifiedViewer } from '../viewer/UnifiedViewer.js';
 
 export class LocalStorage {
-  static async save(sessionEvents: unknown[] | null, harLog: HARLog, consoleLogs: ConsoleEntry[] = []): Promise<void> {
+  static async save(sessionEvents: unknown[] | null, harLog: HARLog, consoleLogs: ConsoleEntry[] = [], memo = ''): Promise<void> {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
 
     if (sessionEvents) {
@@ -20,7 +20,7 @@ export class LocalStorage {
       `qa-network-${timestamp}.har`,
     );
 
-    const reportHtml = UnifiedViewer.generate(sessionEvents ?? [], harLog, consoleLogs);
+    const reportHtml = UnifiedViewer.generate(sessionEvents ?? [], harLog, consoleLogs, memo);
     LocalStorage.downloadBlob(
       new Blob([reportHtml], { type: 'text/html' }),
       `qa-report-${timestamp}.html`,

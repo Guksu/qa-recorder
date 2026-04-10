@@ -3,6 +3,7 @@ import { NetworkCapture } from '../network/NetworkCapture.js';
 import { ScreenRecorder } from '../recorder/ScreenRecorder.js';
 import { ConsoleCapture } from '../console/ConsoleCapture.js';
 import { FloatingButton } from '../ui/FloatingButton.js';
+import { ConfirmModal } from '../ui/ConfirmModal.js';
 import { ProgressBar } from '../ui/ProgressBar.js';
 import { SharePanel } from '../ui/SharePanel.js';
 import { LocalStorage } from '../storage/LocalStorage.js';
@@ -34,6 +35,9 @@ export class QARecorder {
   }
 
   private async onButtonClick(): Promise<void> {
+    const { confirmed, memo } = await ConfirmModal.show('Save this QA session?');
+    if (!confirmed) return;
+
     this.screenRecorder.stop();
 
     const harLog = HARBuilder.build(this.networkCapture.snapshot());
@@ -46,6 +50,7 @@ export class QARecorder {
         const url = await new RemoteDelivery(this.config.endpoint).send(
           this.screenRecorder.getBlob(),
           harLog,
+          memo,
         );
         ProgressBar.hide();
         if (url) SharePanel.show(url, this.config.zIndex);
@@ -54,7 +59,7 @@ export class QARecorder {
         alert(`Upload failed: ${err instanceof Error ? err.message : String(err)}`);
       }
     } else {
-      await LocalStorage.save(this.screenRecorder.getEvents(), harLog, consoleLogs);
+      await LocalStorage.save(this.screenRecorder.getEvents(), harLog, consoleLogs, memo);
       ProgressBar.hide();
     }
 

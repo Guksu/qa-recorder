@@ -107,4 +107,12 @@ describe('LocalStorage.save', () => {
     await LocalStorage.save(null, makeHARLog());
     expect(clickedLinks).toHaveLength(2);
   });
+
+  it('memo가 있으면 통합 뷰어 HTML에 포함된다', async () => {
+    await LocalStorage.save(makeEvents(), makeHARLog(), [], '결제 버튼 오류');
+    const createObjectURL = URL.createObjectURL as ReturnType<typeof vi.fn>;
+    const reportBlob: Blob = createObjectURL.mock.calls[2][0];
+    const text = await reportBlob.text();
+    expect(text).toContain('결제 버튼 오류');
+  });
 });

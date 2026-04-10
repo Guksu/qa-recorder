@@ -2,10 +2,13 @@ import type { HARLog } from '@qa-recorder/shared';
 import type { ConsoleEntry } from '../console/ConsoleCapture.js';
 
 export class UnifiedViewer {
-  static generate(events: unknown[], harLog: HARLog, consoleLogs: ConsoleEntry[]): string {
+  static generate(events: unknown[], harLog: HARLog, consoleLogs: ConsoleEntry[], memo = ''): string {
     const eventsJson  = JSON.stringify(events);
     const entriesJson = JSON.stringify(harLog.entries);
     const consoleJson = JSON.stringify(consoleLogs);
+    const memoHtml    = memo
+      ? `<div id="qa-memo-section" class="qa-memo"><span class="qa-memo-icon">📝</span><span class="qa-memo-text">${memo.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span></div>`
+      : '';
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -43,6 +46,22 @@ export class UnifiedViewer {
     .brand-name { font-size: 13px; font-weight: 600; color: #0f172a; }
     .header-divider { width: 1px; height: 16px; background: #e2e8f0; }
     .header-meta { font-size: 11px; color: #94a3b8; }
+    .qa-memo {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      background: #fffbeb;
+      border: 1px solid #fde68a;
+      border-radius: 6px;
+      padding: 8px 12px;
+      margin: 0 16px 0 0;
+      font-size: 12px;
+      color: #92400e;
+      max-width: 480px;
+      flex-shrink: 1;
+    }
+    .qa-memo-icon { flex-shrink: 0; }
+    .qa-memo-text { word-break: break-word; }
 
     /* ── Main layout ── */
     #main {
@@ -398,6 +417,7 @@ export class UnifiedViewer {
     </div>
     <div class="header-divider"></div>
     <span class="header-meta" id="meta"></span>
+    ${memoHtml}
   </header>
 
   <div id="main">

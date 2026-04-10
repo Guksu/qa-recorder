@@ -5,10 +5,15 @@ const mocks = vi.hoisted(() => ({
   stopFn: vi.fn(),
   record: vi.fn(),
   takeFullSnapshot: vi.fn(),
+  confirmModalShow: vi.fn(),
 }));
 
 vi.mock('rrweb', () => ({
   record: Object.assign(mocks.record, { takeFullSnapshot: mocks.takeFullSnapshot }),
+}));
+
+vi.mock('../../ui/ConfirmModal.js', () => ({
+  ConfirmModal: { show: mocks.confirmModalShow },
 }));
 
 beforeEach(() => {
@@ -19,6 +24,7 @@ beforeEach(() => {
     emit({ type: 2, data: {}, timestamp: 1000 });
     return mocks.stopFn;
   });
+  mocks.confirmModalShow.mockResolvedValue({ confirmed: true, memo: '' });
 });
 
 describe('QARecorder', () => {
@@ -38,16 +44,38 @@ describe('QARecorder', () => {
     recorder.destroy();
   });
 
-  it('버튼 클릭 시 확인 없이 바로 파일이 저장된다', async () => {
+  it('버튼 클릭 시 ConfirmModal이 표시된다', async () => {
     const recorder = new QARecorder();
     await recorder.init();
 
     const host = document.getElementById('qa-recorder-root')!;
     host.shadowRoot!.querySelector('button')!.click();
 
-    await vi.waitFor(() =>
-      expect(URL.createObjectURL).toHaveBeenCalled()
-    );
+    await vi.waitFor(() => expect(mocks.confirmModalShow).toHaveBeenCalledOnce());
+    recorder.destroy();
+  });
+
+  it('확인 시 파일이 저장된다', async () => {
+    const recorder = new QARecorder();
+    await recorder.init();
+
+    const host = document.getElementById('qa-recorder-root')!;
+    host.shadowRoot!.querySelector('button')!.click();
+
+    await vi.waitFor(() => expect(URL.createObjectURL).toHaveBeenCalled());
+    recorder.destroy();
+  });
+
+  it('취소 시 파일이 저장되지 않는다', async () => {
+    mocks.confirmModalShow.mockResolvedValue({ confirmed: false, memo: '' });
+    const recorder = new QARecorder();
+    await recorder.init();
+
+    const host = document.getElementById('qa-recorder-root')!;
+    host.shadowRoot!.querySelector('button')!.click();
+
+    await vi.waitFor(() => expect(mocks.confirmModalShow).toHaveBeenCalledOnce());
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
     recorder.destroy();
   });
 
@@ -58,9 +86,7 @@ describe('QARecorder', () => {
     const host = document.getElementById('qa-recorder-root')!;
     host.shadowRoot!.querySelector('button')!.click();
 
-    await vi.waitFor(() =>
-      expect(mocks.record).toHaveBeenCalledTimes(2)
-    );
+    await vi.waitFor(() => expect(mocks.record).toHaveBeenCalledTimes(2));
     recorder.destroy();
   });
 

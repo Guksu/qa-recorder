@@ -113,4 +113,20 @@ describe('RemoteDelivery.send', () => {
     expect(body.get('session')).toBeNull();
     expect(body.get('har')).toBeInstanceOf(Blob);
   });
+
+  it('memo가 있으면 FormData에 포함된다', async () => {
+    const delivery = new RemoteDelivery('https://example.com/upload');
+    await delivery.send(null, makeHARLog(), '결제 오류 메모');
+
+    const body: FormData = (fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body;
+    expect(body.get('memo')).toBe('결제 오류 메모');
+  });
+
+  it('memo가 없으면 FormData에 memo 필드가 없다', async () => {
+    const delivery = new RemoteDelivery('https://example.com/upload');
+    await delivery.send(null, makeHARLog());
+
+    const body: FormData = (fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body;
+    expect(body.get('memo')).toBeNull();
+  });
 });
