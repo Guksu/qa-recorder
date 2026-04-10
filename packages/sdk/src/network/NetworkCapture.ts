@@ -10,11 +10,13 @@ export class NetworkCapture {
   private originalFetch: typeof fetch;
   private originalXHROpen: typeof XMLHttpRequest.prototype.open;
   private recordingStartedAt: Date | null = null;
+  private readonly maskSet: Set<string>;
 
   constructor(
     private readonly maxRequests: number,
-    private readonly maskHeaders: string[],
+    maskHeaders: string[],
   ) {
+    this.maskSet = new Set(maskHeaders.map((h) => h.toLowerCase()));
     this.originalFetch = window.fetch;
     this.originalXHROpen = XMLHttpRequest.prototype.open;
   }
@@ -101,7 +103,7 @@ export class NetworkCapture {
             },
             timings: { send: 0, wait: elapsed, receive: 0 },
           },
-          self.maskHeaders,
+          self.maskSet,
         ),
       );
       return response;
@@ -190,10 +192,10 @@ export class NetworkCapture {
                 },
                 timings: { send: 0, wait: elapsed, receive: 0 },
               },
-              self.maskHeaders,
+              self.maskSet,
             ),
           );
-        });
+        }, { once: true });
 
         return originalSend(body);
       };

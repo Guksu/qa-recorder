@@ -77,7 +77,7 @@ export class FloatingButton {
       const onMove = (ev: MouseEvent) => {
         const dx = ev.clientX - startX;
         const dy = ev.clientY - startY;
-        if (!dragged && Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
+        if (!dragged && Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
         dragged = true;
         btn.style.cursor = 'grabbing';
 

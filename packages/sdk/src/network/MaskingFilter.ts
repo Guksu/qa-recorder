@@ -3,9 +3,8 @@ import type { HAREntry } from '@qa-recorder/shared';
 const MASKED = '[MASKED]';
 
 export class MaskingFilter {
-  static apply(entry: HAREntry, maskHeaders: string[]): HAREntry {
-    const maskSet = new Set(maskHeaders.map((h) => h.toLowerCase()));
-
+  /** maskSet は呼び出し元で一度だけ生成し再利用すること (lowercase 済みの Set<string>) */
+  static apply(entry: HAREntry, maskSet: Set<string>): HAREntry {
     const maskHeaderList = (headers: { name: string; value: string }[]) =>
       headers.map((h) => ({
         name: h.name,

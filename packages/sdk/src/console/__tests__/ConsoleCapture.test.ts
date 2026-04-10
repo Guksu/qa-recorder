@@ -120,6 +120,16 @@ describe('ConsoleCapture', () => {
     expect(capture.snapshot()).toHaveLength(2);
   });
 
+  it('순환 참조 객체는 String() 변환으로 기록된다', () => {
+    capture.start();
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    console.error(circular);
+    const msg = capture.snapshot()[0].message;
+    expect(msg).not.toBe('[unserializable]');
+    expect(msg.length).toBeGreaterThan(0);
+  });
+
   it('consoleLevels 옵션으로 log도 캡처할 수 있다', () => {
     capture = new ConsoleCapture(200, ['error', 'warn', 'log']);
     capture.start();

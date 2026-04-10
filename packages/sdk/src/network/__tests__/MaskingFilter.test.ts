@@ -34,41 +34,41 @@ function makeEntry(
 describe('MaskingFilter.apply', () => {
   it('지정된 요청 헤더를 [MASKED]로 대체한다', () => {
     const entry = makeEntry([{ name: 'Authorization', value: 'Bearer secret' }]);
-    const result = MaskingFilter.apply(entry, ['Authorization']);
+    const result = MaskingFilter.apply(entry, new Set(['authorization']));
     expect(result.request.headers[0].value).toBe('[MASKED]');
   });
 
   it('지정된 응답 헤더를 [MASKED]로 대체한다', () => {
     const entry = makeEntry([], [{ name: 'Set-Cookie', value: 'session=abc' }]);
-    const result = MaskingFilter.apply(entry, ['Set-Cookie']);
+    const result = MaskingFilter.apply(entry, new Set(['set-cookie']));
     expect(result.response.headers[0].value).toBe('[MASKED]');
   });
 
   it('헤더 이름은 대소문자를 구분하지 않는다', () => {
     const entry = makeEntry([{ name: 'AUTHORIZATION', value: 'Bearer secret' }]);
-    const result = MaskingFilter.apply(entry, ['authorization']);
+    const result = MaskingFilter.apply(entry, new Set(['authorization']));
     expect(result.request.headers[0].value).toBe('[MASKED]');
   });
 
   it('마스킹 목록에 없는 헤더는 원본 값을 유지한다', () => {
     const entry = makeEntry([{ name: 'Content-Type', value: 'application/json' }]);
-    const result = MaskingFilter.apply(entry, ['Authorization']);
+    const result = MaskingFilter.apply(entry, new Set(['authorization']));
     expect(result.request.headers[0].value).toBe('application/json');
   });
 
-  it('maskHeaders가 빈 배열이면 아무것도 마스킹하지 않는다', () => {
+  it('maskSet이 비어 있으면 아무것도 마스킹하지 않는다', () => {
     const entry = makeEntry([
       { name: 'Authorization', value: 'Bearer secret' },
       { name: 'Cookie', value: 'session=abc' },
     ]);
-    const result = MaskingFilter.apply(entry, []);
+    const result = MaskingFilter.apply(entry, new Set());
     expect(result.request.headers[0].value).toBe('Bearer secret');
     expect(result.request.headers[1].value).toBe('session=abc');
   });
 
   it('원본 entry를 변경하지 않는다 (불변성)', () => {
     const entry = makeEntry([{ name: 'Authorization', value: 'Bearer secret' }]);
-    MaskingFilter.apply(entry, ['Authorization']);
+    MaskingFilter.apply(entry, new Set(['authorization']));
     expect(entry.request.headers[0].value).toBe('Bearer secret');
   });
 });

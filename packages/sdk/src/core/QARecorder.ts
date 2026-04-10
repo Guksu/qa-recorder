@@ -100,6 +100,7 @@ export class QARecorder {
         );
         ProgressBar.hide();
         if (url) SharePanel.show(url, this.config.zIndex);
+        else alert('Upload complete.');
       } catch (err) {
         ProgressBar.hide();
         alert(`Upload failed: ${err instanceof Error ? err.message : String(err)}`);

@@ -95,7 +95,7 @@ export class ConsoleCapture {
         try {
           return typeof a === 'object' ? JSON.stringify(a) : String(a);
         } catch {
-          return '[unserializable]';
+          try { return String(a); } catch { return '[unserializable]'; }
         }
       })
       .join(' ');

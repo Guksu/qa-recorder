@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   takeFullSnapshot: vi.fn(),
   confirmModalShow: vi.fn(),
   localStorageSave: vi.fn(),
+  remoteDeliverySend: vi.fn(),
 }));
 
 vi.mock('rrweb', () => ({
@@ -19,6 +20,12 @@ vi.mock('../../ui/ConfirmModal.js', () => ({
 
 vi.mock('../../storage/LocalStorage.js', () => ({
   LocalStorage: { save: mocks.localStorageSave },
+}));
+
+vi.mock('../../storage/RemoteDelivery.js', () => ({
+  RemoteDelivery: class {
+    send(...args: unknown[]) { return mocks.remoteDeliverySend(...args); }
+  },
 }));
 
 const sessionStorageMock = (() => {
@@ -43,6 +50,7 @@ beforeEach(() => {
   });
   mocks.confirmModalShow.mockResolvedValue({ confirmed: true, memo: '' });
   mocks.localStorageSave.mockResolvedValue(undefined);
+  mocks.remoteDeliverySend.mockResolvedValue(undefined);
 });
 
 describe('QARecorder', () => {
@@ -159,6 +167,20 @@ describe('QARecorder', () => {
     expect(sessionStorageMock.getItem).toHaveBeenCalledWith('qa-recorder-backup');
     expect(sessionStorageMock.removeItem).toHaveBeenCalledWith('qa-recorder-backup');
     recorder.destroy();
+  });
+
+  it('endpoint 설정 시 업로드 성공 후 URL이 없으면 "Upload complete." alert를 표시한다', async () => {
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    mocks.remoteDeliverySend.mockResolvedValue(undefined);
+    const recorder = new QARecorder({ endpoint: 'https://example.com/upload' });
+    await recorder.init();
+
+    const host = document.getElementById('qa-recorder-root')!;
+    host.shadowRoot!.querySelector('button')!.click();
+
+    await vi.waitFor(() => expect(alertSpy).toHaveBeenCalledWith('Upload complete.'));
+    recorder.destroy();
+    alertSpy.mockRestore();
   });
 
   it('저장 완료 후 sessionStorage 백업이 초기화된다', async () => {

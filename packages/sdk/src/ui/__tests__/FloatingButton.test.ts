@@ -55,4 +55,34 @@ describe('FloatingButton', () => {
     const style = host.shadowRoot!.querySelector('style')!;
     expect(style.textContent).toContain('z-index: 2147483647');
   });
+
+  it('8px 미만의 마우스 이동은 드래그로 인식되지 않아 클릭 콜백이 호출된다', () => {
+    const onClick = vi.fn();
+    const floatingBtn = new FloatingButton(onClick);
+    floatingBtn.mount();
+    const host = document.getElementById('qa-recorder-root')!;
+    const button = host.shadowRoot!.querySelector('button')!;
+
+    button.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 100, clientY: 100, button: 0 }));
+    document.dispatchEvent(new MouseEvent('mousemove', { clientX: 105, clientY: 103 })); // 5px — 8px 미만
+    document.dispatchEvent(new MouseEvent('mouseup', {}));
+    button.click();
+
+    expect(onClick).toHaveBeenCalledOnce();
+  });
+
+  it('8px 이상의 마우스 이동은 드래그로 인식되어 클릭 콜백이 호출되지 않는다', () => {
+    const onClick = vi.fn();
+    const floatingBtn = new FloatingButton(onClick);
+    floatingBtn.mount();
+    const host = document.getElementById('qa-recorder-root')!;
+    const button = host.shadowRoot!.querySelector('button')!;
+
+    button.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 100, clientY: 100, button: 0 }));
+    document.dispatchEvent(new MouseEvent('mousemove', { clientX: 110, clientY: 100 })); // 10px — 8px 이상
+    document.dispatchEvent(new MouseEvent('mouseup', {}));
+    button.click();
+
+    expect(onClick).not.toHaveBeenCalled();
+  });
 });
