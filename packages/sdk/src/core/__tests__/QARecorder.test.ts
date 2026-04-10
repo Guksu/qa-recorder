@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   record: vi.fn(),
   takeFullSnapshot: vi.fn(),
   confirmModalShow: vi.fn(),
+  localStorageSave: vi.fn(),
   idbHasData: vi.fn(),
   idbSave: vi.fn(),
   idbLoad: vi.fn(),
@@ -29,6 +30,10 @@ vi.mock('../../storage/IndexedDBBackup.js', () => ({
   },
 }));
 
+vi.mock('../../storage/LocalStorage.js', () => ({
+  LocalStorage: { save: mocks.localStorageSave },
+}));
+
 beforeEach(() => {
   vi.clearAllMocks();
   document.body.innerHTML = '';
@@ -38,6 +43,7 @@ beforeEach(() => {
     return mocks.stopFn;
   });
   mocks.confirmModalShow.mockResolvedValue({ confirmed: true, memo: '' });
+  mocks.localStorageSave.mockResolvedValue(undefined);
   mocks.idbHasData.mockResolvedValue(false);
   mocks.idbSave.mockResolvedValue(undefined);
   mocks.idbLoad.mockResolvedValue(null);
@@ -79,7 +85,7 @@ describe('QARecorder', () => {
     const host = document.getElementById('qa-recorder-root')!;
     host.shadowRoot!.querySelector('button')!.click();
 
-    await vi.waitFor(() => expect(URL.createObjectURL).toHaveBeenCalled());
+    await vi.waitFor(() => expect(mocks.localStorageSave).toHaveBeenCalledOnce());
     recorder.destroy();
   });
 
