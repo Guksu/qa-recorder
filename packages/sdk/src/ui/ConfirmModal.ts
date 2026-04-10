@@ -40,7 +40,6 @@ export class ConfirmModal {
       overlay.innerHTML = `
         <div class="qa-modal">
           <h3>${message}</h3>
-          <p>The last 20 minutes of DOM session and network log will be downloaded.</p>
           <label class="qa-memo-label">Bug memo (optional)</label>
           <textarea class="qa-memo-textarea" id="qa-memo" placeholder="Describe what happened..."></textarea>
           <div class="qa-modal-actions">
