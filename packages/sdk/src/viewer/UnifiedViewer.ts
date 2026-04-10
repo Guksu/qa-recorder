@@ -445,9 +445,9 @@ export class UnifiedViewer {
             <span id="t-total">0:00</span>
           </div>
           <div class="controls-right">
-            <button class="speed-btn active" onclick="setSpeed(1)">1×</button>
-            <button class="speed-btn" onclick="setSpeed(2)">2×</button>
-            <button class="speed-btn" onclick="setSpeed(4)">4×</button>
+            <button class="speed-btn active" onclick="setSpeed(1, event)">1×</button>
+            <button class="speed-btn" onclick="setSpeed(2, event)">2×</button>
+            <button class="speed-btn" onclick="setSpeed(4, event)">4×</button>
           </div>
         </div>
       </div>
@@ -628,12 +628,12 @@ export class UnifiedViewer {
       }
     };
 
-    window.setSpeed = (s) => {
+    window.setSpeed = (s, e) => {
       speed = s;
       if (replayer) replayer.setConfig({ speed: s });
       if (playing) { stopTicker(); startTicker(); }
       document.querySelectorAll('.speed-btn').forEach(b => b.classList.remove('active'));
-      event.target.classList.add('active');
+      (e.target as HTMLElement).classList.add('active');
     };
 
     /* Timeline seek */
