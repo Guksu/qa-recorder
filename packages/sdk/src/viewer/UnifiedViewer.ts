@@ -633,7 +633,7 @@ export class UnifiedViewer {
       if (replayer) replayer.setConfig({ speed: s });
       if (playing) { stopTicker(); startTicker(); }
       document.querySelectorAll('.speed-btn').forEach(b => b.classList.remove('active'));
-      (e.target as HTMLElement).classList.add('active');
+      e.target.classList.add('active');
     };
 
     /* Timeline seek */
