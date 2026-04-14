@@ -60,17 +60,51 @@ Or drop it in via `<script>` tag (UMD build, no bundler required):
 
 ## Quick Start
 
-### ESM / npm
+### Vanilla JS
 
 ```ts
 import { QARecorder } from 'qa-recorder';
 
-const recorder = new QARecorder();
-await recorder.init();
+QARecorder.setup({
+  enableBackup: true,
+});
 // Recording starts immediately — no permission prompt, no click needed.
 // A red floating button appears in the bottom-right corner.
 // The last 20 minutes are always available in memory.
 // 1 click → confirm → one ZIP file downloads automatically → recording continues.
+```
+
+### React
+
+Call `QARecorder.setup()` at the module level — outside any component or hook. This is safe even in React StrictMode since `setup()` is idempotent (subsequent calls are no-ops).
+
+```ts
+// main.tsx
+import { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
+import { QARecorder } from 'qa-recorder';
+import App from './App';
+
+QARecorder.setup({ enableBackup: true });
+
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <App />
+  </StrictMode>
+);
+```
+
+### Vue
+
+```ts
+// main.ts
+import { createApp } from 'vue';
+import { QARecorder } from 'qa-recorder';
+import App from './App.vue';
+
+QARecorder.setup({ enableBackup: true });
+
+createApp(App).mount('#app');
 ```
 
 ### Script tag
@@ -78,6 +112,7 @@ await recorder.init();
 ```html
 <script>
   window.__QA_RECORDER_CONFIG__ = {
+    enableBackup: true,
     maxRequests: 100,
     maskHeaders: ['Authorization', 'Cookie'],
   };

@@ -95,6 +95,19 @@
     <pre id="buffer-output"></pre>
   </div>
 
+  <div class="section" style="border-color:#3b82f6; background:#eff6ff;">
+    <h2 style="color:#1d4ed8;" id="section-integration-title"></h2>
+    <p style="color:#1e40af; margin-bottom:16px; font-size:14px;" id="section-integration-desc"></p>
+
+    <div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;" id="framework-tabs">
+      <button style="padding:5px 14px; border:1px solid #3b82f6; border-radius:6px; cursor:pointer; background:#3b82f6; color:#fff; font-size:12px; font-weight:600;" onclick="setFramework('vanilla')">Vanilla JS</button>
+      <button style="padding:5px 14px; border:1px solid #cbd5e0; border-radius:6px; cursor:pointer; background:#fff; color:#4a5568; font-size:12px; font-weight:600;" onclick="setFramework('react')">React</button>
+      <button style="padding:5px 14px; border:1px solid #cbd5e0; border-radius:6px; cursor:pointer; background:#fff; color:#4a5568; font-size:12px; font-weight:600;" onclick="setFramework('vue')">Vue</button>
+      <button style="padding:5px 14px; border:1px solid #cbd5e0; border-radius:6px; cursor:pointer; background:#fff; color:#4a5568; font-size:12px; font-weight:600;" onclick="setFramework('script')">Script tag</button>
+    </div>
+    <pre id="integration-code" style="margin:0;"></pre>
+  </div>
+
   <div class="section" style="border-color:#a78bfa; background:#f5f3ff;">
     <h2 style="color:#5b21b6;">🖥️ Console Capture Test</h2>
     <p style="color:#6d28d9; margin-bottom:12px;">콘솔 로그를 발생시킨 후 저장하면 QA 리포트의 Console 패널에서 확인할 수 있습니다.</p>
@@ -109,6 +122,8 @@
   <script>
     const i18n = {
       ko: {
+        integrationTitle: '프레임워크별 사용법',
+        integrationDesc: 'QARecorder.setup()은 멱등성을 보장합니다 — React StrictMode의 이중 실행에도 안전하게 동작합니다.',
         subtitle: '우측 하단의 버튼이 QA Recorder입니다. 페이지가 열린 순간부터 <strong>자동으로 녹화</strong>가 시작됩니다 (최근 20분 유지). 버튼을 클릭하면 확인 후 저장되고, 녹화는 자동으로 재시작됩니다.',
         section1Title: '동작 흐름',
         modeLabel: '저장 방식',
@@ -155,6 +170,8 @@
         bufferTotal: (n) => `총 ${n}건`,
       },
       en: {
+        integrationTitle: 'Framework Integration',
+        integrationDesc: 'QARecorder.setup() is idempotent — safe to call multiple times, including React StrictMode double-invocation.',
         subtitle: 'The button in the bottom-right is QA Recorder. <strong>Recording starts automatically</strong> when the page loads — no click needed. It keeps the last 20 minutes in memory. Click the button once to save, and recording resumes automatically.',
         section1Title: 'How it works',
         modeLabel: 'Save mode',
@@ -202,8 +219,44 @@ After save → buffers reset + recording resumes`,
       },
     };
 
+    const integrationCode = {
+      vanilla: `import { QARecorder } from 'qa-recorder';
+
+QARecorder.setup({ enableBackup: true });`,
+      react: `// main.tsx
+import { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
+import { QARecorder } from 'qa-recorder';
+import App from './App';
+
+QARecorder.setup({ enableBackup: true });
+
+createRoot(document.getElementById('root')).render(
+  <StrictMode>
+    <App />
+  </StrictMode>
+);`,
+      vue: `// main.ts
+import { createApp } from 'vue';
+import { QARecorder } from 'qa-recorder';
+import App from './App.vue';
+
+QARecorder.setup({ enableBackup: true });
+
+createApp(App).mount('#app');`,
+      script: `<script>
+  window.__QA_RECORDER_CONFIG__ = {
+    enableBackup: true,
+    maxRequests: 100,
+    maskHeaders: ['Authorization', 'Cookie'],
+  };
+<\/script>
+<script src="https://unpkg.com/qa-recorder/dist/qa-recorder.umd.js"><\/script>`,
+    };
+
     let lang = 'ko';
     let mode = 'local';
+    let framework = 'vanilla';
 
     function setLang(l) {
       lang = l;
@@ -221,9 +274,26 @@ After save → buffers reset + recording resumes`,
       if (window.__reinitRecorder) window.__reinitRecorder(m);
     }
 
+    function setFramework(f) {
+      framework = f;
+      const tabs = document.getElementById('framework-tabs').querySelectorAll('button');
+      const labels = ['vanilla', 'react', 'vue', 'script'];
+      tabs.forEach((btn, i) => {
+        const active = labels[i] === f;
+        btn.style.background = active ? '#3b82f6' : '#fff';
+        btn.style.color = active ? '#fff' : '#4a5568';
+        btn.style.borderColor = active ? '#3b82f6' : '#cbd5e0';
+      });
+      document.getElementById('integration-code').textContent = integrationCode[f];
+    }
+
     function render() {
       const t = i18n[lang];
       const isRemote = mode === 'remote';
+
+      document.getElementById('section-integration-title').textContent = t.integrationTitle;
+      document.getElementById('section-integration-desc').textContent = t.integrationDesc;
+      document.getElementById('integration-code').textContent = integrationCode[framework];
 
       document.getElementById('subtitle').innerHTML = t.subtitle;
       document.getElementById('mode-label').textContent = t.modeLabel;
