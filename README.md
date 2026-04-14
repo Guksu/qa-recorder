@@ -35,7 +35,7 @@ No backend required. No browser extension. No screen share permission. Just add 
 | 📋 | **Unified QA report** | Single self-contained HTML: session replay (left) + network inspector + console log (right). Time-synchronized — clicking a network row or console entry seeks to that exact moment. |
 | 🔍 | **Network detail panel** | Click any request row to inspect Headers, Payload, Response, and Timing — Chrome DevTools style. |
 | 🔒 | **Header masking** | `Authorization`, `Cookie`, and custom headers are automatically redacted. |
-| 📦 | **Local save** | Downloads 3 files directly — no backend needed. |
+| 📦 | **Local save** | Downloads a single ZIP file directly — no backend needed. |
 | ☁️ | **Remote upload** | Optionally POST files to your own server. Shows a share-link copy button on success. |
 | 💾 | **Session continuity** | `enableBackup: true` auto-saves the session to IndexedDB on tab hide/close and silently restores it after a page refresh — no prompts, no data loss. |
 | 🧩 | **Shadow DOM UI** | Floating button and modals are fully isolated from the host page's styles. |
@@ -70,7 +70,7 @@ await recorder.init();
 // Recording starts immediately — no permission prompt, no click needed.
 // A red floating button appears in the bottom-right corner.
 // The last 20 minutes are always available in memory.
-// 1 click → confirm → three files download automatically → recording continues.
+// 1 click → confirm → one ZIP file downloads automatically → recording continues.
 ```
 
 ### Script tag
@@ -91,10 +91,11 @@ await recorder.init();
 
 ### Local (default)
 
-When no `endpoint` is configured, three files are downloaded to the user's device:
+When no `endpoint` is configured, a single ZIP file is downloaded to the user's device:
 
 | File | Contents |
 |---|---|
+| `qa-report-{timestamp}.zip` | Contains all three files below |
 | `qa-session-{timestamp}.rr.json` | DOM session replay (rrweb events) |
 | `qa-network-{timestamp}.har` | Network log (HAR 1.2) |
 | `qa-report-{timestamp}.html` | Unified QA report — session replay + network + console in one file |
@@ -180,10 +181,11 @@ User clicks the button (save the last 20 minutes)
   │   └─ SharePanel.show(url)   → copy-link button (if server returns url)
   │
   └─ [no endpoint]
-      └─ LocalStorage.save()    → downloads 3 files:
-                                   qa-session-*.rr.json
-                                   qa-network-*.har
-                                   qa-report-*.html  ← unified viewer
+      └─ LocalStorage.save()    → downloads 1 ZIP file:
+                                   qa-report-*.zip
+                                     ├─ qa-session-*.rr.json
+                                     ├─ qa-network-*.har
+                                     └─ qa-report-*.html  ← unified viewer
 
   └─ ScreenRecorder.reset() + start()   → recording resumes immediately
      NetworkCapture.clearBuffer()       → network log reset

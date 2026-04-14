@@ -2,6 +2,18 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { LocalStorage } from '../LocalStorage.js';
 import type { HARLog } from '@qa-recorder/shared';
 
+const mocks = vi.hoisted(() => ({
+  zipSync: vi.fn(),
+}));
+
+vi.mock('fflate', () => ({
+  zipSync: (entries: Record<string, Uint8Array>) => {
+    mocks.zipSync(entries);
+    return new Uint8Array(4); // dummy bytes — only the call arg matters in tests
+  },
+  strToU8: (s: string) => new TextEncoder().encode(s),
+}));
+
 function makeHARLog(): HARLog {
   return {
     version: '1.2',
@@ -19,6 +31,7 @@ describe('LocalStorage.save', () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
+    mocks.zipSync.mockClear();
     clickedLinks = [];
     vi.stubGlobal('URL', {
       createObjectURL: vi.fn().mockReturnValue('blob:mock-url'),
@@ -46,95 +59,94 @@ describe('LocalStorage.save', () => {
     return p;
   }
 
-  it('세션 파일 다운로드가 트리거된다 (.rr.json)', async () => {
+  function getZippedEntries(): Record<string, Uint8Array> {
+    return mocks.zipSync.mock.calls[0][0] as Record<string, Uint8Array>;
+  }
+
+  function decode(data: Uint8Array): string {
+    return new TextDecoder().decode(data);
+  }
+
+  it('정확히 1개의 ZIP 파일이 다운로드된다', async () => {
     await saveAndFlush(makeEvents(), makeHARLog());
-    expect(clickedLinks.find((l) => l.download.endsWith('.rr.json'))).toBeDefined();
+    expect(clickedLinks).toHaveLength(1);
   });
 
-  it('HAR 파일 다운로드가 트리거된다 (.har)', async () => {
+  it('다운로드 파일명은 qa-report-*.zip 형식이다', async () => {
     await saveAndFlush(makeEvents(), makeHARLog());
-    expect(clickedLinks.find((l) => l.download.endsWith('.har'))).toBeDefined();
+    expect(clickedLinks[0].download).toMatch(/^qa-report-.*\.zip$/);
   });
 
-  it('통합 뷰어 다운로드가 트리거된다 (qa-report-*.html)', async () => {
+  it('ZIP 안에 .rr.json 파일이 포함된다', async () => {
     await saveAndFlush(makeEvents(), makeHARLog());
-    expect(clickedLinks.find((l) => l.download.startsWith('qa-report') && l.download.endsWith('.html'))).toBeDefined();
+    const entries = getZippedEntries();
+    expect(Object.keys(entries).some(f => f.endsWith('.rr.json'))).toBe(true);
   });
 
-  it('세션 있을 때 정확히 3개의 파일이 다운로드된다', async () => {
+  it('ZIP 안에 .har 파일이 포함된다', async () => {
     await saveAndFlush(makeEvents(), makeHARLog());
-    expect(clickedLinks).toHaveLength(3);
+    const entries = getZippedEntries();
+    expect(Object.keys(entries).some(f => f.endsWith('.har'))).toBe(true);
   });
 
-  it('파일명에 타임스탬프가 포함된다', async () => {
+  it('ZIP 안에 .html 뷰어 파일이 포함된다', async () => {
     await saveAndFlush(makeEvents(), makeHARLog());
-    expect(clickedLinks[0].download).toMatch(/qa-session-\d{4}/);
-    expect(clickedLinks[1].download).toMatch(/qa-network-\d{4}/);
-    expect(clickedLinks[2].download).toMatch(/qa-report-\d{4}/);
+    const entries = getZippedEntries();
+    expect(Object.keys(entries).some(f => f.endsWith('.html'))).toBe(true);
   });
 
-  it('통합 뷰어 HTML에 QA Report가 포함된다', async () => {
+  it('세션 있을 때 ZIP 안에 3개 파일이 포함된다', async () => {
     await saveAndFlush(makeEvents(), makeHARLog());
-    const createObjectURL = URL.createObjectURL as ReturnType<typeof vi.fn>;
-    const reportBlob: Blob = createObjectURL.mock.calls[2][0];
-    const text = await reportBlob.text();
-    expect(text).toContain('QA Report');
+    expect(Object.keys(getZippedEntries())).toHaveLength(3);
   });
 
   it('HAR 파일에 올바른 JSON이 담긴다', async () => {
     const harLog = makeHARLog();
     await saveAndFlush(makeEvents(), harLog);
-    const createObjectURL = URL.createObjectURL as ReturnType<typeof vi.fn>;
-    const harBlob: Blob = createObjectURL.mock.calls[1][0];
-    const text = await harBlob.text();
-    expect(JSON.parse(text)).toEqual(harLog);
+    const entries = getZippedEntries();
+    const harKey = Object.keys(entries).find(f => f.endsWith('.har'))!;
+    expect(JSON.parse(decode(entries[harKey]))).toEqual(harLog);
   });
 
-  it('통합 뷰어 HTML은 <!DOCTYPE html>을 포함한다', async () => {
+  it('HTML 뷰어에 QA Report가 포함된다', async () => {
     await saveAndFlush(makeEvents(), makeHARLog());
-    const createObjectURL = URL.createObjectURL as ReturnType<typeof vi.fn>;
-    const htmlBlob: Blob = createObjectURL.mock.calls[2][0];
-    const text = await htmlBlob.text();
-    expect(text).toContain('<!DOCTYPE html>');
+    const entries = getZippedEntries();
+    const htmlKey = Object.keys(entries).find(f => f.endsWith('.html'))!;
+    expect(decode(entries[htmlKey])).toContain('QA Report');
+  });
+
+  it('HTML 뷰어에 <!DOCTYPE html>이 포함된다', async () => {
+    await saveAndFlush(makeEvents(), makeHARLog());
+    const entries = getZippedEntries();
+    const htmlKey = Object.keys(entries).find(f => f.endsWith('.html'))!;
+    expect(decode(entries[htmlKey])).toContain('<!DOCTYPE html>');
   });
 
   it('다운로드 후 Object URL이 해제된다', async () => {
     await saveAndFlush(makeEvents(), makeHARLog());
-    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(3);
+    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1);
   });
 
-  it('파일이 순차적으로 다운로드된다 (동시 다운로드 방지)', async () => {
-    // 첫 번째 타이머가 끝나기 전에는 두 번째 클릭이 발생하지 않아야 함
-    const p = LocalStorage.save(makeEvents(), makeHARLog());
-    // 타이머 실행 전: 첫 번째 파일 클릭만 발생
+  it('sessionEvents가 null이어도 ZIP 1개가 다운로드된다', async () => {
+    await saveAndFlush(null, makeHARLog());
     expect(clickedLinks).toHaveLength(1);
-    await vi.runAllTimersAsync();
-    await p;
-    // 모든 타이머 실행 후: 3개 모두 클릭
-    expect(clickedLinks).toHaveLength(3);
   });
 
-  it('sessionEvents가 null이면 .rr.json 다운로드를 건너뛴다', async () => {
+  it('sessionEvents가 null이면 ZIP 안에 .rr.json이 포함되지 않는다', async () => {
     await saveAndFlush(null, makeHARLog());
-    expect(clickedLinks.find((l) => l.download.endsWith('.rr.json'))).toBeUndefined();
+    const entries = getZippedEntries();
+    expect(Object.keys(entries).some(f => f.endsWith('.rr.json'))).toBe(false);
   });
 
-  it('sessionEvents가 null이어도 .har와 통합 뷰어는 다운로드된다', async () => {
+  it('sessionEvents가 null이면 ZIP 안에 2개 파일이 포함된다', async () => {
     await saveAndFlush(null, makeHARLog());
-    expect(clickedLinks.find((l) => l.download.endsWith('.har'))).toBeDefined();
-    expect(clickedLinks.find((l) => l.download.endsWith('.html'))).toBeDefined();
+    expect(Object.keys(getZippedEntries())).toHaveLength(2);
   });
 
-  it('sessionEvents가 null이면 정확히 2개의 파일이 다운로드된다', async () => {
-    await saveAndFlush(null, makeHARLog());
-    expect(clickedLinks).toHaveLength(2);
-  });
-
-  it('memo가 있으면 통합 뷰어 HTML에 포함된다', async () => {
+  it('memo가 있으면 HTML 뷰어에 포함된다', async () => {
     await saveAndFlush(makeEvents(), makeHARLog(), [], '결제 버튼 오류');
-    const createObjectURL = URL.createObjectURL as ReturnType<typeof vi.fn>;
-    const reportBlob: Blob = createObjectURL.mock.calls[2][0];
-    const text = await reportBlob.text();
-    expect(text).toContain('결제 버튼 오류');
+    const entries = getZippedEntries();
+    const htmlKey = Object.keys(entries).find(f => f.endsWith('.html'))!;
+    expect(decode(entries[htmlKey])).toContain('결제 버튼 오류');
   });
 });

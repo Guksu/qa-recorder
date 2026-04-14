@@ -112,7 +112,7 @@
         subtitle: '우측 하단의 버튼이 QA Recorder입니다. 페이지가 열린 순간부터 <strong>자동으로 녹화</strong>가 시작됩니다 (최근 20분 유지). 버튼을 클릭하면 확인 후 저장되고, 녹화는 자동으로 재시작됩니다.',
         section1Title: '동작 흐름',
         modeLabel: '저장 방식',
-        modeLocal: '파일 3종이 브라우저에 다운로드됩니다.',
+        modeLocal: 'ZIP 파일 1개가 브라우저에 다운로드됩니다.',
         modeRemote: '<code>POST /upload</code> (목 서버)로 전송됩니다. 저장 후 링크 복사 버튼이 나타납니다.',
         flowLocal: `페이지 로드
   ├─ rrweb 즉시 녹화 시작 (최근 20분 롤링 유지)
@@ -120,10 +120,11 @@
   ├─ console.error / warn 캡처
   └─ 새로고침/이동 시 sessionStorage에 세션 자동 저장 후 복원 (enableBackup: true)
 
-버튼 클릭 → 메모 입력(선택) → 확인 → 파일 3종 순차 다운로드:
-  qa-session-*.rr.json  ← DOM 이벤트 원본 (rrweb)
-  qa-network-*.har      ← 네트워크 로그 (HAR 1.2)
-  qa-report-*.html      ← 통합 QA 리포트 (세션 리플레이 + 네트워크 + 콘솔)
+버튼 클릭 → 메모 입력(선택) → 확인 → ZIP 파일 1개 다운로드:
+  qa-report-*.zip
+    ├─ qa-session-*.rr.json  ← DOM 이벤트 원본 (rrweb)
+    ├─ qa-network-*.har      ← 네트워크 로그 (HAR 1.2)
+    └─ qa-report-*.html      ← 통합 QA 리포트 (세션 리플레이 + 네트워크 + 콘솔)
 
 저장 후 → 버퍼 초기화 + 녹화 자동 재시작`,
         flowRemote: `페이지 로드
@@ -157,7 +158,7 @@
         subtitle: 'The button in the bottom-right is QA Recorder. <strong>Recording starts automatically</strong> when the page loads — no click needed. It keeps the last 20 minutes in memory. Click the button once to save, and recording resumes automatically.',
         section1Title: 'How it works',
         modeLabel: 'Save mode',
-        modeLocal: '3 files are downloaded directly to your browser.',
+        modeLocal: '1 ZIP file is downloaded directly to your browser.',
         modeRemote: 'Files are POSTed to <code>/upload</code> (mock server). A copy-link button appears on success.',
         flowLocal: `Page load
   ├─ rrweb starts recording immediately (last 20 min rolling window)
@@ -165,10 +166,11 @@
   ├─ console.error / warn captured
   └─ On refresh/navigate: session auto-saved to sessionStorage and restored (enableBackup: true)
 
-Click button → optional memo → confirm → 3 files download sequentially:
-  qa-session-*.rr.json  ← DOM events (rrweb)
-  qa-network-*.har      ← network log (HAR 1.2)
-  qa-report-*.html      ← unified QA report (session replay + network + console)
+Click button → optional memo → confirm → 1 ZIP file downloaded:
+  qa-report-*.zip
+    ├─ qa-session-*.rr.json  ← DOM events (rrweb)
+    ├─ qa-network-*.har      ← network log (HAR 1.2)
+    └─ qa-report-*.html      ← unified QA report (session replay + network + console)
 
 After save → buffers reset + recording resumes`,
         flowRemote: `Page load

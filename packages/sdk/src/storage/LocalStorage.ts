@@ -1,33 +1,25 @@
 import type { HARLog } from '@qa-recorder/shared';
 import type { ConsoleEntry } from '../console/ConsoleCapture.js';
 import { UnifiedViewer } from '../viewer/UnifiedViewer.js';
+import { zipSync, strToU8 } from 'fflate';
 
 export class LocalStorage {
   static async save(sessionEvents: unknown[] | null, harLog: HARLog, consoleLogs: ConsoleEntry[] = [], memo = ''): Promise<void> {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
 
-    const files: Array<{ blob: Blob; filename: string }> = [];
+    const entries: Record<string, Uint8Array> = {};
 
     if (sessionEvents) {
-      files.push({
-        blob: new Blob([JSON.stringify(sessionEvents)], { type: 'application/json' }),
-        filename: `qa-session-${timestamp}.rr.json`,
-      });
+      entries[`qa-session-${timestamp}.rr.json`] = strToU8(JSON.stringify(sessionEvents));
     }
+    entries[`qa-network-${timestamp}.har`] = strToU8(JSON.stringify(harLog, null, 2));
+    entries[`qa-report-${timestamp}.html`] = strToU8(
+      UnifiedViewer.generate(sessionEvents ?? [], harLog, consoleLogs, memo),
+    );
 
-    files.push({
-      blob: new Blob([JSON.stringify(harLog, null, 2)], { type: 'application/json' }),
-      filename: `qa-network-${timestamp}.har`,
-    });
-
-    files.push({
-      blob: new Blob([UnifiedViewer.generate(sessionEvents ?? [], harLog, consoleLogs, memo)], { type: 'text/html' }),
-      filename: `qa-report-${timestamp}.html`,
-    });
-
-    for (const { blob, filename } of files) {
-      await LocalStorage.downloadBlob(blob, filename);
-    }
+    const zipped = zipSync(entries);
+    const zipBlob = new Blob([zipped], { type: 'application/zip' });
+    await LocalStorage.downloadBlob(zipBlob, `qa-report-${timestamp}.zip`);
   }
 
   private static downloadBlob(blob: Blob, filename: string): Promise<void> {
