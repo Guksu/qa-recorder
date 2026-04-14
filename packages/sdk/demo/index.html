@@ -3,150 +3,543 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>QA Recorder - Demo</title>
+  <title>QA Recorder — One-click QA recording for web apps</title>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
   <style>
-    * { box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 820px; margin: 40px auto; padding: 0 20px; color: #1a202c; }
-    header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-    h1 { color: #e53e3e; margin: 0; font-size: 24px; }
-    .lang-toggle { display: flex; gap: 4px; }
-    .lang-toggle button {
-      padding: 4px 12px; border: 1px solid #cbd5e0; border-radius: 6px;
-      cursor: pointer; background: #fff; color: #4a5568; font-size: 13px;
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --red: #e53e3e;
+      --red-dark: #c53030;
+      --slate-900: #0f172a;
+      --slate-800: #1e293b;
+      --slate-700: #334155;
+      --slate-600: #475569;
+      --slate-500: #64748b;
+      --slate-400: #94a3b8;
+      --slate-300: #cbd5e1;
+      --slate-200: #e2e8f0;
+      --slate-100: #f1f5f9;
+      --slate-50:  #f8fafc;
+
+      /* Type scale — Major Third (×1.25) */
+      --text-xs:   0.75rem;    /* 12px — section labels */
+      --text-sm:   0.875rem;   /* 14px — captions, meta */
+      --text-base: 1rem;       /* 16px — body */
+      --text-md:   1.0625rem;  /* 17px — feature desc */
+      --text-lg:   1.125rem;   /* 18px — card titles */
+      --text-xl:   1.375rem;   /* 22px — subheadings */
+      --text-2xl:  1.75rem;    /* 28px — section titles */
+      --text-3xl:  clamp(2rem, 4.5vw, 2.75rem); /* hero */
+
+      /* Weight tokens */
+      --weight-normal:   400;
+      --weight-medium:   500;
+      --weight-semibold: 600;
+      --weight-bold:     700;
     }
-    .lang-toggle button.active { background: #e53e3e; border-color: #e53e3e; color: #fff; font-weight: 600; }
-    .mode-toggle-wrap { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
-    .mode-toggle-label { font-size: 13px; font-weight: 500; color: #64748b; }
-    .mode-toggle { display: flex; background: #f1f5f9; border-radius: 8px; padding: 3px; gap: 2px; }
-    .mode-toggle button {
+    body { font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: var(--slate-800); background: #fff; line-height: 1.6; font-size: var(--text-base); word-break: keep-all; overflow-wrap: break-word; }
+
+    /* ── Navbar ── */
+    .nav {
+      position: sticky; top: 0; z-index: 100;
+      background: rgba(255,255,255,0.92);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--slate-200);
+      padding: 0 32px;
+      display: flex; align-items: center; justify-content: space-between;
+      height: 60px;
+    }
+    .nav-logo { display: flex; align-items: center; gap: 9px; text-decoration: none; }
+    .nav-logo-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--red); animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+    .nav-logo-text { font-size: var(--text-base); font-weight: var(--weight-bold); color: var(--slate-900); letter-spacing: -0.3px; }
+    .nav-right { display: flex; align-items: center; gap: 4px; }
+    .nav-link {
+      display: flex; align-items: center; gap: 5px;
+      color: var(--slate-500); text-decoration: none; font-size: var(--text-sm);
+      font-weight: var(--weight-medium);
+      padding: 6px 10px; border-radius: 6px; transition: color .12s;
+    }
+    .nav-link:hover { color: var(--slate-900); }
+    .lang-btn {
+      padding: 3px 9px; border-radius: 5px; border: 1px solid var(--slate-200);
+      cursor: pointer; background: transparent; color: var(--slate-500); font-size: var(--text-xs); font-weight: var(--weight-medium);
+      font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif;
+      transition: all .12s;
+    }
+    .lang-btn:hover { border-color: var(--slate-300); color: var(--slate-700); }
+    .lang-btn.active { background: var(--slate-900); border-color: var(--slate-900); color: #fff; }
+
+    /* ── Hero ── */
+    .hero {
+      background: var(--slate-50);
+      border-bottom: 1px solid var(--slate-200);
+      padding: 88px 24px 80px;
+      text-align: center;
+    }
+    .hero-eyebrow {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: #fff; border: 1px solid var(--slate-200);
+      color: var(--slate-600); font-size: var(--text-xs); font-weight: var(--weight-medium); letter-spacing: .3px;
+      padding: 4px 12px; border-radius: 20px; margin-bottom: 28px;
+    }
+    .hero-eyebrow .live-dot { width: 6px; height: 6px; }
+    .hero-title { font-size: var(--text-3xl); font-weight: var(--weight-bold); color: var(--slate-900); letter-spacing: -0.75px; line-height: 1.12; margin-bottom: 18px; text-wrap: balance; }
+    .hero-title span { color: var(--red); }
+    .hero-subtitle { font-size: var(--text-md); color: var(--slate-500); max-width: 520px; margin: 0 auto 40px; line-height: 1.65; text-wrap: pretty; }
+    .hero-install {
+      display: inline-flex; align-items: center; gap: 12px;
+      background: #fff; border: 1px solid var(--slate-200);
+      border-radius: 10px; padding: 12px 20px; font-family: 'SFMono-Regular', Consolas, monospace; font-size: var(--text-sm); color: var(--slate-700);
+      box-shadow: 0 1px 4px rgba(0,0,0,.05);
+    }
+    .hero-install .cmd-prefix { color: var(--slate-400); }
+    .hero-install .cmd-pkg { color: var(--red); font-weight: var(--weight-semibold); }
+    .hero-install .copy-btn {
+      background: none; border: none; cursor: pointer; color: var(--slate-400); padding: 0;
+      display: flex; align-items: center; transition: color .12s;
+    }
+    .hero-install .copy-btn:hover { color: var(--slate-900); }
+    .hero-cta { display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; }
+    .btn-primary {
+      padding: 9px 22px; background: var(--slate-900); color: #fff; border: none;
+      border-radius: 7px; font-size: var(--text-sm); font-weight: var(--weight-semibold); cursor: pointer; text-decoration: none;
+      display: inline-flex; align-items: center; gap: 6px;
+      font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif;
+      transition: background .12s, opacity .12s;
+    }
+    .btn-primary:hover { opacity: .85; }
+    .btn-ghost {
+      padding: 9px 22px; background: #fff; color: var(--slate-700);
+      border: 1px solid var(--slate-200); border-radius: 7px; font-size: var(--text-sm); font-weight: var(--weight-medium);
+      cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 6px;
+      font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif;
+      transition: border-color .12s, color .12s;
+    }
+    .btn-ghost:hover { border-color: var(--slate-400); color: var(--slate-900); }
+
+    /* ── Live notice ── */
+    .live-notice {
+      background: #fff;
+      border-bottom: 1px solid var(--slate-200);
+      padding: 10px 24px;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      font-size: var(--text-sm); color: var(--slate-500); text-align: center; flex-wrap: wrap;
+    }
+    .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--red); animation: pulse 1.5s infinite; flex-shrink: 0; }
+    .live-notice strong { color: var(--slate-800); font-weight: var(--weight-semibold); }
+
+    /* ── Section wrapper ── */
+    .section { padding: 72px 24px; }
+    .section-alt { background: var(--slate-50); }
+    .container { max-width: 1040px; margin: 0 auto; }
+    .section-label { font-size: var(--text-xs); font-weight: var(--weight-semibold); letter-spacing: 1px; text-transform: uppercase; color: var(--red); margin-bottom: 10px; }
+    .section-title { font-size: var(--text-2xl); font-weight: var(--weight-bold); color: var(--slate-900); letter-spacing: -.4px; line-height: 1.2; margin-bottom: 12px; text-wrap: balance; }
+    .section-desc { font-size: var(--text-base); color: var(--slate-500); max-width: 560px; line-height: 1.7; text-wrap: pretty; }
+
+    /* ── Feature cards ── */
+    .features-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1px; margin-top: 40px; background: var(--slate-200); border: 1px solid var(--slate-200); border-radius: 12px; overflow: hidden; }
+    .feature-card {
+      background: #fff; border-radius: 0;
+      padding: 28px 24px; transition: background .15s;
+    }
+    .feature-card:hover { background: var(--slate-50); }
+    .feature-icon {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 44px; height: 44px; border-radius: 10px;
+      font-size: 20px; margin-bottom: 14px;
+    }
+    /* Icon category tints */
+    .icon-red    { background: oklch(95% 0.04 18);  }
+    .icon-blue   { background: oklch(94% 0.05 240); }
+    .icon-amber  { background: oklch(95% 0.06 72);  }
+    .icon-green  { background: oklch(95% 0.05 148); }
+    .icon-violet { background: oklch(95% 0.04 290); }
+    .icon-sky    { background: oklch(94% 0.05 210); }
+    .feature-title { font-size: var(--text-base); font-weight: var(--weight-semibold); color: var(--slate-900); margin-bottom: 6px; }
+    .feature-desc { font-size: var(--text-sm); color: var(--slate-500); line-height: 1.7; }
+
+    /* ── Steps ── */
+    .steps { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 24px; margin-top: 40px; }
+    .step { display: flex; gap: 16px; align-items: flex-start; }
+    .step-num {
+      flex-shrink: 0; width: 32px; height: 32px; border-radius: 8px;
+      background: var(--red); color: #fff; font-size: var(--text-sm); font-weight: var(--weight-bold);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .step-title { font-size: var(--text-base); font-weight: var(--weight-semibold); color: var(--slate-900); margin-bottom: 4px; }
+    .step-desc { font-size: var(--text-sm); color: var(--slate-500); line-height: 1.65; }
+
+    /* ── Code block ── */
+    .code-block {
+      background: var(--slate-900); border: 1px solid var(--slate-700);
+      border-radius: 10px; overflow: hidden;
+    }
+    .code-block-header {
+      background: var(--slate-800); padding: 10px 16px;
+      display: flex; align-items: center; justify-content: space-between;
+      border-bottom: 1px solid var(--slate-700);
+    }
+    .code-block-dots { display: flex; gap: 6px; }
+    .code-block-dots span { width: 10px; height: 10px; border-radius: 50%; }
+    .code-block-dots .d1 { background: #ff5f57; }
+    .code-block-dots .d2 { background: #febc2e; }
+    .code-block-dots .d3 { background: #28c840; }
+    .code-block-filename { font-size: var(--text-xs); color: var(--slate-400); font-family: 'SFMono-Regular', Consolas, monospace; }
+    pre.code {
+      padding: 20px; font-size: 0.8125rem; line-height: 1.75; overflow-x: auto;
+      font-family: 'SFMono-Regular', Consolas, monospace; color: #e2e8f0;
+      white-space: pre; word-break: normal; overflow-wrap: normal;
+    }
+
+    /* ── Framework tabs ── */
+    .fw-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 16px; }
+    .fw-tab {
+      padding: 6px 14px; border-radius: 6px; border: 1px solid var(--slate-200);
+      cursor: pointer; background: #fff; color: var(--slate-600); font-size: var(--text-sm); font-weight: var(--weight-medium);
+      font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif;
+      transition: all .15s;
+    }
+    .fw-tab.active { background: var(--red); border-color: var(--red); color: #fff; }
+    .fw-tab:hover:not(.active) { border-color: var(--slate-400); color: var(--slate-900); }
+
+    /* ── Playground ── */
+    .playground-header {
+      display: flex; align-items: center; justify-content: space-between;
+      flex-wrap: wrap; gap: 12px; margin-bottom: 24px;
+    }
+    .mode-toggle { display: flex; background: var(--slate-100); border-radius: 8px; padding: 3px; gap: 2px; }
+    .mode-tab {
       padding: 6px 16px; border: none; border-radius: 6px;
-      cursor: pointer; background: transparent; color: #64748b; font-size: 13px; font-weight: 500;
-      transition: background 0.15s, color 0.15s;
+      cursor: pointer; background: transparent; color: var(--slate-600); font-size: var(--text-sm); font-weight: var(--weight-medium);
+      font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif;
+      transition: all .15s;
     }
-    .mode-toggle button.active { background: #fff; color: #0f172a; box-shadow: 0 1px 3px rgba(0,0,0,0.1); font-weight: 600; }
-    .subtitle { color: #718096; margin: 0 0 28px; font-size: 14px; line-height: 1.6; }
-    .section { margin: 24px 0; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px; }
-    .section h2 { margin: 0 0 8px; font-size: 16px; }
-    .section p { margin: 0 0 12px; color: #4a5568; font-size: 14px; }
-    .btn-row { display: flex; flex-wrap: wrap; gap: 8px; }
-    button.action {
-      padding: 8px 16px; border: none; border-radius: 6px;
-      cursor: pointer; background: #4a5568; color: white; font-size: 14px;
+    .mode-tab.active { background: #fff; color: var(--slate-900); box-shadow: 0 1px 3px rgba(0,0,0,.1); font-weight: var(--weight-semibold); }
+    .mode-info {
+      display: flex; align-items: flex-start; gap: 10px;
+      padding: 12px 16px; border-radius: 8px; font-size: var(--text-sm); margin-bottom: 20px;
+      line-height: 1.6;
     }
-    button.action:hover { background: #2d3748; }
-    pre {
-      background: #f7fafc; padding: 12px; border-radius: 6px;
-      overflow: auto; max-height: 260px; font-size: 12px; margin: 12px 0 0;
-      border: 1px solid #e2e8f0;
-    }
-    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; background: #c6f6d5; color: #276749; margin-left: 8px; vertical-align: middle; }
-    .badge.remote { background: #e0f2fe; color: #0369a1; }
-    .flow { background: #f7fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px 20px; font-size: 13px; line-height: 1.8; color: #4a5568; font-family: monospace; white-space: pre-wrap; }
-    .mode-info { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border-radius: 8px; font-size: 13px; line-height: 1.5; margin-bottom: 0; }
     .mode-info.local { background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534; }
     .mode-info.remote { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; }
-    .mode-info .mode-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+
+    .playground-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .pg-card-full { grid-column: 1 / -1; }
+
+    .pg-card {
+      background: #fff; border: 1px solid var(--slate-200); border-radius: 12px;
+      overflow: hidden;
+    }
+    .pg-card-header {
+      padding: 14px 16px; border-bottom: 1px solid var(--slate-100);
+      display: flex; align-items: center; gap: 8px;
+    }
+    .pg-card-icon { font-size: 16px; }
+    .pg-card-title { font-size: var(--text-sm); font-weight: var(--weight-semibold); color: var(--slate-900); }
+    .pg-card-body { padding: 16px; }
+    .btn-row { display: flex; flex-wrap: wrap; gap: 8px; }
+    .btn-action {
+      padding: 7px 14px; border: none; border-radius: 6px;
+      cursor: pointer; background: var(--slate-700); color: #fff; font-size: var(--text-sm); font-weight: var(--weight-medium);
+      font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif;
+      transition: background .15s;
+    }
+    .btn-action:hover { background: var(--slate-900); }
+    .btn-action.danger { background: #dc2626; }
+    .btn-action.danger:hover { background: #b91c1c; }
+    pre.output {
+      background: var(--slate-50); border: 1px solid var(--slate-200); border-radius: 6px;
+      padding: 12px; overflow: auto; max-height: 180px; font-size: 0.6875rem; margin-top: 12px;
+      font-family: 'SFMono-Regular', Consolas, monospace; color: var(--slate-700); white-space: pre-wrap;
+      line-height: 1.7;
+    }
+
+    .flow-block {
+      background: var(--slate-900); border-radius: 10px; padding: 20px 24px;
+      font-family: 'SFMono-Regular', Consolas, monospace; font-size: 0.75rem; line-height: 1.9; color: #94a3b8;
+      white-space: pre-wrap; overflow-x: auto; word-break: normal; overflow-wrap: normal;
+    }
+
+    /* ── Footer ── */
+    footer {
+      background: var(--slate-50); border-top: 1px solid var(--slate-200);
+      padding: 32px 24px; text-align: center;
+    }
+    footer p { font-size: var(--text-sm); color: var(--slate-400); line-height: 1.7; }
+    footer a { color: var(--slate-500); text-decoration: none; }
+    footer a:hover { color: var(--slate-900); }
+
+    /* ── Divider ── */
+    .divider { height: 1px; background: var(--slate-200); }
+
+    /* ── Responsive ── */
+    @media (max-width: 640px) {
+      /* Nav */
+      .nav { padding: 0 16px; height: 56px; }
+      .nav-link { display: none; }
+      .nav-right { gap: 6px; }
+
+      /* Hero */
+      .hero { padding: 52px 20px 44px; }
+      .hero-eyebrow { margin-bottom: 20px; }
+      .hero-subtitle { font-size: var(--text-base); margin-bottom: 32px; }
+      .hero-install {
+        display: flex; width: 100%; max-width: 340px;
+        justify-content: space-between;
+        font-size: 0.8125rem;
+      }
+
+      /* Sections */
+      .section { padding: 48px 20px; }
+
+      /* Features */
+      .features-grid { grid-template-columns: 1fr; }
+      .feature-card { padding: 22px 20px; }
+
+      /* Steps */
+      .steps { grid-template-columns: 1fr; gap: 20px; }
+
+      /* Flow block */
+      .flow-block { font-size: 0.6875rem; padding: 16px; }
+
+      /* Playground */
+      .playground-header { flex-direction: column; align-items: flex-start; }
+      .playground-grid { grid-template-columns: 1fr; }
+      .pg-card-full { grid-column: 1; }
+    }
+
+    @media (max-width: 400px) {
+      .hero-install { font-size: 0.75rem; padding: 10px 14px; gap: 8px; }
+      .lang-btn { padding: 3px 7px; }
+    }
   </style>
 </head>
 <body>
-  <header>
-    <h1>QA Recorder <span class="badge" id="badge-live">● LIVE</span></h1>
-    <div class="lang-toggle">
-      <button id="btn-ko" class="active" onclick="setLang('ko')">한국어</button>
-      <button id="btn-en" onclick="setLang('en')">English</button>
-    </div>
-  </header>
-  <p class="subtitle" id="subtitle"></p>
 
-  <div class="mode-toggle-wrap">
-    <span class="mode-toggle-label" id="mode-label"></span>
-    <div class="mode-toggle">
-      <button id="btn-local" class="active" onclick="setMode('local')">📦 Local</button>
-      <button id="btn-remote" onclick="setMode('remote')">☁️ Remote</button>
+<!-- NAVBAR -->
+<nav class="nav">
+  <a class="nav-logo" href="#">
+    <span class="nav-logo-dot"></span>
+    <span class="nav-logo-text">qa-recorder</span>
+  </a>
+  <div class="nav-right">
+    <a class="nav-link" href="https://github.com/Guksu/qa-recorder" target="_blank" rel="noopener">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
+      GitHub
+    </a>
+    <a class="nav-link" href="https://www.npmjs.com/package/qa-recorder" target="_blank" rel="noopener">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M0 0v24h24V0H0zm19.2 19.2H12v-9.6H7.2v9.6H4.8V4.8h14.4v14.4z"/></svg>
+      npm
+    </a>
+    <button class="lang-btn active" id="btn-ko" onclick="setLang('ko')">한국어</button>
+    <button class="lang-btn" id="btn-en" onclick="setLang('en')">English</button>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-eyebrow">
+    <span class="live-dot" style="width:6px;height:6px;"></span>
+    <span id="hero-eyebrow-text"></span>
+  </div>
+  <h1 class="hero-title" id="hero-title"></h1>
+  <p class="hero-subtitle" id="hero-subtitle"></p>
+  <div class="hero-install">
+    <span class="cmd-prefix">$</span>
+    <span>npm install <span class="cmd-pkg">qa-recorder</span></span>
+    <button class="copy-btn" onclick="copyInstall()" title="Copy">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+    </button>
+  </div>
+</section>
+
+<!-- LIVE NOTICE -->
+<div class="live-notice">
+  <span class="live-dot"></span>
+  <span id="live-notice-text"></span>
+</div>
+
+<!-- FEATURES -->
+<section class="section">
+  <div class="container">
+    <p class="section-label" id="features-label"></p>
+    <h2 class="section-title" id="features-title"></h2>
+    <p class="section-desc" id="features-desc"></p>
+    <div class="features-grid" id="features-grid"></div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- HOW IT WORKS -->
+<section class="section section-alt">
+  <div class="container">
+    <p class="section-label" id="how-label"></p>
+    <h2 class="section-title" id="how-title"></h2>
+    <div class="steps" id="steps-grid"></div>
+    <div style="margin-top:32px;">
+      <p class="section-label" id="flow-label" style="margin-bottom:10px;"></p>
+      <div class="mode-toggle" style="margin-bottom:12px; display:inline-flex;">
+        <button class="mode-tab active" id="btn-local" onclick="setMode('local')">📦 Local</button>
+        <button class="mode-tab" id="btn-remote" onclick="setMode('remote')">☁️ Remote</button>
+      </div>
+      <div class="mode-info local" id="mode-info-box">
+        <span>📦</span>
+        <span id="mode-info-text"></span>
+      </div>
+      <div class="flow-block" id="flow-box" style="margin-top:12px;"></div>
     </div>
   </div>
+</section>
 
-  <div class="section">
-    <h2 id="section1-title"></h2>
-    <div class="mode-info local" id="mode-info-box">
-      <span class="mode-icon">📦</span>
-      <span id="mode-info-text"></span>
-    </div>
-    <div style="margin-top:12px;" class="flow" id="flow-box"></div>
-  </div>
+<div class="divider"></div>
 
-  <div class="section">
-    <h2 id="section2-title"></h2>
-    <p id="section2-desc"></p>
-    <div class="btn-row">
-      <button class="action" onclick="fetchTest()" id="btn-fetch"></button>
-      <button class="action" onclick="xhrTest()" id="btn-xhr"></button>
-      <button class="action" onclick="fetchError()" id="btn-fetch-err"></button>
-    </div>
-    <pre id="log-output"></pre>
-  </div>
-
-  <div class="section">
-    <h2 id="section3-title"></h2>
-    <p id="section3-desc"></p>
-    <div class="btn-row">
-      <button class="action" onclick="showBuffer()" id="btn-buffer"></button>
-    </div>
-    <pre id="buffer-output"></pre>
-  </div>
-
-  <div class="section" style="border-color:#3b82f6; background:#eff6ff;">
-    <h2 style="color:#1d4ed8;" id="section-integration-title"></h2>
-    <p style="color:#1e40af; margin-bottom:16px; font-size:14px;" id="section-integration-desc"></p>
-
-    <div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;" id="framework-tabs">
-      <button style="padding:5px 14px; border:1px solid #3b82f6; border-radius:6px; cursor:pointer; background:#3b82f6; color:#fff; font-size:12px; font-weight:600;" onclick="setFramework('vanilla')">Vanilla JS</button>
-      <button style="padding:5px 14px; border:1px solid #cbd5e0; border-radius:6px; cursor:pointer; background:#fff; color:#4a5568; font-size:12px; font-weight:600;" onclick="setFramework('react')">React</button>
-      <button style="padding:5px 14px; border:1px solid #cbd5e0; border-radius:6px; cursor:pointer; background:#fff; color:#4a5568; font-size:12px; font-weight:600;" onclick="setFramework('vue')">Vue</button>
-      <button style="padding:5px 14px; border:1px solid #cbd5e0; border-radius:6px; cursor:pointer; background:#fff; color:#4a5568; font-size:12px; font-weight:600;" onclick="setFramework('script')">Script tag</button>
-    </div>
-    <pre id="integration-code" style="margin:0;"></pre>
-  </div>
-
-  <div class="section" style="border-color:#a78bfa; background:#f5f3ff;">
-    <h2 style="color:#5b21b6;">🖥️ Console Capture Test</h2>
-    <p style="color:#6d28d9; margin-bottom:12px;">콘솔 로그를 발생시킨 후 저장하면 QA 리포트의 Console 패널에서 확인할 수 있습니다.</p>
-    <div class="btn-row">
-      <button class="action" onclick="console.error('Test error: something went wrong', { code: 404 })">console.error()</button>
-      <button class="action" onclick="console.warn('Test warning: deprecated API usage')">console.warn()</button>
-      <button class="action" onclick="throwUncaught()">Uncaught Error</button>
-      <button class="action" onclick="rejectUnhandled()">Unhandled Promise</button>
+<!-- INTEGRATION -->
+<section class="section">
+  <div class="container">
+    <p class="section-label" id="integration-label"></p>
+    <h2 class="section-title" id="integration-title"></h2>
+    <p class="section-desc" id="integration-desc"></p>
+    <div style="margin-top:28px;">
+      <div class="fw-tabs" id="fw-tabs">
+        <button class="fw-tab active" onclick="setFramework('vanilla')">Vanilla JS</button>
+        <button class="fw-tab" onclick="setFramework('react')">React</button>
+        <button class="fw-tab" onclick="setFramework('vue')">Vue</button>
+        <button class="fw-tab" onclick="setFramework('script')">Script tag</button>
+      </div>
+      <div class="code-block">
+        <div class="code-block-header">
+          <div class="code-block-dots"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div>
+          <span class="code-block-filename" id="fw-filename"></span>
+        </div>
+        <pre class="code" id="integration-code"></pre>
+      </div>
     </div>
   </div>
+</section>
 
-  <script>
-    const i18n = {
-      ko: {
-        integrationTitle: '프레임워크별 사용법',
-        integrationDesc: 'QARecorder.setup()은 멱등성을 보장합니다 — React StrictMode의 이중 실행에도 안전하게 동작합니다.',
-        subtitle: '우측 하단의 버튼이 QA Recorder입니다. 페이지가 열린 순간부터 <strong>자동으로 녹화</strong>가 시작됩니다 (최근 20분 유지). 버튼을 클릭하면 확인 후 저장되고, 녹화는 자동으로 재시작됩니다.',
-        section1Title: '동작 흐름',
-        modeLabel: '저장 방식',
-        modeLocal: 'ZIP 파일 1개가 브라우저에 다운로드됩니다.',
-        modeRemote: '<code>POST /upload</code> (목 서버)로 전송됩니다. 저장 후 링크 복사 버튼이 나타납니다.',
-        flowLocal: `페이지 로드
+<div class="divider"></div>
+
+<!-- PLAYGROUND -->
+<section class="section section-alt">
+  <div class="container">
+    <p class="section-label" id="playground-label"></p>
+    <h2 class="section-title" id="playground-title"></h2>
+    <p class="section-desc" id="playground-desc"></p>
+
+    <div style="margin-top:28px;">
+      <div class="playground-grid">
+        <!-- Network -->
+        <div class="pg-card">
+          <div class="pg-card-header">
+            <span class="pg-card-icon">🌐</span>
+            <span class="pg-card-title" id="pg-net-title"></span>
+          </div>
+          <div class="pg-card-body">
+            <p style="font-size:12px;color:var(--slate-500);margin-bottom:12px;" id="pg-net-desc"></p>
+            <div class="btn-row">
+              <button class="btn-action" onclick="fetchTest()" id="btn-fetch"></button>
+              <button class="btn-action" onclick="xhrTest()" id="btn-xhr"></button>
+              <button class="btn-action danger" onclick="fetchError()" id="btn-fetch-err"></button>
+            </div>
+            <pre class="output" id="log-output"></pre>
+          </div>
+        </div>
+
+        <!-- Console -->
+        <div class="pg-card">
+          <div class="pg-card-header">
+            <span class="pg-card-icon">🖥️</span>
+            <span class="pg-card-title" id="pg-con-title"></span>
+          </div>
+          <div class="pg-card-body">
+            <p style="font-size:12px;color:var(--slate-500);margin-bottom:12px;" id="pg-con-desc"></p>
+            <div class="btn-row">
+              <button class="btn-action danger" onclick="console.error('Test error: something went wrong', { code: 404 })">console.error()</button>
+              <button class="btn-action" onclick="console.warn('Test warning: deprecated API usage')">console.warn()</button>
+              <button class="btn-action danger" onclick="throwUncaught()" id="btn-uncaught"></button>
+              <button class="btn-action danger" onclick="rejectUnhandled()" id="btn-unhandled"></button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Buffer -->
+        <div class="pg-card pg-card-full" style="grid-column: 1 / -1;">
+          <div class="pg-card-header">
+            <span class="pg-card-icon">📋</span>
+            <span class="pg-card-title" id="pg-buf-title"></span>
+          </div>
+          <div class="pg-card-body">
+            <button class="btn-action" onclick="showBuffer()" id="btn-buffer"></button>
+            <pre class="output" id="buffer-output"></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <p>
+    <a href="https://github.com/Guksu/qa-recorder" target="_blank" rel="noopener">qa-recorder</a>
+    &nbsp;·&nbsp; MIT License &nbsp;·&nbsp;
+    <a href="https://www.npmjs.com/package/qa-recorder" target="_blank" rel="noopener">npm</a>
+  </p>
+</footer>
+
+<script>
+  const i18n = {
+    ko: {
+      heroEyebrow: '지금 녹화 중',
+      heroTitle: '한 번의 클릭으로\n<span style="color:var(--red)">QA 세션을 저장</span>하세요',
+      heroSubtitle: '백엔드 없이, 권한 요청 없이. 페이지가 열리는 순간부터 DOM·네트워크·콘솔을 자동으로 기록합니다.',
+      heroCTAGithub: 'GitHub에서 보기',
+      heroCTANpm: 'npm 패키지',
+      liveNotice: '지금 이 페이지도 <strong>녹화 중</strong>입니다. 우측 하단의 빨간 버튼을 클릭해 QA 리포트를 저장해보세요.',
+      featuresLabel: '기능',
+      featuresTitle: '필요한 모든 것이 내장되어 있습니다',
+      featuresDesc: '브라우저 익스텐션 없이, 백엔드 없이. 스크립트 태그 하나면 충분합니다.',
+      features: [
+        { icon: '🎥', title: 'DOM 세션 리플레이', desc: 'rrweb 기반 MutationObserver로 모든 DOM 변화를 캡처합니다. getDisplayMedia 권한 불필요 — 모바일, WebView 전 환경 지원.' },
+        { icon: '🌐', title: '네트워크 캡처', desc: 'fetch와 XHR을 인터셉트해 최대 100건을 HAR 1.2 포맷으로 기록합니다. Authorization, Cookie 헤더는 자동 마스킹.' },
+        { icon: '🖥️', title: '콘솔 캡처', desc: 'console.error/warn, window.onerror, unhandledrejection을 자동으로 캡처합니다.' },
+        { icon: '📋', title: '통합 QA 리포트', desc: '세션 리플레이 + 네트워크 인스펙터 + 콘솔 로그가 하나의 HTML 파일로. 타임라인 동기화 지원.' },
+        { icon: '📦', title: 'ZIP 단일 다운로드', desc: '버튼 한 번으로 qa-report-*.zip 하나가 다운로드됩니다. 백엔드 불필요.' },
+        { icon: '☁️', title: '원격 업로드', desc: 'endpoint 설정 시 multipart/form-data로 서버에 전송합니다. 서버가 URL을 반환하면 공유 링크 버튼이 자동으로 표시됩니다.' },
+      ],
+      howLabel: '동작 방식',
+      howTitle: '3단계로 끝납니다',
+      steps: [
+        { title: '설치', desc: 'npm install qa-recorder 또는 script 태그로 삽입합니다.' },
+        { title: '초기화', desc: 'QARecorder.setup()을 한 번 호출합니다. 페이지 로드 즉시 녹화가 시작됩니다.' },
+        { title: '저장', desc: '버튼 클릭 → 확인 → ZIP 파일 다운로드. 저장 후 자동으로 재시작됩니다.' },
+      ],
+      flowLabel: '저장 흐름',
+      modeLabel: '저장 방식',
+      modeLocal: 'ZIP 파일 1개가 브라우저에 다운로드됩니다.',
+      modeRemote: 'POST /upload (목 서버)로 전송됩니다. 저장 후 링크 복사 버튼이 나타납니다.',
+      flowLocal: `페이지 로드
   ├─ rrweb 즉시 녹화 시작 (최근 20분 롤링 유지)
   ├─ fetch / XHR 인터셉트 (최대 100건 순환 버퍼)
   ├─ console.error / warn 캡처
-  └─ 새로고침/이동 시 sessionStorage에 세션 자동 저장 후 복원 (enableBackup: true)
+  └─ 새로고침/이동 시 sessionStorage에 자동 저장 후 복원 (enableBackup: true)
 
 버튼 클릭 → 메모 입력(선택) → 확인 → ZIP 파일 1개 다운로드:
   qa-report-*.zip
     ├─ qa-session-*.rr.json  ← DOM 이벤트 원본 (rrweb)
     ├─ qa-network-*.har      ← 네트워크 로그 (HAR 1.2)
-    └─ qa-report-*.html      ← 통합 QA 리포트 (세션 리플레이 + 네트워크 + 콘솔)
+    └─ qa-report-*.html      ← 통합 QA 리포트
 
 저장 후 → 버퍼 초기화 + 녹화 자동 재시작`,
-        flowRemote: `페이지 로드
+      flowRemote: `페이지 로드
   ├─ rrweb 즉시 녹화 시작 (최근 20분 롤링 유지)
   ├─ fetch / XHR 인터셉트 (최대 100건 순환 버퍼)
   ├─ console.error / warn 캡처
-  └─ 새로고침/이동 시 sessionStorage에 세션 자동 저장 후 복원 (enableBackup: true)
+  └─ 새로고침/이동 시 sessionStorage에 자동 저장 후 복원 (enableBackup: true)
 
 버튼 클릭 → 메모 입력(선택) → 확인 → POST /upload (multipart/form-data):
   session  →  rrweb 이벤트 JSON
@@ -156,28 +549,58 @@
 서버 응답 { url: "..." } → 링크 복사 버튼 표시
 
 저장 후 → 버퍼 초기화 + 녹화 자동 재시작`,
-        section2Title: '네트워크 요청 발생시키기',
-        section2Desc: '아래 버튼으로 네트워크 요청을 발생시킨 후 우측 하단 버튼을 눌러 저장해보세요.',
-        btnFetch: 'fetch() 테스트',
-        btnXhr: 'XHR 테스트',
-        btnFetchErr: 'fetch() 에러 테스트',
-        logPlaceholder: '요청 버튼을 클릭하세요...',
-        section3Title: '캡처된 네트워크 버퍼',
-        section3Desc: '현재 메모리에 쌓인 네트워크 요청 목록을 확인합니다.',
-        btnBuffer: '현재 버퍼 보기',
-        bufferPlaceholder: '버튼을 눌러 확인하세요.',
-        bufferEmpty: '요청 없음',
-        bufferTotal: (n) => `총 ${n}건`,
-      },
-      en: {
-        integrationTitle: 'Framework Integration',
-        integrationDesc: 'QARecorder.setup() is idempotent — safe to call multiple times, including React StrictMode double-invocation.',
-        subtitle: 'The button in the bottom-right is QA Recorder. <strong>Recording starts automatically</strong> when the page loads — no click needed. It keeps the last 20 minutes in memory. Click the button once to save, and recording resumes automatically.',
-        section1Title: 'How it works',
-        modeLabel: 'Save mode',
-        modeLocal: '1 ZIP file is downloaded directly to your browser.',
-        modeRemote: 'Files are POSTed to <code>/upload</code> (mock server). A copy-link button appears on success.',
-        flowLocal: `Page load
+      integrationLabel: '사용법',
+      integrationTitle: '프레임워크별 통합',
+      integrationDesc: 'QARecorder.setup()은 멱등성을 보장합니다 — React StrictMode의 이중 실행에도 안전하게 동작합니다.',
+      playgroundLabel: '테스트',
+      playgroundTitle: '직접 체험해보세요',
+      playgroundDesc: '아래 버튼으로 네트워크 요청과 콘솔 로그를 발생시킨 후, 우측 하단 버튼을 눌러 QA 리포트를 저장해보세요.',
+      pgNetTitle: '네트워크 요청',
+      pgNetDesc: 'fetch/XHR 요청을 발생시켜 네트워크 캡처를 테스트합니다.',
+      pgConTitle: '콘솔 로그',
+      pgConDesc: '에러와 경고를 발생시켜 콘솔 캡처를 테스트합니다.',
+      pgBufTitle: '현재 네트워크 버퍼',
+      btnFetch: 'fetch() 테스트',
+      btnXhr: 'XHR 테스트',
+      btnFetchErr: 'fetch() 에러',
+      btnUncaught: 'Uncaught Error',
+      btnUnhandled: 'Unhandled Promise',
+      btnBuffer: '버퍼 확인',
+      logPlaceholder: '요청 버튼을 클릭하세요...',
+      bufferPlaceholder: '버튼을 눌러 확인하세요.',
+      bufferEmpty: '아직 캡처된 요청이 없습니다.',
+      bufferTotal: (n) => `총 ${n}건 캡처됨`,
+    },
+    en: {
+      heroEyebrow: 'Recording now',
+      heroTitle: 'One-click <span style="color:var(--red)">QA recording</span>\nfor web apps',
+      heroSubtitle: 'No backend. No permissions. DOM session replay + network log + console errors — all captured automatically from page load.',
+      heroCTAGithub: 'View on GitHub',
+      heroCTANpm: 'npm package',
+      liveNotice: 'This page is <strong>being recorded right now</strong>. Click the red button in the bottom-right to save your QA report.',
+      featuresLabel: 'Features',
+      featuresTitle: 'Everything you need, built-in',
+      featuresDesc: 'No browser extension. No backend. One script tag is all it takes.',
+      features: [
+        { icon: '🎥', title: 'DOM Session Replay', desc: 'Captures every DOM change via rrweb (MutationObserver). Works on mobile, WebView, every browser — no getDisplayMedia needed.' },
+        { icon: '🌐', title: 'Network Capture', desc: 'Intercepts fetch and XHR. Keeps up to 100 entries in HAR 1.2 format. Authorization and Cookie headers are auto-masked.' },
+        { icon: '🖥️', title: 'Console Capture', desc: 'Automatically captures console.error/warn, window.onerror, and unhandledrejection.' },
+        { icon: '📋', title: 'Unified QA Report', desc: 'Session replay + network inspector + console log in a single self-contained HTML file. Timeline-synchronized.' },
+        { icon: '📦', title: 'Single ZIP Download', desc: 'One click → one qa-report-*.zip downloaded. No backend required.' },
+        { icon: '☁️', title: 'Remote Upload', desc: 'Set an endpoint to POST files to your server. If the server returns a URL, a share-link copy button appears automatically.' },
+      ],
+      howLabel: 'How it works',
+      howTitle: 'Three steps to capture everything',
+      steps: [
+        { title: 'Install', desc: 'npm install qa-recorder or drop in a script tag.' },
+        { title: 'Initialize', desc: 'Call QARecorder.setup() once. Recording starts immediately on page load.' },
+        { title: 'Save', desc: 'Click the button → confirm → ZIP downloaded. Recording resumes automatically.' },
+      ],
+      flowLabel: 'Save flow',
+      modeLabel: 'Save mode',
+      modeLocal: '1 ZIP file is downloaded directly to your browser.',
+      modeRemote: 'Files are POSTed to /upload (mock server). A copy-link button appears on success.',
+      flowLocal: `Page load
   ├─ rrweb starts recording immediately (last 20 min rolling window)
   ├─ fetch / XHR intercepted (circular buffer, up to 100 entries)
   ├─ console.error / warn captured
@@ -187,10 +610,10 @@ Click button → optional memo → confirm → 1 ZIP file downloaded:
   qa-report-*.zip
     ├─ qa-session-*.rr.json  ← DOM events (rrweb)
     ├─ qa-network-*.har      ← network log (HAR 1.2)
-    └─ qa-report-*.html      ← unified QA report (session replay + network + console)
+    └─ qa-report-*.html      ← unified QA report
 
 After save → buffers reset + recording resumes`,
-        flowRemote: `Page load
+      flowRemote: `Page load
   ├─ rrweb starts recording immediately (last 20 min rolling window)
   ├─ fetch / XHR intercepted (circular buffer, up to 100 entries)
   ├─ console.error / warn captured
@@ -204,47 +627,66 @@ Click button → optional memo → confirm → POST /upload (multipart/form-data
 Server responds { url: "..." } → copy-link button shown
 
 After save → buffers reset + recording resumes`,
-        section2Title: 'Generate network requests',
-        section2Desc: 'Trigger some requests below, then click the floating button to save.',
-        btnFetch: 'fetch() test',
-        btnXhr: 'XHR test',
-        btnFetchErr: 'fetch() error test',
-        logPlaceholder: 'Click a request button...',
-        section3Title: 'Captured network buffer',
-        section3Desc: 'Inspect the network entries currently held in memory.',
-        btnBuffer: 'Show current buffer',
-        bufferPlaceholder: 'Click the button to inspect.',
-        bufferEmpty: 'No requests yet',
-        bufferTotal: (n) => `${n} request${n !== 1 ? 's' : ''} captured`,
-      },
-    };
+      integrationLabel: 'Integration',
+      integrationTitle: 'Framework integration',
+      integrationDesc: 'QARecorder.setup() is idempotent — safe to call multiple times, including in React StrictMode.',
+      playgroundLabel: 'Playground',
+      playgroundTitle: 'Try it live',
+      playgroundDesc: 'Trigger network requests and console errors below, then click the floating button to save your QA report.',
+      pgNetTitle: 'Network requests',
+      pgNetDesc: 'Trigger fetch/XHR requests to test network capture.',
+      pgConTitle: 'Console logs',
+      pgConDesc: 'Trigger errors and warnings to test console capture.',
+      pgBufTitle: 'Current network buffer',
+      btnFetch: 'fetch() test',
+      btnXhr: 'XHR test',
+      btnFetchErr: 'fetch() error',
+      btnUncaught: 'Uncaught Error',
+      btnUnhandled: 'Unhandled Promise',
+      btnBuffer: 'Show buffer',
+      logPlaceholder: 'Click a request button...',
+      bufferPlaceholder: 'Click the button to inspect.',
+      bufferEmpty: 'No requests captured yet.',
+      bufferTotal: (n) => `${n} request${n !== 1 ? 's' : ''} captured`,
+    },
+  };
 
-    const integrationCode = {
-      vanilla: `import { QARecorder } from 'qa-recorder';
+  const integrationCode = {
+    vanilla: {
+      filename: 'main.js',
+      code: `import { QARecorder } from 'qa-recorder';
 
 QARecorder.setup({ enableBackup: true });`,
-      react: `// main.tsx
-import { StrictMode } from 'react';
+    },
+    react: {
+      filename: 'main.tsx',
+      code: `import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { QARecorder } from 'qa-recorder';
 import App from './App';
 
+// Call outside React — safe in StrictMode (idempotent)
 QARecorder.setup({ enableBackup: true });
 
-createRoot(document.getElementById('root')).render(
+createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />
   </StrictMode>
 );`,
-      vue: `// main.ts
-import { createApp } from 'vue';
+    },
+    vue: {
+      filename: 'main.ts',
+      code: `import { createApp } from 'vue';
 import { QARecorder } from 'qa-recorder';
 import App from './App.vue';
 
 QARecorder.setup({ enableBackup: true });
 
 createApp(App).mount('#app');`,
-      script: `<script>
+    },
+    script: {
+      filename: 'index.html',
+      code: `<script>
   window.__QA_RECORDER_CONFIG__ = {
     enableBackup: true,
     maxRequests: 100,
@@ -252,158 +694,180 @@ createApp(App).mount('#app');`,
   };
 <\/script>
 <script src="https://unpkg.com/qa-recorder/dist/qa-recorder.umd.js"><\/script>`,
-    };
+    },
+  };
 
-    let lang = 'ko';
-    let mode = 'local';
-    let framework = 'vanilla';
+  let lang = 'ko';
+  let mode = 'local';
+  let framework = 'vanilla';
 
-    function setLang(l) {
-      lang = l;
-      document.documentElement.lang = l;
-      document.getElementById('btn-ko').classList.toggle('active', l === 'ko');
-      document.getElementById('btn-en').classList.toggle('active', l === 'en');
-      render();
-    }
-
-    function setMode(m) {
-      mode = m;
-      document.getElementById('btn-local').classList.toggle('active', m === 'local');
-      document.getElementById('btn-remote').classList.toggle('active', m === 'remote');
-      render();
-      if (window.__reinitRecorder) window.__reinitRecorder(m);
-    }
-
-    function setFramework(f) {
-      framework = f;
-      const tabs = document.getElementById('framework-tabs').querySelectorAll('button');
-      const labels = ['vanilla', 'react', 'vue', 'script'];
-      tabs.forEach((btn, i) => {
-        const active = labels[i] === f;
-        btn.style.background = active ? '#3b82f6' : '#fff';
-        btn.style.color = active ? '#fff' : '#4a5568';
-        btn.style.borderColor = active ? '#3b82f6' : '#cbd5e0';
-      });
-      document.getElementById('integration-code').textContent = integrationCode[f];
-    }
-
-    function render() {
-      const t = i18n[lang];
-      const isRemote = mode === 'remote';
-
-      document.getElementById('section-integration-title').textContent = t.integrationTitle;
-      document.getElementById('section-integration-desc').textContent = t.integrationDesc;
-      document.getElementById('integration-code').textContent = integrationCode[framework];
-
-      document.getElementById('subtitle').innerHTML = t.subtitle;
-      document.getElementById('mode-label').textContent = t.modeLabel;
-
-      const badge = document.getElementById('badge-live');
-      badge.textContent = isRemote ? '● REMOTE' : '● LIVE';
-      badge.className = isRemote ? 'badge remote' : 'badge';
-
-      const box = document.getElementById('mode-info-box');
-      box.className = isRemote ? 'mode-info remote' : 'mode-info local';
-      document.getElementById('mode-info-text').innerHTML = isRemote ? t.modeRemote : t.modeLocal;
-
-      document.getElementById('section1-title').textContent = t.section1Title;
-      document.getElementById('flow-box').textContent = isRemote ? t.flowRemote : t.flowLocal;
-      document.getElementById('section2-title').textContent = t.section2Title;
-      document.getElementById('section2-desc').textContent = t.section2Desc;
-      document.getElementById('btn-fetch').textContent = t.btnFetch;
-      document.getElementById('btn-xhr').textContent = t.btnXhr;
-      document.getElementById('btn-fetch-err').textContent = t.btnFetchErr;
-      document.getElementById('section3-title').textContent = t.section3Title;
-      document.getElementById('section3-desc').textContent = t.section3Desc;
-      document.getElementById('btn-buffer').textContent = t.btnBuffer;
-      if (document.getElementById('log-output').dataset.userContent !== 'true') {
-        document.getElementById('log-output').textContent = t.logPlaceholder;
-      }
-      if (document.getElementById('buffer-output').dataset.userContent !== 'true') {
-        document.getElementById('buffer-output').textContent = t.bufferPlaceholder;
-      }
-    }
-
+  function setLang(l) {
+    lang = l;
+    document.documentElement.lang = l;
+    document.getElementById('btn-ko').classList.toggle('active', l === 'ko');
+    document.getElementById('btn-en').classList.toggle('active', l === 'en');
     render();
-  </script>
+  }
 
-  <script type="module">
-    import { QARecorder } from '../src/index.ts';
+  function setMode(m) {
+    mode = m;
+    document.getElementById('btn-local').classList.toggle('active', m === 'local');
+    document.getElementById('btn-remote').classList.toggle('active', m === 'remote');
+    render();
+    if (window.__reinitRecorder) window.__reinitRecorder(m);
+  }
 
-    let recorder = null;
+  function setFramework(f) {
+    framework = f;
+    document.querySelectorAll('.fw-tab').forEach((btn, i) => {
+      const labels = ['vanilla', 'react', 'vue', 'script'];
+      btn.classList.toggle('active', labels[i] === f);
+    });
+    document.getElementById('fw-filename').textContent = integrationCode[f].filename;
+    document.getElementById('integration-code').textContent = integrationCode[f].code;
+  }
 
-    async function initRecorder(m) {
-      if (recorder) recorder.destroy();
-      recorder = new QARecorder({
-        maxRequests: 100,
-        maskHeaders: ['Authorization', 'Cookie'],
-        enableBackup: true,
-        ...(m === 'remote' ? { endpoint: '/upload' } : {}),
-      });
-      window.__recorder = recorder;
-      await recorder.init();
+  function copyInstall() {
+    navigator.clipboard.writeText('npm install qa-recorder').catch(() => {});
+  }
+
+  function render() {
+    const t = i18n[lang];
+    const isRemote = mode === 'remote';
+
+    document.getElementById('hero-eyebrow-text').textContent = t.heroEyebrow;
+    document.getElementById('hero-title').innerHTML = t.heroTitle.replace('\n', '<br>');
+    document.getElementById('hero-subtitle').textContent = t.heroSubtitle;
+
+    document.getElementById('live-notice-text').innerHTML = t.liveNotice;
+
+    document.getElementById('features-label').textContent = t.featuresLabel;
+    document.getElementById('features-title').textContent = t.featuresTitle;
+    document.getElementById('features-desc').textContent = t.featuresDesc;
+    const iconColors = ['icon-red', 'icon-blue', 'icon-amber', 'icon-green', 'icon-violet', 'icon-sky'];
+    document.getElementById('features-grid').innerHTML = t.features.map((f, i) =>
+      `<div class="feature-card"><div class="feature-icon ${iconColors[i % iconColors.length]}">${f.icon}</div><div class="feature-title">${f.title}</div><div class="feature-desc">${f.desc}</div></div>`
+    ).join('');
+
+    document.getElementById('how-label').textContent = t.howLabel;
+    document.getElementById('how-title').textContent = t.howTitle;
+    document.getElementById('steps-grid').innerHTML = t.steps.map((s, i) =>
+      `<div class="step"><div class="step-num">${i + 1}</div><div><div class="step-title">${s.title}</div><div class="step-desc">${s.desc}</div></div></div>`
+    ).join('');
+
+    document.getElementById('flow-label').textContent = t.flowLabel;
+    const modeInfoBox = document.getElementById('mode-info-box');
+    modeInfoBox.className = isRemote ? 'mode-info remote' : 'mode-info local';
+    document.getElementById('mode-info-text').textContent = isRemote ? t.modeRemote : t.modeLocal;
+    document.getElementById('flow-box').textContent = isRemote ? t.flowRemote : t.flowLocal;
+
+    document.getElementById('integration-label').textContent = t.integrationLabel;
+    document.getElementById('integration-title').textContent = t.integrationTitle;
+    document.getElementById('integration-desc').textContent = t.integrationDesc;
+    document.getElementById('fw-filename').textContent = integrationCode[framework].filename;
+    document.getElementById('integration-code').textContent = integrationCode[framework].code;
+
+    document.getElementById('playground-label').textContent = t.playgroundLabel;
+    document.getElementById('playground-title').textContent = t.playgroundTitle;
+    document.getElementById('playground-desc').textContent = t.playgroundDesc;
+    document.getElementById('pg-net-title').textContent = t.pgNetTitle;
+    document.getElementById('pg-net-desc').textContent = t.pgNetDesc;
+    document.getElementById('pg-con-title').textContent = t.pgConTitle;
+    document.getElementById('pg-con-desc').textContent = t.pgConDesc;
+    document.getElementById('pg-buf-title').textContent = t.pgBufTitle;
+    document.getElementById('btn-fetch').textContent = t.btnFetch;
+    document.getElementById('btn-xhr').textContent = t.btnXhr;
+    document.getElementById('btn-fetch-err').textContent = t.btnFetchErr;
+    document.getElementById('btn-uncaught').textContent = t.btnUncaught;
+    document.getElementById('btn-unhandled').textContent = t.btnUnhandled;
+    document.getElementById('btn-buffer').textContent = t.btnBuffer;
+
+    if (document.getElementById('log-output').dataset.userContent !== 'true') {
+      document.getElementById('log-output').textContent = t.logPlaceholder;
     }
+    if (document.getElementById('buffer-output').dataset.userContent !== 'true') {
+      document.getElementById('buffer-output').textContent = t.bufferPlaceholder;
+    }
+  }
 
-    window.__reinitRecorder = initRecorder;
-    await initRecorder('local');
+  render();
+</script>
 
-    window.fetchTest = async () => {
-      const log = document.getElementById('log-output');
-      log.dataset.userContent = 'true';
-      try {
-        const res = await fetch('https://jsonplaceholder.typicode.com/posts/1');
-        const data = await res.json();
-        log.textContent = '[fetch] GET /posts/1\n' + JSON.stringify(data, null, 2);
-      } catch (e) {
-        log.textContent = '[fetch] Error: ' + e.message;
-      }
-    };
+<script type="module">
+  import { QARecorder } from '../src/index.ts';
 
-    window.xhrTest = () => {
-      const log = document.getElementById('log-output');
-      log.dataset.userContent = 'true';
-      const xhr = new XMLHttpRequest();
-      xhr.open('POST', 'https://jsonplaceholder.typicode.com/posts');
-      xhr.setRequestHeader('Content-Type', 'application/json');
-      xhr.onload = () => {
-        log.textContent = '[XHR] POST /posts\n' + xhr.responseText;
-      };
-      xhr.send(JSON.stringify({ title: 'test', body: 'hello', userId: 1 }));
-    };
+  let recorder = null;
 
-    window.fetchError = async () => {
-      const log = document.getElementById('log-output');
-      log.dataset.userContent = 'true';
-      try {
-        await fetch('https://jsonplaceholder.typicode.com/nonexistent/999');
-        log.textContent = '[fetch] 404 response (captured)';
-      } catch (e) {
-        log.textContent = '[fetch] Error: ' + e.message;
-      }
-    };
+  async function initRecorder(m) {
+    if (recorder) recorder.destroy();
+    recorder = new QARecorder({
+      maxRequests: 100,
+      maskHeaders: ['Authorization', 'Cookie'],
+      enableBackup: true,
+      ...(m === 'remote' ? { endpoint: '/upload' } : {}),
+    });
+    window.__recorder = recorder;
+    await recorder.init();
+  }
 
-    window.throwUncaught = () => {
-      setTimeout(() => { throw new Error('Intentional uncaught error for testing'); }, 0);
-    };
+  window.__reinitRecorder = initRecorder;
+  await initRecorder('local');
 
-    window.rejectUnhandled = () => {
-      Promise.reject(new Error('Intentional unhandled promise rejection'));
-    };
+  window.fetchTest = async () => {
+    const log = document.getElementById('log-output');
+    log.dataset.userContent = 'true';
+    try {
+      const res = await fetch('https://jsonplaceholder.typicode.com/posts/1');
+      const data = await res.json();
+      log.textContent = '[fetch] GET /posts/1\n' + JSON.stringify(data, null, 2);
+    } catch (e) {
+      log.textContent = '[fetch] Error: ' + e.message;
+    }
+  };
 
-    window.showBuffer = () => {
-      const out = document.getElementById('buffer-output');
-      out.dataset.userContent = 'true';
-      const entries = recorder.getNetworkEntries();
-      if (entries.length === 0) {
-        out.textContent = i18n[lang].bufferEmpty;
-        return;
-      }
-      out.textContent =
-        i18n[lang].bufferTotal(entries.length) + '\n\n' +
-        entries.map((e, i) =>
-          `[${i + 1}] ${e.request.method} ${e.request.url}\n    → ${e.response.status} (${Math.round(e.time)}ms)`
-        ).join('\n');
-    };
-  </script>
+  window.xhrTest = () => {
+    const log = document.getElementById('log-output');
+    log.dataset.userContent = 'true';
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', 'https://jsonplaceholder.typicode.com/posts');
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.onload = () => { log.textContent = '[XHR] POST /posts\n' + xhr.responseText; };
+    xhr.send(JSON.stringify({ title: 'test', body: 'hello', userId: 1 }));
+  };
+
+  window.fetchError = async () => {
+    const log = document.getElementById('log-output');
+    log.dataset.userContent = 'true';
+    try {
+      await fetch('https://jsonplaceholder.typicode.com/nonexistent/999');
+      log.textContent = '[fetch] 404 response (captured)';
+    } catch (e) {
+      log.textContent = '[fetch] Error: ' + e.message;
+    }
+  };
+
+  window.throwUncaught = () => {
+    setTimeout(() => { throw new Error('Intentional uncaught error for testing'); }, 0);
+  };
+
+  window.rejectUnhandled = () => {
+    Promise.reject(new Error('Intentional unhandled promise rejection'));
+  };
+
+  window.showBuffer = () => {
+    const out = document.getElementById('buffer-output');
+    out.dataset.userContent = 'true';
+    const entries = recorder.getNetworkEntries();
+    if (entries.length === 0) {
+      out.textContent = i18n[lang].bufferEmpty;
+      return;
+    }
+    out.textContent =
+      i18n[lang].bufferTotal(entries.length) + '\n\n' +
+      entries.map((e, i) =>
+        `[${i + 1}] ${e.request.method} ${e.request.url}\n    → ${e.response.status} (${Math.round(e.time)}ms)`
+      ).join('\n');
+  };
+</script>
 </body>
 </html>
