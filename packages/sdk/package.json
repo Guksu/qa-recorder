@@ -1,6 +1,6 @@
 {
   "name": "qa-recorder",
-  "version": "1.11.2",
+  "version": "1.11.3",
   "description": "One-click QA recording for web apps — screen video + network activity, all in the browser.",
   "keywords": [
     "qa",

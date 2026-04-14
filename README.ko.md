@@ -3,9 +3,9 @@
 [![npm version](https://img.shields.io/npm/v/qa-recorder?color=crimson)](https://www.npmjs.com/package/qa-recorder)
 [![license](https://img.shields.io/npm/l/qa-recorder?color=blue)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![라이브 데모](https://img.shields.io/badge/라이브%20데모-→-e53e3e)](https://guksu.github.io/qa-recorder/)
-
 **버튼 하나로 DOM 세션 리플레이 + 네트워크 기록 + 콘솔 에러를 저장하는 웹 QA 라이브러리**
+
+**[→ 라이브 데모](https://guksu.github.io/qa-recorder/)**
 
 [English](./README.md)
 
