@@ -3,7 +3,6 @@
 [![npm version](https://img.shields.io/npm/v/qa-recorder?color=crimson)](https://www.npmjs.com/package/qa-recorder)
 [![license](https://img.shields.io/npm/l/qa-recorder?color=blue)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![test](https://img.shields.io/badge/tests-164%20passing-brightgreen)](./packages/sdk)
 
 **One-click QA recording for web apps — DOM session replay + network activity + console errors, all in the browser.**
 
@@ -35,7 +34,7 @@ No backend required. No browser extension. No screen share permission. Just add 
 | 📋 | **Unified QA report** | Single self-contained HTML: session replay (left) + network inspector + console log (right). Time-synchronized — clicking a network row or console entry seeks to that exact moment. |
 | 🔍 | **Network detail panel** | Click any request row to inspect Headers, Payload, Response, and Timing — Chrome DevTools style. |
 | 🔒 | **Header masking** | `Authorization`, `Cookie`, and custom headers are automatically redacted. |
-| 📦 | **Local save** | Downloads 3 files directly — no backend needed. |
+| 📦 | **Local save** | Downloads a single ZIP file directly — no backend needed. |
 | ☁️ | **Remote upload** | Optionally POST files to your own server. Shows a share-link copy button on success. |
 | 💾 | **Session continuity** | `enableBackup: true` auto-saves the session to IndexedDB on tab hide/close and silently restores it after a page refresh — no prompts, no data loss. |
 | 🧩 | **Shadow DOM UI** | Floating button and modals are fully isolated from the host page's styles. |
@@ -60,17 +59,51 @@ Or drop it in via `<script>` tag (UMD build, no bundler required):
 
 ## Quick Start
 
-### ESM / npm
+### Vanilla JS
 
 ```ts
 import { QARecorder } from 'qa-recorder';
 
-const recorder = new QARecorder();
-await recorder.init();
+QARecorder.setup({
+  enableBackup: true,
+});
 // Recording starts immediately — no permission prompt, no click needed.
 // A red floating button appears in the bottom-right corner.
 // The last 20 minutes are always available in memory.
-// 1 click → confirm → three files download automatically → recording continues.
+// 1 click → confirm → one ZIP file downloads automatically → recording continues.
+```
+
+### React
+
+Call `QARecorder.setup()` at the module level — outside any component or hook. This is safe even in React StrictMode since `setup()` is idempotent (subsequent calls are no-ops).
+
+```ts
+// main.tsx
+import { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
+import { QARecorder } from 'qa-recorder';
+import App from './App';
+
+QARecorder.setup({ enableBackup: true });
+
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <App />
+  </StrictMode>
+);
+```
+
+### Vue
+
+```ts
+// main.ts
+import { createApp } from 'vue';
+import { QARecorder } from 'qa-recorder';
+import App from './App.vue';
+
+QARecorder.setup({ enableBackup: true });
+
+createApp(App).mount('#app');
 ```
 
 ### Script tag
@@ -78,6 +111,7 @@ await recorder.init();
 ```html
 <script>
   window.__QA_RECORDER_CONFIG__ = {
+    enableBackup: true,
     maxRequests: 100,
     maskHeaders: ['Authorization', 'Cookie'],
   };
@@ -91,10 +125,11 @@ await recorder.init();
 
 ### Local (default)
 
-When no `endpoint` is configured, three files are downloaded to the user's device:
+When no `endpoint` is configured, a single ZIP file is downloaded to the user's device:
 
 | File | Contents |
 |---|---|
+| `qa-report-{timestamp}.zip` | Contains all three files below |
 | `qa-session-{timestamp}.rr.json` | DOM session replay (rrweb events) |
 | `qa-network-{timestamp}.har` | Network log (HAR 1.2) |
 | `qa-report-{timestamp}.html` | Unified QA report — session replay + network + console in one file |
@@ -180,10 +215,11 @@ User clicks the button (save the last 20 minutes)
   │   └─ SharePanel.show(url)   → copy-link button (if server returns url)
   │
   └─ [no endpoint]
-      └─ LocalStorage.save()    → downloads 3 files:
-                                   qa-session-*.rr.json
-                                   qa-network-*.har
-                                   qa-report-*.html  ← unified viewer
+      └─ LocalStorage.save()    → downloads 1 ZIP file:
+                                   qa-report-*.zip
+                                     ├─ qa-session-*.rr.json
+                                     ├─ qa-network-*.har
+                                     └─ qa-report-*.html  ← unified viewer
 
   └─ ScreenRecorder.reset() + start()   → recording resumes immediately
      NetworkCapture.clearBuffer()       → network log reset
