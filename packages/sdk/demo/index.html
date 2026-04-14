@@ -710,6 +710,8 @@ createApp(App).mount('#app');`,
   }
 
   function setMode(m) {
+    const isLocal = ['localhost', '127.0.0.1', ''].includes(window.location.hostname);
+    if (m === 'remote' && !isLocal) return;
     mode = m;
     document.getElementById('btn-local').classList.toggle('active', m === 'local');
     document.getElementById('btn-remote').classList.toggle('active', m === 'remote');
@@ -794,7 +796,15 @@ createApp(App).mount('#app');`,
 </script>
 
 <script type="module">
-  import { QARecorder } from '../src/index.ts';
+  import { QARecorder } from 'https://esm.sh/qa-recorder';
+
+  const IS_LOCAL = ['localhost', '127.0.0.1', ''].includes(window.location.hostname);
+
+  // Remote tab is only available in local dev environment
+  if (!IS_LOCAL) {
+    const btnRemote = document.getElementById('btn-remote');
+    if (btnRemote) btnRemote.style.display = 'none';
+  }
 
   let recorder = null;
 
@@ -804,7 +814,7 @@ createApp(App).mount('#app');`,
       maxRequests: 100,
       maskHeaders: ['Authorization', 'Cookie'],
       enableBackup: true,
-      ...(m === 'remote' ? { endpoint: '/upload' } : {}),
+      ...(m === 'remote' && IS_LOCAL ? { endpoint: '/upload' } : {}),
     });
     window.__recorder = recorder;
     await recorder.init();
