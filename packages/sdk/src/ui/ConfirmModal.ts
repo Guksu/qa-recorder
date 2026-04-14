@@ -27,7 +27,7 @@ export class ConfirmModal {
           border-radius: 6px;
           font-size: 12px;
           font-family: inherit;
-          resize: vertical;
+          resize: none;
           outline: none;
           box-sizing: border-box;
           color: #0f172a;
