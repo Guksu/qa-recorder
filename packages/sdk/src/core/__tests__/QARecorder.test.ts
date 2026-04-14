@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { QARecorder } from '../QARecorder.js';
 
 const mocks = vi.hoisted(() => ({
@@ -193,5 +193,61 @@ describe('QARecorder', () => {
     await vi.waitFor(() => expect(mocks.localStorageSave).toHaveBeenCalled());
     expect(sessionStorageMock.removeItem).toHaveBeenCalledWith('qa-recorder-backup');
     recorder.destroy();
+  });
+});
+
+describe('QARecorder.setup / getInstance', () => {
+  afterEach(() => {
+    QARecorder.getInstance()?.destroy();
+  });
+
+  it('setup() 전에는 getInstance()가 null을 반환한다', () => {
+    expect(QARecorder.getInstance()).toBeNull();
+  });
+
+  it('setup() 후 getInstance()가 QARecorder 인스턴스를 반환한다', async () => {
+    QARecorder.setup();
+    await vi.waitFor(() => expect(mocks.record).toHaveBeenCalledOnce());
+    expect(QARecorder.getInstance()).toBeInstanceOf(QARecorder);
+  });
+
+  it('setup()을 여러 번 호출해도 init()은 한 번만 실행된다', async () => {
+    QARecorder.setup();
+    QARecorder.setup();
+    QARecorder.setup();
+    await vi.waitFor(() => expect(mocks.record).toHaveBeenCalledOnce());
+    expect(mocks.record).toHaveBeenCalledOnce();
+  });
+
+  it('setup()을 여러 번 호출해도 항상 동일한 인스턴스를 반환한다', () => {
+    QARecorder.setup();
+    const first = QARecorder.getInstance();
+    QARecorder.setup();
+    const second = QARecorder.getInstance();
+    expect(first).toBe(second);
+  });
+
+  it('destroy() 후 getInstance()가 null을 반환한다', async () => {
+    QARecorder.setup();
+    await vi.waitFor(() => expect(mocks.record).toHaveBeenCalledOnce());
+    QARecorder.getInstance()!.destroy();
+    expect(QARecorder.getInstance()).toBeNull();
+  });
+
+  it('destroy() 후 setup()을 다시 호출하면 새 인스턴스가 초기화된다', async () => {
+    QARecorder.setup();
+    await vi.waitFor(() => expect(mocks.record).toHaveBeenCalledOnce());
+    QARecorder.getInstance()!.destroy();
+
+    vi.clearAllMocks();
+    document.body.innerHTML = '';
+    mocks.record.mockImplementation(({ emit }: { emit: (event: unknown) => void }) => {
+      emit({ type: 2, data: {}, timestamp: 1000 });
+      return mocks.stopFn;
+    });
+
+    QARecorder.setup();
+    await vi.waitFor(() => expect(mocks.record).toHaveBeenCalledOnce());
+    expect(QARecorder.getInstance()).toBeInstanceOf(QARecorder);
   });
 });

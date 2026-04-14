@@ -15,6 +15,31 @@ import type { ConsoleEntry } from '../console/ConsoleCapture.js';
 const SESSION_KEY = 'qa-recorder-backup';
 
 export class QARecorder {
+  private static _instance: QARecorder | null = null;
+
+  /**
+   * Initialize qa-recorder as a singleton. Safe to call multiple times —
+   * subsequent calls are no-ops. Designed to be called at module level,
+   * outside React components, so StrictMode double-invocation has no effect.
+   *
+   * @example
+   * // main.tsx or app entry point — outside React
+   * QARecorder.setup({ enableBackup: true });
+   */
+  static setup(config?: QARecorderConfig): void {
+    if (!QARecorder._instance) {
+      QARecorder._instance = new QARecorder(config);
+      QARecorder._instance.init();
+    }
+  }
+
+  /**
+   * Returns the singleton instance created by `setup()`, or `null` if not yet initialized.
+   */
+  static getInstance(): QARecorder | null {
+    return QARecorder._instance;
+  }
+
   private config: Required<QARecorderConfig>;
   private networkCapture: NetworkCapture;
   private screenRecorder: ScreenRecorder;
@@ -131,6 +156,9 @@ export class QARecorder {
     if (this.pageHideHandler) {
       window.removeEventListener('pagehide', this.pageHideHandler);
       this.pageHideHandler = null;
+    }
+    if (QARecorder._instance === this) {
+      QARecorder._instance = null;
     }
   }
 
