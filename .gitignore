@@ -15,6 +15,7 @@ dist/
 # Claude Code
 .claude/
 CLAUDE.md
+.impeccable.md
 
 # Logs
 *.log
