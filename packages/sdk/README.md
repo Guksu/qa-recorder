@@ -3,8 +3,9 @@
 [![npm version](https://img.shields.io/npm/v/qa-recorder?color=crimson)](https://www.npmjs.com/package/qa-recorder)
 [![license](https://img.shields.io/npm/l/qa-recorder?color=blue)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-
 **One-click QA recording for web apps — DOM session replay + network activity + console errors, all in the browser.**
+
+**[→ Live Demo](https://guksu.github.io/qa-recorder/)**
 
 [한국어](./README.ko.md)
 

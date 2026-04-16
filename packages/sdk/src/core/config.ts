@@ -49,10 +49,11 @@ export interface QARecorderConfig {
   maxConsoleEntries?: number;
 
   /**
-   * When `true`, the current session is automatically saved to IndexedDB whenever
-   * the tab becomes hidden (refresh, close, navigate). On the next `init()`, the
-   * backup is silently restored into the current session buffers before recording
-   * continues. The 20-minute rolling window is always respected.
+   * When `true`, the current session is automatically saved to sessionStorage whenever
+   * the tab is hidden (refresh, navigate). On the next `init()` within the same tab
+   * session, the backup is silently restored into the current buffers before recording
+   * continues. Note: sessionStorage is cleared when the tab is closed, so this only
+   * survives page refreshes and navigations — not full tab/browser closes.
    *
    * @default false
    */

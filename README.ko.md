@@ -41,7 +41,7 @@
 | 🔒 | **헤더 마스킹** | `Authorization`, `Cookie` 등 민감 헤더 자동 마스킹. |
 | 📦 | **로컬 저장** | 파일 3종을 로컬에 다운로드 — 백엔드 불필요. |
 | ☁️ | **원격 업로드** | 서버 endpoint 설정 시 POST 업로드. 응답 URL이 있으면 링크 복사 버튼 노출. |
-| 💾 | **세션 연속성** | `enableBackup: true` 설정 시 탭 숨김/닫기 시 세션을 IndexedDB에 자동 저장하고 새로고침 후 조용히 복원 — 팝업 없음, 데이터 손실 없음. |
+| 💾 | **세션 연속성** | `enableBackup: true` 설정 시 탭 숨김 시 세션을 sessionStorage에 자동 저장하고 새로고침 후 조용히 복원 — 팝업 없음, 데이터 손실 없음. (탭을 닫으면 데이터가 삭제됩니다.) |
 | 🧩 | **Shadow DOM UI** | 플로팅 버튼과 팝업이 호스트 페이지 스타일과 완전히 격리. |
 
 ---
@@ -146,7 +146,7 @@ window.__QA_RECORDER_CONFIG__ = {
   zIndex: 2147483647,        // UI 요소의 z-index (기본값: 최대 정수).
   consoleLevels: ['error', 'warn'],  // 캡처할 콘솔 레벨 (기본값 표시).
   maxConsoleEntries: 200,    // 순환 버퍼 최대 콘솔 기록 수 (기본값: 200).
-  enableBackup: false,       // 탭 숨김/닫기 시 세션을 IndexedDB에 자동 저장하고 새로고침 후 복원 (기본값: false).
+  enableBackup: false,       // 탭 숨김 시 세션을 sessionStorage에 자동 저장하고 새로고침 후 복원 (기본값: false). 탭 닫기 시 삭제됨.
 };
 ```
 
@@ -158,7 +158,7 @@ window.__QA_RECORDER_CONFIG__ = {
 | `zIndex` | `number` | `2147483647` | UI 요소(버튼, 프로그레스 바, 공유 패널)의 z-index. |
 | `consoleLevels` | `string[]` | `['error', 'warn']` | 캡처할 콘솔 레벨. 유효값: `'error'`, `'warn'`, `'log'`, `'info'`. |
 | `maxConsoleEntries` | `number` | `200` | 순환 버퍼에 유지할 최대 콘솔 기록 수. |
-| `enableBackup` | `boolean` | `false` | `true`로 설정 시, 탭이 숨겨질 때(새로고침·닫기·이동) 현재 세션을 IndexedDB에 자동 저장. 다음 `init()` 호출 시 팝업 없이 현재 세션 버퍼에 조용히 복원. 최근 20분 롤링 윈도우는 항상 적용됨. |
+| `enableBackup` | `boolean` | `false` | `true`로 설정 시, 탭이 숨겨질 때(새로고침·이동) 현재 세션을 sessionStorage에 자동 저장. 다음 `init()` 호출 시 팝업 없이 현재 세션 버퍼에 조용히 복원. 최근 20분 롤링 윈도우는 항상 적용됨. 탭 닫기 시 데이터 삭제. |
 
 ---
 
