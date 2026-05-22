@@ -3,7 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/qa-recorder?color=crimson)](https://www.npmjs.com/package/qa-recorder)
 [![license](https://img.shields.io/npm/l/qa-recorder?color=blue)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-**버튼 하나로 DOM 세션 리플레이 + 네트워크 기록 + 콘솔 에러를 저장하는 웹 QA 라이브러리**
+**rrweb DOM 직렬화 방식으로 세션 흐름, 네트워크 요청, 콘솔 에러를 통합 수집해 리포트 하나로 만드는 웹 QA 라이브러리 — 버튼 하나, 백엔드 불필요**
 
 **[→ 라이브 데모](https://guksu.github.io/qa-recorder/)**
 
@@ -19,11 +19,13 @@
 
 개발자가 버그를 찾으려면 세 가지가 필요합니다: **그 순간의 화면**, **그 순간의 네트워크 요청**, 그리고 **그 순간의 콘솔 에러**. 스크린샷 한 장과 텍스트 재현 절차로는 충분하지 않은 경우가 많습니다.
 
-`qa-recorder`는 페이지 로드 시점에 즉시 녹화를 시작합니다 — 별도 클릭 불필요. 최근 20분 분량을 메모리에 유지합니다 (영상 파일 없음, 디스크 용량 부담 없음). QA 담당자가 플로팅 버튼을 클릭하면 최근 20분이 저장됩니다:
+`qa-recorder`는 **rrweb DOM 직렬화** 방식 — 영상 캡처가 아닌 — 으로 페이지 로드 시점부터 모든 DOM 변화, 사용자 인터랙션, 네트워크 요청, 콘솔 에러를 통합 수집합니다. rrweb이 영상 스트림 대신 DOM 트리를 직렬화하기 때문에 대용량 파일도, 화면 공유 권한도, 플랫폼 제약도 없습니다.
 
-- **DOM 세션 리플레이** 원본 (rrweb 이벤트 스트림)
-- **네트워크 요청 로그** (.har)
-- **통합 QA 리포트** — 세션 리플레이 + 네트워크 인스펙터 + 콘솔 에러가 하나의 HTML 파일로
+최근 20분 분량을 메모리에 유지합니다. QA 담당자가 플로팅 버튼을 클릭하고 버그 메모를 입력(선택)하면 저장됩니다:
+
+- **DOM 세션 리플레이** 원본 (rrweb 이벤트 — 경량, 영상 없음)
+- **네트워크 요청 로그** (HAR 1.2)
+- **통합 QA 리포트** — 세션 리플레이 + 네트워크 인스펙터 + 콘솔 에러가 시간 동기화된 하나의 HTML 파일로
 
 백엔드 불필요. 브라우저 확장 프로그램 불필요. 화면 공유 권한 불필요. script 태그 하나만 추가하면 됩니다.
 
@@ -41,6 +43,7 @@
 | 🔒 | **헤더 마스킹** | `Authorization`, `Cookie` 등 민감 헤더 자동 마스킹. |
 | 📦 | **로컬 저장** | 파일 3종을 로컬에 다운로드 — 백엔드 불필요. |
 | ☁️ | **원격 업로드** | 서버 endpoint 설정 시 POST 업로드. 응답 URL이 있으면 링크 복사 버튼 노출. |
+| 📝 | **버그 메모** | 저장 시 입력하는 선택적 텍스트 메모 — 통합 HTML 리포트에 포함되고 원격 업로드 시 함께 전송. |
 | 💾 | **세션 연속성** | `enableBackup: true` 설정 시 탭 숨김 시 세션을 sessionStorage에 자동 저장하고 새로고침 후 조용히 복원 — 팝업 없음, 데이터 손실 없음. (탭을 닫으면 데이터가 삭제됩니다.) |
 | 🧩 | **Shadow DOM UI** | 플로팅 버튼과 팝업이 호스트 페이지 스타일과 완전히 격리. |
 
@@ -95,10 +98,11 @@ await recorder.init();
 
 ### 로컬 저장 (기본)
 
-`endpoint`를 설정하지 않으면 사용자 기기에 파일 3종을 다운로드합니다:
+`endpoint`를 설정하지 않으면 사용자 기기에 ZIP 파일 1개를 다운로드합니다:
 
 | 파일 | 내용 |
 |---|---|
+| `qa-report-{timestamp}.zip` | 아래 3개 파일을 포함한 ZIP |
 | `qa-session-{timestamp}.rr.json` | DOM 세션 리플레이 (rrweb 이벤트 원본) |
 | `qa-network-{timestamp}.har` | 네트워크 로그 (HAR 1.2) |
 | `qa-report-{timestamp}.html` | 통합 QA 리포트 — 세션 리플레이 + 네트워크 + 콘솔을 하나의 파일로 |
@@ -126,6 +130,7 @@ await recorder.init();
 POST /upload
   session  →  qa-session-{timestamp}.rr.json
   har      →  qa-network-{timestamp}.har
+  memo     →  (선택) 사용자가 입력한 버그 메모 텍스트
 ```
 
 ---
@@ -171,7 +176,9 @@ window.__QA_RECORDER_CONFIG__ = {
   ├─ ConsoleCapture.start()   → console.error/warn + window.onerror 패치 (순환 버퍼)
   └─ FloatingButton.mount()   → Shadow DOM으로 버튼 삽입 (recording 상태)
 
-플로팅 버튼 클릭 (최근 20분 저장)
+플로팅 버튼 클릭
+  ├─ ConfirmModal.show()            → { confirmed, memo }
+  │   └─ [취소] → no-op
   ├─ ScreenRecorder.stop()
   ├─ NetworkCapture.snapshot()  → HAR 1.2 JSON 생성
   ├─ ConsoleCapture.snapshot()  → 콘솔 엔트리 배열 생성
@@ -184,10 +191,11 @@ window.__QA_RECORDER_CONFIG__ = {
   │   └─ SharePanel.show(url)   → 링크 복사 버튼 (서버가 url 반환 시)
   │
   └─ [endpoint 없는 경우]
-      └─ LocalStorage.save()    → 파일 3종 다운로드:
-                                   qa-session-*.rr.json
-                                   qa-network-*.har
-                                   qa-report-*.html  ← 통합 QA 리포트
+      └─ LocalStorage.save()    → ZIP 파일 1개 다운로드:
+                                   qa-report-*.zip
+                                     ├─ qa-session-*.rr.json
+                                     ├─ qa-network-*.har
+                                     └─ qa-report-*.html  ← 통합 QA 리포트
 
   └─ ScreenRecorder.reset() + start()   → 녹화 자동 재시작
      NetworkCapture.clearBuffer()       → 네트워크 로그 초기화
