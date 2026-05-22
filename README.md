@@ -3,7 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/qa-recorder?color=crimson)](https://www.npmjs.com/package/qa-recorder)
 [![license](https://img.shields.io/npm/l/qa-recorder?color=blue)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-**One-click QA recording for web apps — DOM session replay + network activity + console errors, all in the browser.**
+**One-click QA capture for web apps. Uses rrweb DOM serialization to collect session flow, network requests, and console errors — unified in a single self-contained report, no backend required.**
 
 **[→ Live Demo](https://guksu.github.io/qa-recorder/)**
 
@@ -15,11 +15,13 @@
 
 Reproducing bugs in web applications is hard. When a QA engineer clicks a button and an error appears, the developer needs three things to debug it: **what was on screen**, **what network requests were made**, and **what errors were logged**. A screenshot and a text description are rarely enough.
 
-`qa-recorder` starts recording the moment the page loads — no interaction needed. It keeps a rolling 20-minute window in memory (no video files, no disk usage). When your QA team wants to capture a session, they click the floating button once to save:
+`qa-recorder` uses **rrweb DOM serialization** — not video capture — to record every DOM mutation, user interaction, network request, and console error from the moment the page loads. Because rrweb serializes the DOM tree rather than recording a video stream, there are no large files, no screen-share permissions, and the capture works on mobile, WebView, and any browser.
 
-- A **DOM session replay** of the entire interaction (rrweb format)
+It keeps a rolling 20-minute window in memory. When your QA team wants to capture a session, they click the floating button once, optionally add a bug memo, then save:
+
+- A **DOM session replay** of the entire interaction (rrweb events — lightweight, no video)
 - A **HAR network log** of the last 100 requests
-- A **unified QA report** — session replay + network inspector + console errors in one self-contained HTML file
+- A **unified QA report** — session replay + network inspector + console errors time-synchronized in one self-contained HTML file
 
 No backend required. No browser extension. No screen share permission. Just add one script tag.
 
@@ -37,6 +39,7 @@ No backend required. No browser extension. No screen share permission. Just add 
 | 🔒 | **Header masking** | `Authorization`, `Cookie`, and custom headers are automatically redacted. |
 | 📦 | **Local save** | Downloads a single ZIP file directly — no backend needed. |
 | ☁️ | **Remote upload** | Optionally POST files to your own server. Shows a share-link copy button on success. |
+| 📝 | **Bug memo** | Optional text note added at save time — embedded in the unified HTML report and sent with remote uploads. |
 | 💾 | **Session continuity** | `enableBackup: true` auto-saves the session to sessionStorage on tab hide and silently restores it after a page refresh or navigation — no prompts, no data loss. (Note: data is cleared when the tab is closed.) |
 | 🧩 | **Shadow DOM UI** | Floating button and modals are fully isolated from the host page's styles. |
 
@@ -158,6 +161,7 @@ The files are sent as `multipart/form-data`:
 POST /upload
   session  →  qa-session-{timestamp}.rr.json
   har      →  qa-network-{timestamp}.har
+  memo     →  (optional) bug memo text entered by the user
 ```
 
 ---
@@ -203,7 +207,9 @@ Page load
   ├─ ConsoleCapture.start()   → patches console.error/warn + window.onerror (circular buffer)
   └─ FloatingButton.mount()   → injects button via Shadow DOM (recording state)
 
-User clicks the button (save the last 20 minutes)
+User clicks the button
+  ├─ ConfirmModal.show()            → { confirmed, memo }
+  │   └─ [cancelled] → no-op
   ├─ ScreenRecorder.stop()
   ├─ NetworkCapture.snapshot()  → HAR 1.2 JSON
   ├─ ConsoleCapture.snapshot()  → console entries array

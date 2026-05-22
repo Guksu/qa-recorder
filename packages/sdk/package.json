@@ -1,7 +1,7 @@
 {
   "name": "qa-recorder",
-  "version": "1.11.4",
-  "description": "One-click QA recording for web apps — screen video + network activity, all in the browser.",
+  "version": "1.11.5",
+  "description": "One-click QA capture for web apps — rrweb DOM serialization, network logs, and console errors unified in one report.",
   "keywords": [
     "qa",
     "testing",
