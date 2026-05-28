@@ -158,4 +158,41 @@ describe('ScreenRecorder', () => {
     expect((events[0] as { timestamp: number }).timestamp).toBe(initial[0].timestamp);
     expect((events[events.length - 1] as { type: number }).type).toBe(3);
   });
+
+  describe('mode preset', () => {
+    it("mode='light'는 checkoutEveryNms 30분, sampling 없음을 전달한다", () => {
+      const recorder = new ScreenRecorder('light');
+      recorder.start();
+      const opts = mocks.record.mock.calls[0]![0] as Record<string, unknown>;
+      expect(opts.checkoutEveryNms).toBe(30 * 60 * 1000);
+      expect(opts.sampling).toBeUndefined();
+    });
+
+    it("mode='normal'은 checkoutEveryNms 20분, sampling 없음을 전달한다 (기본값)", () => {
+      const recorder = new ScreenRecorder('normal');
+      recorder.start();
+      const opts = mocks.record.mock.calls[0]![0] as Record<string, unknown>;
+      expect(opts.checkoutEveryNms).toBe(20 * 60 * 1000);
+      expect(opts.sampling).toBeUndefined();
+    });
+
+    it("mode='heavy'는 checkoutEveryNms 5분, sampling을 전달한다", () => {
+      const recorder = new ScreenRecorder('heavy');
+      recorder.start();
+      const opts = mocks.record.mock.calls[0]![0] as Record<string, unknown>;
+      expect(opts.checkoutEveryNms).toBe(5 * 60 * 1000);
+      expect(opts.sampling).toEqual({ mousemove: 100, scroll: 150, input: 'last' });
+    });
+
+    it("mode='heavy'에서 prependEvents는 5분 컷오프를 적용한다", () => {
+      const recorder = new ScreenRecorder('heavy');
+      recorder.start();
+      const beyondHeavy = { type: 2, data: {}, timestamp: Date.now() - 6 * 60 * 1000 };
+      const withinHeavy = { type: 2, data: {}, timestamp: Date.now() - 1000 };
+      recorder.prependEvents([beyondHeavy, withinHeavy]);
+      const events = recorder.getEvents();
+      expect(events.some(e => (e as { timestamp: number }).timestamp === beyondHeavy.timestamp)).toBe(false);
+      expect(events.some(e => (e as { timestamp: number }).timestamp === withinHeavy.timestamp)).toBe(true);
+    });
+  });
 });

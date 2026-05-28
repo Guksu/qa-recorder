@@ -50,7 +50,7 @@ export class QARecorder {
   constructor(overrides?: QARecorderConfig) {
     this.config = resolveConfig(overrides);
     this.networkCapture = new NetworkCapture(this.config.maxRequests, this.config.maskHeaders);
-    this.screenRecorder = new ScreenRecorder();
+    this.screenRecorder = new ScreenRecorder(this.config.mode);
     this.consoleCapture = new ConsoleCapture(this.config.maxConsoleEntries, this.config.consoleLevels);
     this.floatingButton = new FloatingButton(this.onButtonClick.bind(this), this.config.zIndex);
   }

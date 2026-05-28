@@ -1,5 +1,7 @@
 import type { ConsoleLevel } from '../console/ConsoleCapture.js';
 
+export type RecorderMode = 'light' | 'normal' | 'heavy';
+
 export interface QARecorderConfig {
   /**
    * Remote upload URL. When set, recorded files are POSTed as `multipart/form-data`
@@ -58,6 +60,19 @@ export interface QARecorderConfig {
    * @default false
    */
   enableBackup?: boolean;
+
+  /**
+   * Recording intensity preset. Controls rrweb's checkout interval and event sampling
+   * to keep the in-memory buffer bounded on long or heavy pages.
+   *
+   * - `'light'`: 30-minute checkout, no sampling (lightest pages, longer history)
+   * - `'normal'`: 20-minute checkout, no sampling (default)
+   * - `'heavy'`: 5-minute checkout, throttled mousemove/scroll/input (heavy pages
+   *   with frequent DOM mutations, animations, or long sessions)
+   *
+   * @default 'normal'
+   */
+  mode?: RecorderMode;
 }
 
 const DEFAULT_CONFIG: Required<QARecorderConfig> = {
@@ -68,6 +83,7 @@ const DEFAULT_CONFIG: Required<QARecorderConfig> = {
   consoleLevels: ['error', 'warn'],
   maxConsoleEntries: 200,
   enableBackup: false,
+  mode: 'normal',
 };
 
 export function resolveConfig(overrides?: QARecorderConfig): Required<QARecorderConfig> {

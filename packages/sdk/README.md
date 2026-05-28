@@ -183,6 +183,7 @@ window.__QA_RECORDER_CONFIG__ = {
   consoleLevels: ['error', 'warn'],  // Console levels to capture (default shown).
   maxConsoleEntries: 200,    // Max console entries in the circular buffer (default: 200).
   enableBackup: false,       // Auto-save session to sessionStorage on tab hide and restore after refresh (default: false). Cleared on tab close.
+  mode: 'normal',            // Recording intensity preset: 'light' | 'normal' | 'heavy' (default: 'normal').
 };
 ```
 
@@ -194,7 +195,8 @@ window.__QA_RECORDER_CONFIG__ = {
 | `zIndex` | `number` | `2147483647` | z-index for all UI elements (button, progress bar, share panel). |
 | `consoleLevels` | `string[]` | `['error', 'warn']` | Console levels to capture. Valid values: `'error'`, `'warn'`, `'log'`, `'info'`. |
 | `maxConsoleEntries` | `number` | `200` | Max console entries to keep in the circular buffer. |
-| `enableBackup` | `boolean` | `false` | When `true`, auto-saves the current session to sessionStorage whenever the tab becomes hidden (refresh, navigate). On the next `init()`, the backup is silently restored into the current session buffers before recording continues. The 20-minute rolling window is always respected. Note: data is cleared when the tab is closed. |
+| `enableBackup` | `boolean` | `false` | When `true`, auto-saves the current session to sessionStorage whenever the tab becomes hidden (refresh, navigate). On the next `init()`, the backup is silently restored into the current session buffers before recording continues. The rolling window matches `mode` (light: 30m / normal: 20m / heavy: 5m). Note: data is cleared when the tab is closed. |
+| `mode` | `'light' \| 'normal' \| 'heavy'` | `'normal'` | Recording intensity preset that controls rrweb's checkout interval and event sampling to keep the in-memory buffer bounded. Use `'heavy'` for pages with frequent DOM mutations, animations, or long sessions — 5-minute checkout plus throttled `mousemove`/`scroll`/`input`. Use `'light'` for lightweight pages where you want a longer 30-minute history. |
 
 ---
 

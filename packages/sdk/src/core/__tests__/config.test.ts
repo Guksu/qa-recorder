@@ -44,4 +44,19 @@ describe('resolveConfig', () => {
     const config = resolveConfig({ maxRequests: 10 });
     expect(config.maxRequests).toBe(10);
   });
+
+  it('mode의 기본값은 normal이다', () => {
+    const config = resolveConfig();
+    expect(config.mode).toBe('normal');
+  });
+
+  it('overrides로 mode를 heavy로 설정한다', () => {
+    const config = resolveConfig({ mode: 'heavy' });
+    expect(config.mode).toBe('heavy');
+  });
+
+  it('overrides로 mode를 light로 설정한다', () => {
+    const config = resolveConfig({ mode: 'light' });
+    expect(config.mode).toBe('light');
+  });
 });
