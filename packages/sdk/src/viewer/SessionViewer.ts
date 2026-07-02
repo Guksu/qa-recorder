@@ -1,6 +1,8 @@
+import { toScriptJson } from './scriptJson.js';
+
 export class SessionViewer {
   static generate(events: unknown[]): string {
-    const eventsJson = JSON.stringify(events);
+    const eventsJson = toScriptJson(events);
     return `<!DOCTYPE html>
 <html lang="en">
 <head>

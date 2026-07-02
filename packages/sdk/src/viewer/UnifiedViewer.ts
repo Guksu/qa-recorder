@@ -1,13 +1,14 @@
 import type { HARLog } from '@qa-recorder/shared';
 import type { ConsoleEntry } from '../console/ConsoleCapture.js';
+import { toScriptJson } from './scriptJson.js';
 
 export class UnifiedViewer {
   static generate(events: unknown[], harLog: HARLog, consoleLogs: ConsoleEntry[], memo = ''): string {
-    const eventsJson  = JSON.stringify(events);
-    const entriesJson = JSON.stringify(harLog.entries);
-    const consoleJson = JSON.stringify(consoleLogs);
+    const eventsJson  = toScriptJson(events);
+    const entriesJson = toScriptJson(harLog.entries);
+    const consoleJson = toScriptJson(consoleLogs);
     const memoHtml    = memo
-      ? `<div id="qa-memo-section" class="qa-memo"><span class="qa-memo-icon">📝</span><span class="qa-memo-text">${memo.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span></div>`
+      ? `<div id="qa-memo-section" class="qa-memo"><span class="qa-memo-icon">📝</span><span class="qa-memo-text">${memo.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span></div>`
       : '';
 
     return `<!DOCTYPE html>

@@ -113,4 +113,27 @@ describe('UnifiedViewer.generate', () => {
     const html = UnifiedViewer.generate(EVENTS, makeHARLog(), [], '');
     expect(html).not.toContain('qa-memo-section');
   });
+
+  it('캡처 데이터에 </script>가 있어도 스크립트 블록이 깨지지 않는다', () => {
+    const entry = makeEntry();
+    entry.response.content.text = '</script><script>alert(1)</script>';
+    const consoleLog: ConsoleEntry = {
+      timestamp: '2024-01-01T00:00:05.000Z',
+      level: 'error',
+      message: '<!--<script>alert(2)</script>',
+      _offsetMs: 100,
+    };
+    const html = UnifiedViewer.generate(EVENTS, makeHARLog([entry]), [consoleLog]);
+
+    expect(html).not.toContain('</script><script>alert(1)');
+    expect(html).not.toContain('<!--<script>');
+    // 이스케이프된 JSON은 원본 값으로 복원되어야 한다
+    expect(JSON.parse('"\\u003c/script>"')).toBe('</script>');
+  });
+
+  it('memo의 특수문자가 HTML 이스케이프된다', () => {
+    const html = UnifiedViewer.generate(EVENTS, makeHARLog(), [], '<img src=x onerror=alert(1)>');
+    expect(html).not.toContain('<img src=x');
+    expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;');
+  });
 });
