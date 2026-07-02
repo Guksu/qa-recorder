@@ -133,8 +133,13 @@ export class QARecorder {
         alert(`Upload failed: ${err instanceof Error ? err.message : String(err)}`);
       }
     } else {
-      await LocalStorage.save(this.screenRecorder.getEvents(), harLog, consoleLogs, memo);
-      ProgressBar.hide();
+      try {
+        await LocalStorage.save(this.screenRecorder.getEvents(), harLog, consoleLogs, memo);
+      } catch (err) {
+        alert(`Save failed: ${err instanceof Error ? err.message : String(err)}`);
+      } finally {
+        ProgressBar.hide();
+      }
     }
 
     if (this.config.enableBackup) {
