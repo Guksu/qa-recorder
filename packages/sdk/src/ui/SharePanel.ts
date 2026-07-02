@@ -4,7 +4,8 @@ export class SharePanel {
   private static host: HTMLElement | null = null;
 
   static show(url: string, zIndex = 2147483647): void {
-    if (this.host) return;
+    // 이미 표시 중이면 교체하여 항상 최신 URL을 노출
+    if (this.host) this.hide();
 
     this.host = document.createElement('div');
     this.host.setAttribute('data-qa', 'share-panel');
@@ -17,9 +18,11 @@ export class SharePanel {
     panel.className = 'qa-share-panel';
     panel.innerHTML = `
       <div class="qa-share-title">Saved</div>
-      <div class="qa-share-url">${url}</div>
+      <div class="qa-share-url"></div>
       <button class="qa-copy-btn">Copy link</button>
     `;
+    // 서버가 내려준 값이므로 HTML로 해석되지 않도록 textContent로 삽입
+    panel.querySelector('.qa-share-url')!.textContent = url;
 
     panel.querySelector('.qa-copy-btn')!.addEventListener('click', () => {
       navigator.clipboard.writeText(url);

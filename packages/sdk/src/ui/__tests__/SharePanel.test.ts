@@ -33,6 +33,22 @@ describe('SharePanel', () => {
     expect(hosts).toHaveLength(1);
   });
 
+  it('show()를 다시 호출하면 최신 URL이 표시된다', () => {
+    SharePanel.show('https://a.com/old');
+    SharePanel.show('https://b.com/new');
+    const host = document.querySelector('[data-qa="share-panel"]') as HTMLElement;
+    const urlEl = host.shadowRoot!.querySelector('.qa-share-url');
+    expect(urlEl?.textContent).toBe('https://b.com/new');
+  });
+
+  it('URL의 HTML 마크업이 해석되지 않고 텍스트로 표시된다', () => {
+    SharePanel.show('https://a.com/<img src=x onerror=alert(1)>');
+    const host = document.querySelector('[data-qa="share-panel"]') as HTMLElement;
+    expect(host.shadowRoot!.querySelector('img')).toBeNull();
+    expect(host.shadowRoot!.querySelector('.qa-share-url')?.textContent)
+      .toBe('https://a.com/<img src=x onerror=alert(1)>');
+  });
+
   it('복사 버튼 클릭 시 clipboard.writeText가 호출된다', async () => {
     SharePanel.show('https://example.com/share/abc');
     const host = document.querySelector('[data-qa="share-panel"]') as HTMLElement;
