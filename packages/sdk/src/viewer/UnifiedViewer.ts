@@ -4,9 +4,19 @@ import { toScriptJson } from './scriptJson.js';
 
 export class UnifiedViewer {
   static generate(events: unknown[], harLog: HARLog, consoleLogs: ConsoleEntry[], memo = ''): string {
+    /* _offsetMs는 녹화 시작 시점 기준이지만 리플레이 타임라인의 원점은
+     * EVENTS[0].timestamp(마지막 체크아웃 시점)다. 체크아웃이나 백업 복원 이후에는
+     * 두 원점이 어긋나므로, 절대 시각을 기준으로 리플레이 원점 대비 오프셋을 재계산한다. */
+    const t0 = events.length ? (events[0] as { timestamp?: unknown }).timestamp : undefined;
+    const syncOffset = <T extends { _offsetMs?: number }>(item: T, isoTime: string): T => {
+      if (typeof t0 !== 'number') return item;
+      const t = Date.parse(isoTime);
+      return Number.isNaN(t) ? item : { ...item, _offsetMs: Math.max(0, t - t0) };
+    };
+
     const eventsJson  = toScriptJson(events);
-    const entriesJson = toScriptJson(harLog.entries);
-    const consoleJson = toScriptJson(consoleLogs);
+    const entriesJson = toScriptJson(harLog.entries.map((e) => syncOffset(e, e.startedDateTime)));
+    const consoleJson = toScriptJson(consoleLogs.map((c) => syncOffset(c, c.timestamp)));
     const memoHtml    = memo
       ? `<div id="qa-memo-section" class="qa-memo"><span class="qa-memo-icon">📝</span><span class="qa-memo-text">${memo.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span></div>`
       : '';
