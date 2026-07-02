@@ -41,19 +41,36 @@ describe('ScreenRecorder', () => {
     expect(mocks.record).toHaveBeenCalledOnce();
   });
 
-  it('isCheckout이 true이면 이벤트 배열을 해당 이벤트만으로 초기화한다', () => {
+  it('체크아웃이 발생해도 직전 구간은 유지된다 (최소 한 주기 히스토리 보장)', () => {
     const recorder = new ScreenRecorder();
     mocks.record.mockImplementation(({ emit }: { emit: (event: unknown, isCheckout?: boolean) => void }) => {
-      emit({ type: 2, data: {}, timestamp: 1000 });         // 일반 이벤트
-      emit({ type: 2, data: {}, timestamp: 2000 });         // 일반 이벤트
-      emit({ type: 2, data: {}, timestamp: 3000 }, true);   // 체크포인트 (이전 버퍼 초기화)
-      emit({ type: 3, data: {}, timestamp: 4000 });         // 이후 이벤트
+      emit({ type: 2, data: {}, timestamp: 1000 });         // 이전 구간
+      emit({ type: 3, data: {}, timestamp: 2000 });         // 이전 구간
+      emit({ type: 4, data: {}, timestamp: 3000 }, true);   // 체크아웃 → 새 구간 시작
+      emit({ type: 3, data: {}, timestamp: 4000 });         // 현재 구간
       return mocks.stopFn;
     });
     recorder.start();
     const events = recorder.getEvents();
-    expect(events).toHaveLength(2); // 체크포인트 이벤트 + 이후 이벤트
-    expect((events[0] as { timestamp: number }).timestamp).toBe(3000);
+    expect(events).toHaveLength(4); // 직전 구간 2개 + 체크아웃 이벤트 + 이후 이벤트
+    expect((events[0] as { timestamp: number }).timestamp).toBe(1000);
+  });
+
+  it('체크아웃이 두 번 발생하면 가장 오래된 구간은 폐기된다 (최대 두 구간 유지)', () => {
+    const recorder = new ScreenRecorder();
+    mocks.record.mockImplementation(({ emit }: { emit: (event: unknown, isCheckout?: boolean) => void }) => {
+      emit({ type: 2, data: {}, timestamp: 1000 });         // 1구간 (폐기 대상)
+      emit({ type: 4, data: {}, timestamp: 2000 }, true);   // 체크아웃 1 → 2구간 시작
+      emit({ type: 3, data: {}, timestamp: 3000 });
+      emit({ type: 4, data: {}, timestamp: 4000 }, true);   // 체크아웃 2 → 3구간 시작
+      emit({ type: 3, data: {}, timestamp: 5000 });
+      return mocks.stopFn;
+    });
+    recorder.start();
+    const events = recorder.getEvents();
+    expect(events).toHaveLength(4); // 2구간(2개) + 3구간(2개)
+    expect((events[0] as { timestamp: number }).timestamp).toBe(2000);
+    expect(events.some(e => (e as { timestamp: number }).timestamp === 1000)).toBe(false);
   });
 
   it('stop()은 record()가 반환한 stop 함수를 호출한다', () => {
@@ -105,6 +122,17 @@ describe('ScreenRecorder', () => {
     recorder.clearBuffer();
     expect(mocks.takeFullSnapshot).toHaveBeenCalledOnce();
     expect(recorder.getEvents()).toHaveLength(0);
+  });
+
+  it('clearBuffer()는 녹화 중이 아니면 takeFullSnapshot을 호출하지 않는다', () => {
+    const recorder = new ScreenRecorder();
+    expect(() => recorder.clearBuffer()).not.toThrow();
+    expect(mocks.takeFullSnapshot).not.toHaveBeenCalled();
+
+    recorder.start();
+    recorder.stop();
+    recorder.clearBuffer();
+    expect(mocks.takeFullSnapshot).not.toHaveBeenCalled();
   });
 
   it('reset()은 stopped 상태에서 idle로 되돌려 start()를 다시 호출할 수 있다', () => {

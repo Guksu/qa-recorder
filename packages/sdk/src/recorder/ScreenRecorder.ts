@@ -24,6 +24,12 @@ const MODE_PRESETS: Record<RecorderMode, ModePreset> = {
  */
 export class ScreenRecorder {
   private events: unknown[] = [];
+  /**
+   * 직전 체크아웃 구간. 체크아웃 시 현재 구간을 즉시 버리면 저장 시점에 따라
+   * 히스토리가 0에 수렴할 수 있으므로, 마지막 두 구간을 유지해
+   * 항상 최소 한 주기(checkoutEveryNms)만큼의 리플레이를 보장한다 (최대 두 주기).
+   */
+  private prevEvents: unknown[] = [];
   private stopFn: (() => void) | null = null;
   private state: RecorderState = 'idle';
   private preset: ModePreset;
@@ -36,9 +42,11 @@ export class ScreenRecorder {
     if (this.state === 'recording') return;
 
     this.events = [];
+    this.prevEvents = [];
     const opts: Parameters<typeof record>[0] = {
       emit: (event, isCheckout) => {
         if (isCheckout) {
+          this.prevEvents = this.events;
           this.events = [event];
         } else {
           this.events.push(event);
@@ -54,7 +62,9 @@ export class ScreenRecorder {
 
   clearBuffer(): void {
     this.events = [];
-    record.takeFullSnapshot();
+    this.prevEvents = [];
+    // takeFullSnapshot은 record()가 실행 중일 때만 유효 — idle/stopped에서 호출하면 rrweb이 throw
+    if (this.state === 'recording') record.takeFullSnapshot();
   }
 
   stop(): void {
@@ -66,12 +76,11 @@ export class ScreenRecorder {
 
   getEvents(): unknown[] {
     if (this.state === 'idle') throw new Error('No recording available');
-    return this.events;
+    return [...this.prevEvents, ...this.events];
   }
 
   getBlob(): Blob {
-    if (this.state === 'idle') throw new Error('No recording available');
-    return new Blob([JSON.stringify(this.events)], { type: 'application/json' });
+    return new Blob([JSON.stringify(this.getEvents())], { type: 'application/json' });
   }
 
   /** 백업에서 복원된 이벤트를 버퍼 앞에 추가 (현재 mode의 checkout 주기 초과분 자동 필터링) */
@@ -80,12 +89,13 @@ export class ScreenRecorder {
     const filtered = events.filter(
       (e) => ((e as { timestamp: number }).timestamp ?? 0) >= cutoff,
     );
-    this.events = [...filtered, ...this.events];
+    this.prevEvents = [...filtered, ...this.prevEvents];
   }
 
   reset(): void {
     if (this.state === 'recording') return;
     this.events = [];
+    this.prevEvents = [];
     this.stopFn = null;
     this.state = 'idle';
   }
