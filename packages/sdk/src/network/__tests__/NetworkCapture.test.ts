@@ -101,15 +101,72 @@ describe('NetworkCapture', () => {
       capture.stop();
     });
 
-    it('응답 body를 content에 기록한다', async () => {
+    it('응답 body를 content에 기록한다 (비동기로 채워짐)', async () => {
       vi.stubGlobal('fetch', makeMockFetch(200, '{"id":1}'));
       const capture = new NetworkCapture(100, []);
       capture.start();
 
       await window.fetch('https://example.com/api');
+      await new Promise((r) => setTimeout(r, 0)); // body 비동기 캡처 대기
 
       const entry = capture.snapshot()[0];
       expect(entry.response.content.text).toBe('{"id":1}');
+      expect(entry.response.bodySize).toBe(8);
+      capture.stop();
+    });
+
+    it('스트리밍 응답이어도 fetch가 body 완료를 기다리지 않고 즉시 resolve된다', async () => {
+      // 절대 close되지 않는 스트림 — 기존 구현은 여기서 영원히 블로킹됨
+      const neverEndingStream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('data: hello\n\n'));
+        },
+      });
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+        new Response(neverEndingStream, {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+        }),
+      ));
+      const capture = new NetworkCapture(100, []);
+      capture.start();
+
+      const response = await window.fetch('https://example.com/sse');
+
+      expect(response.status).toBe(200);
+      const entries = capture.snapshot();
+      expect(entries).toHaveLength(1);
+      expect(entries[0].response.status).toBe(200);
+      capture.stop();
+    });
+
+    it('네트워크 실패 시 에러가 그대로 전파되고 status 0 엔트리가 기록된다', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+      const capture = new NetworkCapture(100, []);
+      capture.start();
+
+      await expect(window.fetch('https://example.com/down')).rejects.toThrow('Failed to fetch');
+
+      const entries = capture.snapshot();
+      expect(entries).toHaveLength(1);
+      expect(entries[0].response.status).toBe(0);
+      expect(entries[0].request.url).toBe('https://example.com/down');
+      capture.stop();
+    });
+
+    it('Headers 인스턴스로 전달한 content-type도 postData.mimeType에 기록된다', async () => {
+      vi.stubGlobal('fetch', makeMockFetch());
+      const capture = new NetworkCapture(100, []);
+      capture.start();
+
+      await window.fetch('https://example.com', {
+        method: 'POST',
+        body: '{"a":1}',
+        headers: new Headers({ 'Content-Type': 'application/json' }),
+      });
+
+      const entry = capture.snapshot()[0];
+      expect(entry.request.postData?.mimeType).toBe('application/json');
       capture.stop();
     });
 
