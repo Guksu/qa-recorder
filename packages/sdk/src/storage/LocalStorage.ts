@@ -17,7 +17,8 @@ export class LocalStorage {
       UnifiedViewer.generate(sessionEvents ?? [], harLog, consoleLogs, memo),
     );
 
-    const zipped = zipSync(entries);
+    // TS 5.9+: Uint8Array<ArrayBufferLike>는 BlobPart로 좁혀지지 않으므로 명시 캐스트
+    const zipped = zipSync(entries) as Uint8Array<ArrayBuffer>;
     const zipBlob = new Blob([zipped], { type: 'application/zip' });
     await LocalStorage.downloadBlob(zipBlob, `qa-report-${timestamp}.zip`);
   }
