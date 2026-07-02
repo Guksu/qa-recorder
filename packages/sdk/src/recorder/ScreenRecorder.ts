@@ -83,11 +83,15 @@ export class ScreenRecorder {
     return new Blob([JSON.stringify(this.getEvents())], { type: 'application/json' });
   }
 
-  /** 백업에서 복원된 이벤트를 버퍼 앞에 추가 (현재 mode의 checkout 주기 초과분 자동 필터링) */
+  /**
+   * 백업에서 복원된 이벤트를 버퍼 앞에 추가 (현재 mode의 checkout 주기 초과분 자동 필터링).
+   * 컷오프로 잘린 뒤에는 기준 스냅샷 없는 고아 incremental 이벤트가 앞에 남지 않도록
+   * 재생 가능한 지점(FullSnapshot)부터 시작하게 정렬한다.
+   */
   prependEvents(events: unknown[]): void {
     const cutoff = Date.now() - this.preset.checkoutEveryNms;
-    const filtered = events.filter(
-      (e) => ((e as { timestamp: number }).timestamp ?? 0) >= cutoff,
+    const filtered = alignToFullSnapshot(
+      events.filter((e) => ((e as { timestamp: number }).timestamp ?? 0) >= cutoff),
     );
     this.prevEvents = [...filtered, ...this.prevEvents];
   }
@@ -99,4 +103,20 @@ export class ScreenRecorder {
     this.stopFn = null;
     this.state = 'idle';
   }
+}
+
+/* rrweb EventType: 2 = FullSnapshot, 4 = Meta (스냅샷 직전에 viewport 정보로 선행) */
+const FULL_SNAPSHOT = 2;
+const META = 4;
+
+/**
+ * 첫 FullSnapshot 이전의 이벤트를 제거해 배열이 재생 가능한 지점에서 시작하도록 정렬.
+ * FullSnapshot 바로 앞의 Meta 이벤트는 함께 유지하고, FullSnapshot이 없으면
+ * 전부 재생 불가이므로 빈 배열을 반환한다.
+ */
+function alignToFullSnapshot(events: unknown[]): unknown[] {
+  const idx = events.findIndex((e) => (e as { type?: number }).type === FULL_SNAPSHOT);
+  if (idx === -1) return [];
+  const hasLeadingMeta = idx > 0 && (events[idx - 1] as { type?: number }).type === META;
+  return events.slice(hasLeadingMeta ? idx - 1 : idx);
 }

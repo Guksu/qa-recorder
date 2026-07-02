@@ -173,6 +173,33 @@ describe('ScreenRecorder', () => {
     expect(events.some(e => (e as { timestamp: number }).timestamp === recent.timestamp)).toBe(true);
   });
 
+  it('prependEvents()는 컷오프로 FullSnapshot이 잘리면 고아 incremental 이벤트도 버린다', () => {
+    const recorder = new ScreenRecorder();
+    recorder.start();
+    const eventsBefore = recorder.getEvents().length;
+    // FullSnapshot은 컷오프(20분) 밖, incremental만 안에 남는 상황
+    const staleSnapshot = { type: 2, data: {}, timestamp: Date.now() - 21 * 60 * 1000 };
+    const orphan1 = { type: 3, data: {}, timestamp: Date.now() - 2000 };
+    const orphan2 = { type: 3, data: {}, timestamp: Date.now() - 1000 };
+    recorder.prependEvents([staleSnapshot, orphan1, orphan2]);
+    expect(recorder.getEvents()).toHaveLength(eventsBefore); // 전부 폐기
+  });
+
+  it('prependEvents()는 첫 FullSnapshot 앞의 이벤트를 제거하되 직전 Meta는 유지한다', () => {
+    const recorder = new ScreenRecorder();
+    recorder.start();
+    const orphan   = { type: 3, data: {}, timestamp: Date.now() - 5000 };
+    const meta     = { type: 4, data: {}, timestamp: Date.now() - 4000 };
+    const snapshot = { type: 2, data: {}, timestamp: Date.now() - 3000 };
+    const after    = { type: 3, data: {}, timestamp: Date.now() - 2000 };
+    recorder.prependEvents([orphan, meta, snapshot, after]);
+
+    const events = recorder.getEvents();
+    expect(events.some(e => (e as { timestamp: number }).timestamp === orphan.timestamp)).toBe(false);
+    expect((events[0] as { timestamp: number }).timestamp).toBe(meta.timestamp);
+    expect((events[1] as { timestamp: number }).timestamp).toBe(snapshot.timestamp);
+  });
+
   it('prependEvents() 이후 신규 이벤트가 뒤에 추가된다', () => {
     const recorder = new ScreenRecorder();
     mocks.record.mockImplementation(({ emit }: { emit: (event: unknown) => void }) => {
