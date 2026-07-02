@@ -59,4 +59,19 @@ describe('resolveConfig', () => {
     const config = resolveConfig({ mode: 'light' });
     expect(config.mode).toBe('light');
   });
+
+  it('명시적 undefined 값은 기본값을 덮어쓰지 않는다', () => {
+    const config = resolveConfig({ maxRequests: undefined, endpoint: undefined, mode: 'heavy' });
+    expect(config.maxRequests).toBe(100);
+    expect(config.endpoint).toBe('');
+    expect(config.mode).toBe('heavy');
+  });
+
+  it('window 설정의 undefined 값도 기본값을 덮어쓰지 않는다', () => {
+    (window as Window & { __QA_RECORDER_CONFIG__?: object }).__QA_RECORDER_CONFIG__ = {
+      maxConsoleEntries: undefined,
+    };
+    const config = resolveConfig();
+    expect(config.maxConsoleEntries).toBe(200);
+  });
 });

@@ -183,6 +183,23 @@ describe('QARecorder', () => {
     alertSpy.mockRestore();
   });
 
+  it('로컬 저장 실패 시에도 ProgressBar가 사라지고 녹화가 재시작된다', async () => {
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    mocks.localStorageSave.mockRejectedValue(new Error('quota exceeded'));
+    const recorder = new QARecorder();
+    await recorder.init();
+
+    const host = document.getElementById('qa-recorder-root')!;
+    host.shadowRoot!.querySelector('button')!.click();
+
+    // 녹화 재시작(record 2회 호출)까지 진행되어야 함
+    await vi.waitFor(() => expect(mocks.record).toHaveBeenCalledTimes(2));
+    expect(alertSpy).toHaveBeenCalledWith(expect.stringContaining('quota exceeded'));
+    expect(document.querySelector('[data-qa="progress-bar"]')).toBeNull();
+    recorder.destroy();
+    alertSpy.mockRestore();
+  });
+
   it('저장 완료 후 sessionStorage 백업이 초기화된다', async () => {
     const recorder = new QARecorder({ enableBackup: true });
     await recorder.init();

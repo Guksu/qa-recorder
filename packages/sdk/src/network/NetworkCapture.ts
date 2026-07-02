@@ -8,7 +8,7 @@ import type { HAREntry } from '@qa-recorder/shared';
 export class NetworkCapture {
   private buffer: HAREntry[] = [];
   private originalFetch: typeof fetch;
-  private originalXHROpen: typeof XMLHttpRequest.prototype.open;
+  private originalXHR: typeof XMLHttpRequest;
   private recordingStartedAt: Date | null = null;
   private readonly maskSet: Set<string>;
 
@@ -18,7 +18,7 @@ export class NetworkCapture {
   ) {
     this.maskSet = new Set(maskHeaders.map((h) => h.toLowerCase()));
     this.originalFetch = window.fetch;
-    this.originalXHROpen = XMLHttpRequest.prototype.open;
+    this.originalXHR = window.XMLHttpRequest;
   }
 
   start(): void {
@@ -29,7 +29,7 @@ export class NetworkCapture {
 
   stop(): void {
     window.fetch = this.originalFetch;
-    XMLHttpRequest.prototype.open = this.originalXHROpen;
+    (window as Window & { XMLHttpRequest: typeof XMLHttpRequest }).XMLHttpRequest = this.originalXHR;
   }
 
   /** 버퍼를 비우고 기록 시작 시점을 현재로 재설정 */
@@ -48,71 +48,112 @@ export class NetworkCapture {
     this.buffer = [...entries, ...this.buffer].slice(-this.maxRequests);
   }
 
-  private push(entry: HAREntry): void {
+  private push(entry: HAREntry): HAREntry {
     if (this.buffer.length >= this.maxRequests) {
       this.buffer.shift(); // FIFO: 가장 오래된 항목 제거
     }
     const offsetMs = this.recordingStartedAt
       ? new Date(entry.startedDateTime).getTime() - this.recordingStartedAt.getTime()
       : 0;
-    this.buffer.push({ ...entry, _offsetMs: offsetMs });
+    const stored = { ...entry, _offsetMs: offsetMs };
+    this.buffer.push(stored);
+    return stored;
   }
 
   private interceptFetch(): void {
     const self = this;
     window.fetch = async function (input, init) {
       const startedAt = new Date();
-      const request = new Request(input, init);
       const startTime = performance.now();
 
-      const response = await self.originalFetch.call(window, input, init);
-      const elapsed = performance.now() - startTime;
-      const cloned = response.clone();
-      const bodyText = await cloned.text().catch(() => '');
+      let response: Response;
+      try {
+        response = await self.originalFetch.call(window, input, init);
+      } catch (err) {
+        self.captureFetch(input, init, startedAt, performance.now() - startTime, null);
+        throw err;
+      }
+
+      self.captureFetch(input, init, startedAt, performance.now() - startTime, response);
+      return response;
+    };
+  }
+
+  /**
+   * fetch 요청/응답을 버퍼에 기록. response가 null이면 네트워크 실패(status 0)로 기록.
+   * 캡처 로직의 예외가 앱의 fetch 호출로 전파되지 않도록 내부에서 모두 삼킨다.
+   * 응답 body는 호출자를 블로킹하지 않도록 비동기로 채운다 (SSE/스트리밍 응답 대응).
+   */
+  private captureFetch(
+    input: RequestInfo | URL,
+    init: RequestInit | undefined,
+    startedAt: Date,
+    elapsed: number,
+    response: Response | null,
+  ): void {
+    try {
+      const { method, url, headers } = describeFetchRequest(input, init);
 
       let postData: { mimeType: string; text: string } | undefined;
       if (init?.body) {
-        const body = typeof init.body === 'string' ? init.body : '[binary]';
-        const mimeType = (init.headers as Record<string, string>)?.['content-type'] ?? '';
-        postData = { mimeType, text: body };
+        const text = typeof init.body === 'string' ? init.body : '[binary]';
+        const mimeType = headers.find((h) => h.name.toLowerCase() === 'content-type')?.value ?? '';
+        postData = { mimeType, text };
       }
 
-      self.push(
+      const content = {
+        size: 0,
+        mimeType: response?.headers.get('content-type') ?? '',
+        text: '',
+      };
+
+      const stored = this.push(
         MaskingFilter.apply(
           {
             startedDateTime: startedAt.toISOString(),
             time: elapsed,
             request: {
-              method: request.method,
-              url: request.url,
+              method,
+              url,
               httpVersion: 'HTTP/1.1',
-              headers: Array.from(request.headers.entries()).map(([name, value]) => ({ name, value })),
-              queryString: parseQueryString(request.url),
+              headers,
+              queryString: parseQueryString(url),
               postData,
               bodySize: postData ? postData.text.length : -1,
               headersSize: -1,
             },
             response: {
-              status: response.status,
-              statusText: response.statusText,
+              status: response?.status ?? 0,
+              statusText: response ? response.statusText : 'Network Error',
               httpVersion: 'HTTP/1.1',
-              headers: Array.from(response.headers.entries()).map(([name, value]) => ({ name, value })),
-              content: { size: bodyText.length, mimeType: response.headers.get('content-type') ?? '', text: bodyText },
-              bodySize: bodyText.length,
+              headers: response
+                ? Array.from(response.headers.entries()).map(([name, value]) => ({ name, value }))
+                : [],
+              content,
+              bodySize: response ? 0 : -1,
               headersSize: -1,
             },
             timings: { send: 0, wait: elapsed, receive: 0 },
           },
-          self.maskSet,
+          this.maskSet,
         ),
       );
-      return response;
-    };
+
+      if (response) {
+        response.clone().text().then((text) => {
+          stored.response.content.text = text;
+          stored.response.content.size = text.length;
+          stored.response.bodySize = text.length;
+        }).catch(() => { /* body 읽기 실패 무시 */ });
+      }
+    } catch {
+      /* 캡처 실패가 앱 요청에 영향을 주지 않도록 무시 */
+    }
   }
 
   private interceptXHR(): void {
     const self = this;
-    const OriginalXHR = XMLHttpRequest;
+    const OriginalXHR = this.originalXHR;
 
     function PatchedXHR(this: XMLHttpRequest) {
       const xhr = new OriginalXHR();
@@ -133,6 +174,9 @@ export class NetworkCapture {
       ) {
         method = m;
         url = typeof u === 'string' ? u : u.toString();
+        // open()은 XHR 상태를 리셋하므로 이전에 수집한 헤더/바디도 초기화
+        requestHeaders = [];
+        requestBody = '';
         return originalOpen(m, u, async, user, password);
       };
 
@@ -200,9 +244,13 @@ export class NetworkCapture {
         return originalSend(body);
       };
 
-      // 나머지 프로퍼티/메서드 원본 xhr에 위임
+      // 패치된 open/setRequestHeader/send는 이 객체의 own property에서,
+      // 나머지 프로퍼티/메서드는 원본 xhr에 위임
       return new Proxy(this, {
-        get(_, prop) {
+        get(target, prop) {
+          if (Object.prototype.hasOwnProperty.call(target, prop)) {
+            return (target as unknown as Record<string, unknown>)[prop as string];
+          }
           const val = (xhr as unknown as Record<string, unknown>)[prop as string];
           return typeof val === 'function' ? val.bind(xhr) : val;
         },
@@ -225,5 +273,34 @@ function parseQueryString(url: string): { name: string; value: string }[] {
     return Array.from(searchParams.entries()).map(([name, value]) => ({ name, value }));
   } catch {
     return [];
+  }
+}
+
+/**
+ * fetch 인자에서 method/url/headers를 추출.
+ * new Request()는 ReadableStream body 등에서 throw할 수 있으므로 실패 시 수동 추출로 폴백.
+ */
+function describeFetchRequest(
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+): { method: string; url: string; headers: { name: string; value: string }[] } {
+  try {
+    const request = new Request(input, init);
+    return {
+      method: request.method,
+      url: request.url,
+      headers: Array.from(request.headers.entries()).map(([name, value]) => ({ name, value })),
+    };
+  } catch {
+    const url = typeof input === 'string'
+      ? new URL(input, window.location.href).toString()
+      : input instanceof URL ? input.toString() : input.url;
+    const method = (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
+    let headers: { name: string; value: string }[] = [];
+    try {
+      const h = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+      headers = Array.from(h.entries()).map(([name, value]) => ({ name, value }));
+    } catch { /* 헤더 추출 실패 시 빈 배열 유지 */ }
+    return { method, url, headers };
   }
 }

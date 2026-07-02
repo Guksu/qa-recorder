@@ -63,12 +63,14 @@ export interface QARecorderConfig {
 
   /**
    * Recording intensity preset. Controls rrweb's checkout interval and event sampling
-   * to keep the in-memory buffer bounded on long or heavy pages.
+   * to keep the in-memory buffer bounded on long or heavy pages. The last two checkout
+   * segments are retained, so a save always includes at least one full interval of
+   * history (and at most two).
    *
-   * - `'light'`: 30-minute checkout, no sampling (lightest pages, longer history)
-   * - `'normal'`: 20-minute checkout, no sampling (default)
-   * - `'heavy'`: 5-minute checkout, throttled mousemove/scroll/input (heavy pages
-   *   with frequent DOM mutations, animations, or long sessions)
+   * - `'light'`: 30-minute checkout, no sampling — retains the last 30–60 minutes
+   * - `'normal'`: 20-minute checkout, no sampling — retains the last 20–40 minutes (default)
+   * - `'heavy'`: 5-minute checkout, throttled mousemove/scroll/input — retains the last
+   *   5–10 minutes (heavy pages with frequent DOM mutations, animations, or long sessions)
    *
    * @default 'normal'
    */
@@ -86,8 +88,15 @@ const DEFAULT_CONFIG: Required<QARecorderConfig> = {
   mode: 'normal',
 };
 
+/** 명시적으로 undefined가 담긴 키가 기본값을 덮어쓰지 않도록 제거 */
+function stripUndefined(config: QARecorderConfig): QARecorderConfig {
+  return Object.fromEntries(
+    Object.entries(config).filter(([, value]) => value !== undefined),
+  ) as QARecorderConfig;
+}
+
 export function resolveConfig(overrides?: QARecorderConfig): Required<QARecorderConfig> {
   const fromWindow = (window as Window & { __QA_RECORDER_CONFIG__?: QARecorderConfig })
     .__QA_RECORDER_CONFIG__ ?? {};
-  return { ...DEFAULT_CONFIG, ...fromWindow, ...overrides };
+  return { ...DEFAULT_CONFIG, ...stripUndefined(fromWindow), ...stripUndefined(overrides ?? {}) };
 }

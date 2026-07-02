@@ -40,4 +40,10 @@ describe('SessionViewer.generate', () => {
     const html = SessionViewer.generate(makeEvents());
     expect(html).toContain('QA Session Replay');
   });
+
+  it('이벤트 데이터에 </script>가 있어도 스크립트 블록이 깨지지 않는다', () => {
+    const events = [{ type: 3, data: { text: '</script><script>alert(1)</script>' }, timestamp: 1000 }];
+    const html = SessionViewer.generate(events);
+    expect(html).not.toContain('</script><script>alert(1)');
+  });
 });

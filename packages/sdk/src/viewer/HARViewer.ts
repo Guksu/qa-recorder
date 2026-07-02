@@ -1,10 +1,11 @@
 import type { HARLog } from '@qa-recorder/shared';
 import type { ConsoleEntry } from '../console/ConsoleCapture.js';
+import { toScriptJson } from './scriptJson.js';
 
 export class HARViewer {
   static generate(harLog: HARLog, consoleLogs: ConsoleEntry[] = []): string {
-    const entriesJson = JSON.stringify(harLog.entries);
-    const consoleJson = JSON.stringify(consoleLogs);
+    const entriesJson = toScriptJson(harLog.entries);
+    const consoleJson = toScriptJson(consoleLogs);
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
