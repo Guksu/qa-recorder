@@ -86,8 +86,15 @@ const DEFAULT_CONFIG: Required<QARecorderConfig> = {
   mode: 'normal',
 };
 
+/** 명시적으로 undefined가 담긴 키가 기본값을 덮어쓰지 않도록 제거 */
+function stripUndefined(config: QARecorderConfig): QARecorderConfig {
+  return Object.fromEntries(
+    Object.entries(config).filter(([, value]) => value !== undefined),
+  ) as QARecorderConfig;
+}
+
 export function resolveConfig(overrides?: QARecorderConfig): Required<QARecorderConfig> {
   const fromWindow = (window as Window & { __QA_RECORDER_CONFIG__?: QARecorderConfig })
     .__QA_RECORDER_CONFIG__ ?? {};
-  return { ...DEFAULT_CONFIG, ...fromWindow, ...overrides };
+  return { ...DEFAULT_CONFIG, ...stripUndefined(fromWindow), ...stripUndefined(overrides ?? {}) };
 }
