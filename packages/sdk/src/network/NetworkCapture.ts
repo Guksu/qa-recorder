@@ -8,7 +8,7 @@ import type { HAREntry } from '@qa-recorder/shared';
 export class NetworkCapture {
   private buffer: HAREntry[] = [];
   private originalFetch: typeof fetch;
-  private originalXHROpen: typeof XMLHttpRequest.prototype.open;
+  private originalXHR: typeof XMLHttpRequest;
   private recordingStartedAt: Date | null = null;
   private readonly maskSet: Set<string>;
 
@@ -18,7 +18,7 @@ export class NetworkCapture {
   ) {
     this.maskSet = new Set(maskHeaders.map((h) => h.toLowerCase()));
     this.originalFetch = window.fetch;
-    this.originalXHROpen = XMLHttpRequest.prototype.open;
+    this.originalXHR = window.XMLHttpRequest;
   }
 
   start(): void {
@@ -29,7 +29,7 @@ export class NetworkCapture {
 
   stop(): void {
     window.fetch = this.originalFetch;
-    XMLHttpRequest.prototype.open = this.originalXHROpen;
+    (window as Window & { XMLHttpRequest: typeof XMLHttpRequest }).XMLHttpRequest = this.originalXHR;
   }
 
   /** 버퍼를 비우고 기록 시작 시점을 현재로 재설정 */
@@ -112,7 +112,7 @@ export class NetworkCapture {
 
   private interceptXHR(): void {
     const self = this;
-    const OriginalXHR = XMLHttpRequest;
+    const OriginalXHR = this.originalXHR;
 
     function PatchedXHR(this: XMLHttpRequest) {
       const xhr = new OriginalXHR();
@@ -133,6 +133,9 @@ export class NetworkCapture {
       ) {
         method = m;
         url = typeof u === 'string' ? u : u.toString();
+        // open()은 XHR 상태를 리셋하므로 이전에 수집한 헤더/바디도 초기화
+        requestHeaders = [];
+        requestBody = '';
         return originalOpen(m, u, async, user, password);
       };
 
@@ -200,9 +203,13 @@ export class NetworkCapture {
         return originalSend(body);
       };
 
-      // 나머지 프로퍼티/메서드 원본 xhr에 위임
+      // 패치된 open/setRequestHeader/send는 이 객체의 own property에서,
+      // 나머지 프로퍼티/메서드는 원본 xhr에 위임
       return new Proxy(this, {
-        get(_, prop) {
+        get(target, prop) {
+          if (Object.prototype.hasOwnProperty.call(target, prop)) {
+            return (target as unknown as Record<string, unknown>)[prop as string];
+          }
           const val = (xhr as unknown as Record<string, unknown>)[prop as string];
           return typeof val === 'function' ? val.bind(xhr) : val;
         },
