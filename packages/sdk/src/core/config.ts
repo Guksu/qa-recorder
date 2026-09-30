@@ -38,21 +38,29 @@ export interface QARecorderConfig {
    *   searched recursively through nested objects and arrays; a matching key's whole value is
    *   masked, even if it is an object.
    * - The page URL that rrweb records in the replay (the `href` of the Meta event it emits with
-   *   each full snapshot), with the same query and fragment rules — so the page URL stored with
-   *   the replay no longer carries a reset-password or magic-link `?token=` or an OAuth
-   *   `#access_token=`.
+   *   each full snapshot), with the same query and fragment rules — so a reset-password or
+   *   magic-link `?token=` or an OAuth `#access_token=` is masked there when it is a top-level
+   *   query or fragment parameter of the page URL.
    *
    * `null` and empty-string values are kept as-is.
    *
-   * The address-bar URL can still reach the replay, the HTML report and the sessionStorage
-   * backup in two ways that `maskKeys` does not cover:
+   * `maskKeys` matches key names only and never looks inside a string value, so the address-bar
+   * URL, and any token in it, can still reach the replay, the HTML report and the sessionStorage
+   * backup in ways it does not cover — for example:
    *
+   * - A token in the page URL's path, or nested inside the value of a parameter whose key does
+   *   not match (plain or percent-encoded), such as `/reset-password/{token}` or
+   *   `?next=/reset?token=…`, stays in the recorded page URL.
+   * - Captured requests and responses that carry the page URL as the value of a key that does
+   *   not match keep the token in it: analytics or error-reporting payloads (a `dl=` parameter,
+   *   `context.page.url`, `request.url`), a `returnTo=` redirect, or the app's own logging
+   *   requests.
    * - Text and links inside the page's DOM. rrweb stores relative links such as `href="#main"`
    *   and SVG `<use href="#icon">` as absolute URLs that include the page's query string. Mask
    *   such text with `maskTextSelector`, and leave elements whose links carry a token out of the
    *   replay with the `rr-block` class.
-   * - Console entries. The message and stack trace of an uncaught error thrown from an inline
-   *   script include the page URL.
+   * - Console entries, such as the message and stack trace of an uncaught error thrown from an
+   *   inline script, which include the page URL.
    *
    * Matching: the key and each entry are lowercased and stripped of ASCII non-alphanumeric
    * characters (`_`, `-`, `.`, spaces, …). A key matches when it equals or ends with an entry,

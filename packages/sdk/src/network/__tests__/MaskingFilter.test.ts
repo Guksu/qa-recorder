@@ -308,6 +308,26 @@ describe('MaskingFilter.apply', () => {
     });
   });
 
+  it('페이지 URL을 값으로 담은 요청·응답(분석 도구의 dl=, page.url)은 키가 매칭되지 않으면 토큰째 남는다 (문서화된 한계)', () => {
+    // 키 이름만 비교하고 문자열 값 안은 검사하지 않는다 — maskKeys 문서(config.ts, README)에 적힌 한계.
+    // 이 동작을 바꾸면 문서도 함께 고칠 것
+    const pageUrl = 'https://app.example.com/reset-password?token=PAGE-SECRET';
+    const entry = makeBodyEntry({
+      url: `https://analytics.example.com/collect?v=2&dl=${encodeURIComponent(pageUrl)}`,
+      queryString: [{ name: 'v', value: '2' }, { name: 'dl', value: pageUrl }],
+      postData: {
+        mimeType: JSON_MIME,
+        text: JSON.stringify({ context: { page: { url: pageUrl, search: '?token=PAGE-SECRET' } } }),
+      },
+      responseText: JSON.stringify({ redirectUrl: pageUrl }),
+    });
+    const result = MaskingFilter.apply(entry, new Set(), matcher);
+    expect(result.request.url).toBe(entry.request.url);
+    expect(result.request.queryString).toEqual(entry.request.queryString);
+    expect(result.request.postData!.text).toBe(entry.request.postData!.text);
+    expect(result.response.content.text).toBe(entry.response.content.text);
+  });
+
   it('keyMatcher가 null이면(maskKeys: []) body와 쿼리를 마스킹하지 않는다', () => {
     const entry = makeBodyEntry({
       url: 'https://example.com/api?token=abc',
@@ -428,6 +448,16 @@ describe('MaskingFilter.maskUrl', () => {
     for (const url of ['https://app.example.com/#/session?id=42', 'https://app.example.com/#/api?key=public']) {
       expect(MaskingFilter.maskUrl(url, matcher)).toBe(url);
     }
+  });
+
+  it.each([
+    'https://app.example.com/reset-password/PATH-SECRET?email=a%40b.com',
+    'https://app.example.com/login?next=/reset-password?token=NESTED-SECRET',
+    'https://app.example.com/login?returnUrl=%2Finvite%2Faccept%3Ftoken%3DENCODED-SECRET',
+    'https://app.example.com/#/login?redirect=/verify?token=HASH-NESTED-SECRET',
+  ])('키 이름만 비교하므로 경로나 다른 파라미터 값 안의 토큰은 가리지 않는다 (문서화된 한계): %s', (url) => {
+    // maskKeys 문서(config.ts, README)에 적힌 한계 — 이 동작을 바꾸면 문서도 함께 고칠 것
+    expect(MaskingFilter.maskUrl(url, matcher)).toBe(url);
   });
 
   it.each([

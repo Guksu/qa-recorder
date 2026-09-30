@@ -100,6 +100,8 @@ export class MaskingFilter {
    * OAuth implicit flow처럼 fragment 자체가 form 필드인 경우(`#access_token=...&token_type=bearer`)를 모두 검사한다
    * (maskFragment 참고). URLSearchParams로 재직렬화하면 인코딩이 바뀌므로(공백 → '+') 매칭된 값만 문자열 치환하고,
    * 가릴 값이 없으면 원본 URL을 그대로 반환한다.
+   * 필드의 키만 비교하고 값은 해석하지 않으므로, 경로나 다른 필드 값 안에 중첩된 토큰(`/reset/{token}`,
+   * `?next=/reset?token=...`, 퍼센트 인코딩된 경우 포함)은 감지하지 않는다.
    * 앱의 fetch/XHR과 rrweb emit 경로에서 호출되므로 throw하지 않는다. 예기치 못한 예외 시에는
    * 쿼리와 fragment를 통째로 제거한다 (fail-closed).
    */
