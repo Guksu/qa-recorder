@@ -42,6 +42,9 @@ const sessionStorageMock = (() => {
   };
 })();
 
+/** beforeEach에서 stub되기 전의 실제 URL 생성자 */
+const RealURL = globalThis.URL;
+
 /** record() mock이 (재)시작될 때마다 emit하는 FullSnapshot */
 const START_SNAPSHOT = { type: 2, data: {}, timestamp: 1000 };
 
@@ -336,11 +339,16 @@ describe('QARecorder', () => {
         progressVisibleOnAlert = isProgressVisible();
       });
       mocks.confirmModalShow.mockResolvedValue({ confirmed: true, memo: 'bug memo' });
-      mocks.remoteDeliverySend.mockRejectedValue(new Error('network down'));
       const recorder = new QARecorder({ endpoint, enableBackup: true });
       await recorder.init();
       const before = seedBuffers(recorder);
       sessionStorageMock.removeItem.mockClear();
+      // rrweb은 stop() 후에도 throttle trailing 타이머로 이벤트를 늦게 emit할 수 있다 — 업로드 대기 중에 도착하는 경우
+      const { emit } = mocks.record.mock.lastCall![0] as { emit: (event: unknown) => void };
+      mocks.remoteDeliverySend.mockImplementation(async () => {
+        emit({ type: 3, data: { late: true }, timestamp: 1600 });
+        throw new Error('network down');
+      });
 
       const host = document.getElementById('qa-recorder-root')!;
       host.shadowRoot!.querySelector('button')!.click();
@@ -413,6 +421,50 @@ describe('QARecorder', () => {
       expect(sessionStorageMock.removeItem).not.toHaveBeenCalled();
       recorder.destroy();
       alertSpy.mockRestore();
+    });
+
+    it('실패한 업로드 요청 자체는 보존된 네트워크 로그와 다음 저장에 포함되지 않는다', async () => {
+      const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
+      // 실제 fetch 캡처 경로를 쓰도록 URL stub을 되돌리고 실제 RemoteDelivery로 업로드한다
+      vi.stubGlobal('URL', RealURL);
+      const secretEndpoint = 'https://qa.example.com/upload?token=SECRET123';
+      vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+        const url = input instanceof Request ? input.url : String(input);
+        return url === secretEndpoint
+          ? new Response('{"error":"db down"}', { status: 500 })
+          : new Response('[]', { status: 200 });
+      }));
+      const { RemoteDelivery: RealRemoteDelivery } = await vi.importActual<
+        typeof import('../../storage/RemoteDelivery.js')
+      >('../../storage/RemoteDelivery.js');
+      mocks.remoteDeliverySend.mockImplementation((...args: Parameters<InstanceType<typeof RealRemoteDelivery>['send']>) =>
+        new RealRemoteDelivery(secretEndpoint).send(...args));
+      mocks.localStorageSave.mockRejectedValueOnce(new Error('quota exceeded'));
+
+      const recorder = new QARecorder({ endpoint: secretEndpoint });
+      await recorder.init();
+      await window.fetch('https://app.example.com/api/items');
+      const appUrls = ['https://app.example.com/api/items'];
+      expect(buffersOf(recorder).network.map((e) => e.request.url)).toEqual(appUrls);
+
+      const host = document.getElementById('qa-recorder-root')!;
+      const btn = host.shadowRoot!.querySelector('button')!;
+      btn.click();
+      await vi.waitFor(() => expect(mocks.record).toHaveBeenCalledTimes(2));
+
+      // 업로드와 로컬 저장이 모두 실패해도 녹화기 자신의 업로드 요청은 버퍼에 남지 않는다
+      expect(alertSpy).toHaveBeenCalledWith(expect.stringContaining('The recording was kept'));
+      expect(buffersOf(recorder).network.map((e) => e.request.url)).toEqual(appUrls);
+
+      // 재시도 시 저장되는 HAR에도 앱 요청만 들어간다
+      btn.click();
+      await vi.waitFor(() => expect(mocks.record).toHaveBeenCalledTimes(3));
+      const [, harLog] = mocks.localStorageSave.mock.calls[1]!;
+      expect(harLog.entries.map((e: HAREntry) => e.request.url)).toEqual(appUrls);
+
+      recorder.destroy();
+      alertSpy.mockRestore();
+      vi.unstubAllGlobals();
     });
   });
 

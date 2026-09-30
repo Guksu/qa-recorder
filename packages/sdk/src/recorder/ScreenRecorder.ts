@@ -28,6 +28,8 @@ export class ScreenRecorder {
    * 직전 체크아웃 구간. 체크아웃 시 현재 구간을 즉시 버리면 저장 시점에 따라
    * 히스토리가 0에 수렴할 수 있으므로, 마지막 두 구간을 유지해
    * 항상 최소 한 주기(checkoutEveryNms)만큼의 리플레이를 보장한다 (최대 두 주기).
+   * 단, resume()으로 보존된 녹화 전체가 prevEvents가 되고 새 record()가 체크아웃 주기를
+   * 처음부터 다시 세므로, 저장 실패 후 다음 체크아웃 전까지는 두 주기를 넘을 수 있다.
    */
   private prevEvents: unknown[] = [];
   private stopFn: (() => void) | null = null;

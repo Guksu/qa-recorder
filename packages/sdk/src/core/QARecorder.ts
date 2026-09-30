@@ -51,7 +51,12 @@ export class QARecorder {
 
   constructor(overrides?: QARecorderConfig) {
     this.config = resolveConfig(overrides);
-    this.networkCapture = new NetworkCapture(this.config.maxRequests, this.config.maskHeaders);
+    // 업로드 요청은 앱 트래픽이 아니므로 캡처하지 않는다 (저장 실패로 버퍼를 보존할 때 리포트에 섞이지 않도록)
+    this.networkCapture = new NetworkCapture(
+      this.config.maxRequests,
+      this.config.maskHeaders,
+      this.config.endpoint ? [this.config.endpoint] : [],
+    );
     this.screenRecorder = new ScreenRecorder(this.config.mode);
     this.consoleCapture = new ConsoleCapture(this.config.maxConsoleEntries, this.config.consoleLevels);
     this.floatingButton = new FloatingButton(this.onButtonClick.bind(this), this.config.zIndex);
@@ -150,13 +155,17 @@ export class QARecorder {
     consoleLogs: ConsoleEntry[],
     memo: string,
   ): Promise<boolean> {
+    let events: unknown[] | undefined;
     let url: string | undefined;
     try {
-      url = await new RemoteDelivery(endpoint).send(this.screenRecorder.getBlob(), harLog, memo);
+      // 대체 저장에도 같은 이벤트를 쓰도록 한 번만 읽는다 — rrweb은 stop() 후에도
+      // throttle된 콜백(mousemove 등)의 trailing 타이머로 이벤트를 늦게 emit할 수 있다
+      events = this.screenRecorder.getEvents();
+      const sessionBlob = new Blob([JSON.stringify(events)], { type: 'application/json' });
+      url = await new RemoteDelivery(endpoint).send(sessionBlob, harLog, memo);
     } catch (uploadErr) {
       try {
-        // 녹화는 정지 상태이므로 getEvents()는 업로드에 쓰인 이벤트와 동일하다
-        await LocalStorage.save(this.screenRecorder.getEvents(), harLog, consoleLogs, memo);
+        await LocalStorage.save(events ?? this.screenRecorder.getEvents(), harLog, consoleLogs, memo);
       } catch (saveErr) {
         ProgressBar.hide();
         alert(
