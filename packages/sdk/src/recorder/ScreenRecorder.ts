@@ -1,5 +1,6 @@
 import { record } from 'rrweb';
 import type { QARecorderConfig, RecorderMode } from '../core/config.js';
+import { MaskingFilter, type KeyMatcher } from '../network/MaskingFilter.js';
 
 export type RecorderState = 'idle' | 'recording' | 'stopped';
 
@@ -7,8 +8,13 @@ export type RecorderState = 'idle' | 'recording' | 'stopped';
  * rrweb record()에 전달하는 프라이버시 옵션 (미지정 시 rrweb 기본 동작과 동일).
  * maskAllInputs는 rrweb의 빈틈을 메운 maskInputOptions와 textarea 텍스트 마스킹 셀렉터로 바꿔 전달한다
  * (MASK_ALL_INPUT_OPTIONS, MASK_ALL_INPUTS_TEXT_SELECTOR 참고).
+ * maskKeys는 rrweb에 전달하지 않고, 기록된 Meta 이벤트의 페이지 URL(data.href)을 가리는 데 쓴다 (maskMetaHref 참고).
+ * 미지정이나 []이면 페이지 URL을 마스킹하지 않는다 — QARecorder는 설정의 maskKeys(기본 목록)를 넘긴다.
  */
-export type RecordPrivacyOptions = Pick<QARecorderConfig, 'maskAllInputs' | 'maskTextSelector' | 'blockSelector'>;
+export type RecordPrivacyOptions = Pick<
+  QARecorderConfig,
+  'maskAllInputs' | 'maskTextSelector' | 'blockSelector' | 'maskKeys'
+>;
 
 interface ModePreset {
   checkoutEveryNms: number;
@@ -66,9 +72,12 @@ export class ScreenRecorder {
   private stopFn: (() => void) | null = null;
   private state: RecorderState = 'idle';
   private preset: ModePreset;
+  /** 페이지 URL 마스킹용 민감 키 판별 함수 — 이벤트마다 만들지 않도록 생성자에서 한 번만 만든다 */
+  private readonly isSensitiveKey: KeyMatcher | null;
 
   constructor(mode: RecorderMode = 'normal', private readonly privacy: RecordPrivacyOptions = {}) {
     this.preset = MODE_PRESETS[mode];
+    this.isSensitiveKey = MaskingFilter.createKeyMatcher(privacy.maskKeys ?? []);
   }
 
   start(): void {
@@ -78,11 +87,12 @@ export class ScreenRecorder {
     this.prevEvents = [];
     const opts: Parameters<typeof record>[0] = {
       emit: (event, isCheckout) => {
+        const stored = maskMetaHref(event, this.isSensitiveKey);
         if (isCheckout) {
           this.prevEvents = this.events;
-          this.events = [event];
+          this.events = [stored];
         } else {
-          this.events.push(event);
+          this.events.push(stored);
         }
       },
       checkoutEveryNms: this.preset.checkoutEveryNms,
@@ -129,13 +139,15 @@ export class ScreenRecorder {
    * 백업에서 복원된 이벤트를 버퍼 앞에 추가 (현재 mode의 checkout 주기 초과분 자동 필터링).
    * 컷오프로 잘린 뒤에는 기준 스냅샷 없는 고아 incremental 이벤트가 앞에 남지 않도록
    * 재생 가능한 지점(FullSnapshot)부터 시작하게 정렬한다.
+   * 페이지 URL 마스킹 이전 버전이나 다른 maskKeys 설정으로 저장된 백업일 수 있으므로 Meta href도 다시 가린다.
    */
   prependEvents(events: unknown[]): void {
     const cutoff = Date.now() - this.preset.checkoutEveryNms;
     const filtered = alignToFullSnapshot(
       events.filter((e) => ((e as { timestamp: number }).timestamp ?? 0) >= cutoff),
     );
-    this.prevEvents = [...filtered, ...this.prevEvents];
+    const masked = filtered.map((e) => maskMetaHref(e, this.isSensitiveKey));
+    this.prevEvents = [...masked, ...this.prevEvents];
   }
 
   reset(): void {
@@ -161,4 +173,21 @@ function alignToFullSnapshot(events: unknown[]): unknown[] {
   if (idx === -1) return [];
   const hasLeadingMeta = idx > 0 && (events[idx - 1] as { type?: number }).type === META;
   return events.slice(hasLeadingMeta ? idx - 1 : idx);
+}
+
+/**
+ * Meta 이벤트의 data.href — rrweb이 스냅샷마다 기록하는 window.location.href — 에서 민감 키 값을 가린 새 이벤트를 반환
+ * (MaskingFilter.maskUrl: 쿼리와 '='가 있는 fragment). 비밀번호 재설정 링크의 `?token=`, 매직 링크 토큰,
+ * OAuth implicit flow의 `#access_token=`이 rr.json·HTML 리포트·sessionStorage 백업에 남지 않게 한다.
+ * rrweb 1.1.3 Replayer는 Meta 이벤트에서 width/height(와 type·timestamp)만 읽고 href는 쓰지 않으므로 재생에는 영향이 없다.
+ * rrweb이 넘긴 객체는 수정하지 않는다 (emit 직후에도 rrweb의 wrappedEmit이 같은 객체를 읽는다).
+ * Meta가 아니거나 가릴 값이 없으면 받은 이벤트를 그대로 반환한다.
+ */
+function maskMetaHref(event: unknown, isSensitiveKey: KeyMatcher | null): unknown {
+  if (!isSensitiveKey || typeof event !== 'object' || event === null) return event;
+  const meta = event as { type?: unknown; data?: { href?: unknown } | null };
+  const href = meta.data?.href;
+  if (meta.type !== META || typeof href !== 'string') return event;
+  const masked = MaskingFilter.maskUrl(href, isSensitiveKey);
+  return masked === href ? event : { ...meta, data: { ...meta.data, href: masked } };
 }

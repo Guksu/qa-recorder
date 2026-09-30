@@ -40,7 +40,7 @@
 | 🖥️ | **콘솔 캡처** | `console.error`, `console.warn`, `window.onerror`, `unhandledrejection` 자동 수집. |
 | 📋 | **통합 QA 리포트** | 하나의 HTML 파일: 세션 리플레이(좌) + 네트워크 인스펙터 + 콘솔 로그(우). 시간 동기화 — 네트워크 행이나 콘솔 항목 클릭 시 해당 시점으로 즉시 이동. |
 | 🔍 | **네트워크 상세 패널** | 요청 행 클릭 시 Headers, Payload, Response, Timing 탭 — Chrome 개발자도구 스타일. |
-| 🔒 | **민감 정보 마스킹** | 요청/응답 body(JSON, form)와 URL 쿼리 속 비밀번호·토큰·API 키 등 민감 키의 값과 `Authorization`, `Cookie` 등 인증 헤더를 저장 전에 자동 마스킹. SDK 자체 UI(버튼, 버그 메모 입력 창 등)는 리플레이에 녹화되지 않으며, `maskAllInputs`·`maskTextSelector`로 입력값·텍스트를 가리고 `rr-block` 클래스를 붙인 요소는 리플레이에서 제외 (`blockSelector`는 아래 제약 참고). |
+| 🔒 | **민감 정보 마스킹** | 비밀번호·토큰·API 키 등 민감 키(`maskKeys`)의 값을 요청 URL(쿼리와 fragment), JSON·form 요청/응답 body, 리플레이에 기록되는 페이지 URL에서 저장 전에 자동 마스킹하고, `Authorization`, `Cookie` 등 인증 헤더도 가림. 페이지 DOM 안의 텍스트와 링크는 `maskKeys` 대상이 아니며, `maskAllInputs`·`maskTextSelector`로 리플레이의 입력값·텍스트를 가리고 `rr-block` 클래스를 붙인 요소는 리플레이에서 제외 (`blockSelector`는 아래 제약 참고). SDK 자체 UI(버튼, 버그 메모 입력 창 등)는 리플레이에 녹화되지 않음. |
 | 📦 | **로컬 저장** | 파일 3종을 로컬에 다운로드 — 백엔드 불필요. |
 | ☁️ | **원격 업로드** | 서버 endpoint 설정 시 POST 업로드. 응답 URL이 있으면 링크 복사 버튼 노출. |
 | 📝 | **버그 메모** | 저장 시 입력하는 선택적 텍스트 메모 — 통합 HTML 리포트에 포함되고 원격 업로드 시 함께 전송. |
@@ -152,7 +152,7 @@ window.__QA_RECORDER_CONFIG__ = {
     'X-CSRF-Token',
     'X-XSRF-Token',
   ],
-  maskKeys: [                // 저장 전 마스킹할 body/쿼리 키 (기본값 표시). []이면 비활성.
+  maskKeys: [                // 요청 URL·body·리플레이 페이지 URL에서 저장 전 마스킹할 키 (기본값 표시). []이면 비활성.
     'password', 'passwd', 'pwd', 'passwordConfirm', 'passwordConfirmation', 'passphrase', 'passcode',
     'secret', 'secretKey', 'token', 'jwt', 'apiKey', 'accessKey', 'clientSecret', 'privateKey',
     'credential', 'authorization', 'sessionId', 'otp', 'otpCode', 'ssn', 'cardNumber', 'cvv', 'cvc',
@@ -173,7 +173,7 @@ window.__QA_RECORDER_CONFIG__ = {
 | `endpoint` | `string` | `''` | 원격 업로드 URL. 비어있으면 로컬 다운로드. |
 | `maxRequests` | `number` | `100` | 순환 버퍼에 유지할 최대 네트워크 기록 수. |
 | `maskHeaders` | `string[]` | `['Authorization', 'Cookie', 'Set-Cookie', 'Proxy-Authorization', 'X-API-Key', 'X-Auth-Token', 'X-CSRF-Token', 'X-XSRF-Token']` | 마스킹할 헤더 이름 목록 (대소문자 무시). 지정하면 기본 목록을 대체. |
-| `maskKeys` | `string[]` | `['password', 'passwd', 'pwd', 'passwordConfirm', 'passwordConfirmation', 'passphrase', 'passcode', 'secret', 'secretKey', 'token', 'jwt', 'apiKey', 'accessKey', 'clientSecret', 'privateKey', 'credential', 'authorization', 'sessionId', 'otp', 'otpCode', 'ssn', 'cardNumber', 'cvv', 'cvc']` | URL 쿼리 파라미터와 요청/응답 body(JSON은 중첩 객체·배열까지 재귀 탐색, `application/x-www-form-urlencoded`는 필드 단위)에서 값을 `"[MASKED]"`로 바꿀 키 목록. 대소문자와 `_`, `-`, `.` 등 기호를 무시하고 비교하며, 키가 항목과 같거나 항목으로 끝나면(끝의 숫자는 무시), 또는 키 전체가 항목의 복수형이면 매칭 — `access_token`, `x-api-key`, `newPassword`, `password2`, `tokens`, `apiKeys` 모두 매칭 (`max_tokens` 같은 카운터는 제외). 트레이드오프: 페이지네이션 커서 `nextPageToken`처럼 접미사가 같은 비민감 키도 마스킹되고, 일부 JWT 라이브러리가 반환하는 `access`/`refresh`처럼 항목을 포함하지 않는 일반적인 이름의 비밀 값은 감지되지 않음 — 이런 키는 기본 목록과 함께 `maskKeys`에 직접 지정. `null`과 빈 값은 유지. 지정하면 기본 목록을 대체하며, `[]`이면 body/쿼리 마스킹 비활성. |
+| `maskKeys` | `string[]` | `['password', 'passwd', 'pwd', 'passwordConfirm', 'passwordConfirmation', 'passphrase', 'passcode', 'secret', 'secretKey', 'token', 'jwt', 'apiKey', 'accessKey', 'clientSecret', 'privateKey', 'credential', 'authorization', 'sessionId', 'otp', 'otpCode', 'ssn', 'cardNumber', 'cvv', 'cvc']` | 저장 전에 값을 `"[MASKED]"`로 바꿀 키 목록. 적용 대상: 캡처한 요청의 URL — 쿼리 파라미터와 `=`를 포함한 fragment(OAuth `#access_token=…&token_type=bearer`, `#/reset?token=…` 같은 해시 라우트의 쿼리), 요청/응답 body(JSON은 중첩 객체·배열까지 재귀 탐색, `application/x-www-form-urlencoded`는 필드 단위), 그리고 rrweb이 리플레이에 기록하는 페이지 URL(쿼리·fragment 규칙 동일) — 주소창의 비밀번호 재설정 `?token=`, 매직 링크 토큰, OAuth `#access_token=`이 리플레이·HTML 리포트·sessionStorage 백업에 남지 않음. 페이지 DOM 안의 텍스트와 링크는 대상이 아님 (rrweb은 `href="#"` 같은 상대 링크를 페이지 쿼리가 포함된 절대 URL로 기록함) — 이런 텍스트는 `maskTextSelector`로 가리고, 토큰이 담긴 링크가 있는 요소는 `rr-block` 클래스를 붙여 리플레이에서 제외할 것. 대소문자와 `_`, `-`, `.` 등 기호를 무시하고 비교하며, 키가 항목과 같거나 항목으로 끝나면(끝의 숫자는 무시), 또는 키 전체가 항목의 복수형이면 매칭 — `access_token`, `x-api-key`, `newPassword`, `password2`, `tokens`, `apiKeys` 모두 매칭 (`max_tokens` 같은 카운터는 제외). 트레이드오프: 페이지네이션 커서 `nextPageToken`처럼 접미사가 같은 비민감 키도 마스킹되고, 일부 JWT 라이브러리가 반환하는 `access`/`refresh`처럼 항목을 포함하지 않는 일반적인 이름의 비밀 값은 감지되지 않음 — 이런 키는 기본 목록과 함께 `maskKeys`에 직접 지정. `null`과 빈 값은 유지. 지정하면 기본 목록을 대체하며, `[]`이면 이 마스킹을 모두 비활성 (헤더는 `maskHeaders`로 별도 설정). |
 | `zIndex` | `number` | `2147483647` | UI 요소(버튼, 프로그레스 바, 공유 패널)의 z-index. |
 | `consoleLevels` | `string[]` | `['error', 'warn']` | 캡처할 콘솔 레벨. 유효값: `'error'`, `'warn'`, `'log'`, `'info'`. |
 | `maxConsoleEntries` | `number` | `200` | 순환 버퍼에 유지할 최대 콘솔 기록 수. |

@@ -203,7 +203,7 @@ describe('MaskingFilter.apply', () => {
     });
   });
 
-  describe('URL 쿼리', () => {
+  describe('URL 쿼리·fragment', () => {
     it('URL 쿼리 파라미터 값과 queryString을 마스킹한다', () => {
       const entry = makeBodyEntry({
         url: 'https://example.com/cb?code=1&access_token=abc&state=x',
@@ -222,10 +222,20 @@ describe('MaskingFilter.apply', () => {
       ]);
     });
 
-    it('매칭된 값만 바꾸고 URL의 나머지 인코딩과 fragment는 그대로 둔다', () => {
-      const entry = makeBodyEntry({ url: '/search?q=a%20b+c&token=t%2Fx#section?token=keep' });
+    it('매칭된 값만 바꾸고 URL의 나머지 인코딩과 "="가 없는 fragment는 그대로 둔다', () => {
+      const entry = makeBodyEntry({ url: '/search?q=a%20b+c&token=t%2Fx#section' });
       const result = MaskingFilter.apply(entry, new Set(), matcher);
-      expect(result.request.url).toBe('/search?q=a%20b+c&token=[MASKED]#section?token=keep');
+      expect(result.request.url).toBe('/search?q=a%20b+c&token=[MASKED]#section');
+    });
+
+    it('요청 URL fragment의 민감 키 값도 마스킹한다', () => {
+      const entry = makeBodyEntry({
+        url: 'https://example.com/cb?state=x#access_token=abc&token_type=bearer',
+        queryString: [{ name: 'state', value: 'x' }],
+      });
+      const result = MaskingFilter.apply(entry, new Set(), matcher);
+      expect(result.request.url).toBe('https://example.com/cb?state=x#access_token=[MASKED]&token_type=bearer');
+      expect(result.request.queryString).toEqual([{ name: 'state', value: 'x' }]);
     });
 
     it('매칭되는 파라미터가 없으면 URL을 그대로 유지한다', () => {
@@ -372,5 +382,69 @@ describe('MaskingFilter.maskBody', () => {
   it('마스킹 중 예외가 나면 원문 대신 [MASKED]를 반환한다 (fail-closed)', () => {
     const throwing = () => { throw new Error('boom'); };
     expect(MaskingFilter.maskBody('{"password":"pw"}', JSON_MIME, throwing)).toBe('[MASKED]');
+  });
+});
+
+describe('MaskingFilter.maskUrl', () => {
+  it('OAuth implicit flow fragment의 토큰 값을 가리고 나머지 필드는 유지한다', () => {
+    const url = 'https://app.example.com/callback#access_token=AT-SECRET&token_type=bearer&expires_in=3600&id_token=IDT-SECRET&state=xyz';
+    expect(MaskingFilter.maskUrl(url, matcher)).toBe(
+      'https://app.example.com/callback#access_token=[MASKED]&token_type=bearer&expires_in=3600&id_token=[MASKED]&state=xyz',
+    );
+  });
+
+  it('해시 라우트의 쿼리(#/path?token=...)를 가리고 라우트 경로는 유지한다', () => {
+    expect(MaskingFilter.maskUrl('https://app.example.com/#/reset-password?token=RT-SECRET&email=a%40b.com', matcher))
+      .toBe('https://app.example.com/#/reset-password?token=[MASKED]&email=a%40b.com');
+    expect(MaskingFilter.maskUrl('https://app.example.com/#!/verify?otp=123456', matcher))
+      .toBe('https://app.example.com/#!/verify?otp=[MASKED]');
+    // 라우트 경로를 뗀 키로 비교하므로 키 전체가 복수형인 경우(credentials)도 매칭된다
+    expect(MaskingFilter.maskUrl('https://app.example.com/#/oauth/done?credentials=CRED-SECRET', matcher))
+      .toBe('https://app.example.com/#/oauth/done?credentials=[MASKED]');
+  });
+
+  it('fragment의 첫 "=" 뒤에 나오는 "?"는 값의 일부로 보고 뒤의 필드도 검사한다', () => {
+    expect(MaskingFilter.maskUrl('https://app.example.com/cb#state=/home?tab=1&access_token=AT-SECRET', matcher))
+      .toBe('https://app.example.com/cb#state=/home?tab=1&access_token=[MASKED]');
+  });
+
+  it.each([
+    'https://example.com/docs#installation',
+    'https://example.com/#/users/42',
+    'https://example.com/#/reset?token',
+    'https://example.com/password#token',
+  ])('"="가 없는 fragment는 그대로 둔다: %s', (url) => {
+    expect(MaskingFilter.maskUrl(url, matcher)).toBe(url);
+  });
+
+  it.each([
+    'https://example.com/search?q=a%20b+c&page=2#/list?sort=desc&q=%ED%95%9C',
+    '/relative/path?lang=ko#:~:text=token',
+    'https://example.com/a?&=&token=#token=',
+    'https://example.com/%E0%A4%A?%E0%A4%A=x#%=%',
+    'https://example.com/?#',
+    '',
+  ])('가릴 값이 없으면 URL을 바이트 단위로 그대로 반환한다: "%s"', (url) => {
+    expect(MaskingFilter.maskUrl(url, matcher)).toBe(url);
+  });
+
+  it('쿼리와 fragment를 함께 마스킹하고, 한쪽에만 있어도 다른 쪽은 그대로 둔다', () => {
+    expect(MaskingFilter.maskUrl('https://app.example.com/cb?code=C&client_secret=CS#access_token=AT&token_type=bearer', matcher))
+      .toBe('https://app.example.com/cb?code=C&client_secret=[MASKED]#access_token=[MASKED]&token_type=bearer');
+    expect(MaskingFilter.maskUrl('/reset?token=RT&lang=ko#/step?page=2', matcher))
+      .toBe('/reset?token=[MASKED]&lang=ko#/step?page=2');
+    expect(MaskingFilter.maskUrl('/login?next=%2Fhome#/magic?apiKey=K', matcher))
+      .toBe('/login?next=%2Fhome#/magic?apiKey=[MASKED]');
+  });
+
+  it('keyMatcher가 null이면(maskKeys: []) URL을 그대로 반환한다', () => {
+    const url = 'https://example.com/cb?token=abc#access_token=xyz';
+    expect(MaskingFilter.maskUrl(url, MaskingFilter.createKeyMatcher([]))).toBe(url);
+  });
+
+  it('마스킹 중 예외가 나면 쿼리와 fragment를 통째로 제거한다 (fail-closed)', () => {
+    const throwing = () => { throw new Error('boom'); };
+    expect(MaskingFilter.maskUrl('https://example.com/cb?code=1#access_token=AT', throwing)).toBe('https://example.com/cb');
+    expect(MaskingFilter.maskUrl('https://example.com/cb#access_token=AT', throwing)).toBe('https://example.com/cb');
   });
 });

@@ -2,7 +2,7 @@ import type { HAREntry, HARNameValue } from '@qa-recorder/shared';
 
 const MASKED = '[MASKED]';
 
-/** body/쿼리의 키가 민감 정보인지 판별하는 함수 — MaskingFilter.createKeyMatcher()로 생성 */
+/** body·URL(쿼리·fragment)의 키가 민감 정보인지 판별하는 함수 — MaskingFilter.createKeyMatcher()로 생성 */
 export type KeyMatcher = (key: string) => boolean;
 
 export class MaskingFilter {
@@ -14,7 +14,7 @@ export class MaskingFilter {
    * 키 전체가 항목의 복수형이어도 매칭한다 (tokens, passwords, apiKeys, credentials — 하위 키가
    * access/refresh처럼 일반적인 이름이라 래퍼 키에서 가려야 하는 경우). 복수형은 접미사로 보지 않아
    * max_tokens, total_tokens 같은 카운터는 매칭하지 않는다.
-   * 유효한 항목이 없으면 null — body/쿼리 마스킹 비활성.
+   * 유효한 항목이 없으면 null — body·요청 URL·페이지 URL 마스킹 비활성.
    */
   static createKeyMatcher(maskKeys: string[]): KeyMatcher | null {
     const entries = Array.from(new Set(maskKeys.map(normalizeKey).filter(Boolean)));
@@ -30,7 +30,7 @@ export class MaskingFilter {
   }
 
   /**
-   * 헤더(maskSet)와 URL 쿼리·요청/응답 body의 민감 키(isSensitiveKey) 값을 [MASKED]로 바꾼 사본을 반환.
+   * 헤더(maskSet)와 URL 쿼리·fragment, 요청/응답 body의 민감 키(isSensitiveKey) 값을 [MASKED]로 바꾼 사본을 반환.
    * maskSet은 호출자가 한 번만 생성해 재사용할 것 (lowercase 처리된 Set<string>).
    * 앱의 fetch/XHR 경로에서 호출되므로 throw하지 않는다.
    */
@@ -46,7 +46,7 @@ export class MaskingFilter {
       ...entry,
       request: {
         ...request,
-        url: maskUrl(request.url, isSensitiveKey),
+        url: MaskingFilter.maskUrl(request.url, isSensitiveKey),
         headers: maskHeaderList(request.headers),
         queryString: maskNameValues(request.queryString, isSensitiveKey),
       },
@@ -93,6 +93,33 @@ export class MaskingFilter {
       return MASKED;
     }
   }
+
+  /**
+   * URL의 쿼리와 fragment에서 민감 키의 값만 [MASKED]로 바꾼다. 요청 URL과 rrweb이 기록하는 페이지 URL에 사용.
+   * fragment는 '='를 포함할 때만 form 필드로 보며, 첫 '=' 앞에 '?'가 있으면 해시 라우트(`#/reset?token=...`)로 보고
+   * 그 뒤를, 없으면 OAuth implicit flow(`#access_token=...&token_type=bearer`)처럼 fragment 전체를 마스킹한다.
+   * URLSearchParams로 재직렬화하면 인코딩이 바뀌므로(공백 → '+') 매칭된 값만 문자열 치환하고,
+   * 가릴 값이 없으면 원본 URL을 그대로 반환한다.
+   * 앱의 fetch/XHR과 rrweb emit 경로에서 호출되므로 throw하지 않는다. 예기치 못한 예외 시에는
+   * 쿼리와 fragment를 통째로 제거한다 (fail-closed).
+   */
+  static maskUrl(url: string, isSensitiveKey: KeyMatcher | null): string {
+    if (!isSensitiveKey) return url;
+    try {
+      const hashIndex = url.indexOf('#');
+      if (hashIndex === -1) return maskQuery(url, isSensitiveKey);
+
+      const beforeHash = url.slice(0, hashIndex);
+      const fragment = url.slice(hashIndex + 1);
+      const maskedBeforeHash = maskQuery(beforeHash, isSensitiveKey);
+      const maskedFragment = maskFragment(fragment, isSensitiveKey);
+      return maskedBeforeHash === beforeHash && maskedFragment === fragment
+        ? url
+        : `${maskedBeforeHash}#${maskedFragment}`;
+    } catch {
+      return url.split(/[?#]/)[0]; // fail-closed: 쿼리와 fragment를 통째로 제거
+    }
+  }
 }
 
 /**
@@ -116,27 +143,31 @@ function maskNameValues(list: HARNameValue[], isSensitiveKey: KeyMatcher | null)
   }));
 }
 
-/**
- * URL의 쿼리 파라미터 값만 마스킹. URLSearchParams로 재직렬화하면 인코딩이 바뀌므로(공백 → '+')
- * 매칭된 값만 문자열 치환하고 나머지(경로, 다른 파라미터, fragment)는 그대로 둔다.
- */
-function maskUrl(url: string, isSensitiveKey: KeyMatcher | null): string {
-  if (!isSensitiveKey) return url;
-  try {
-    const hashIndex = url.indexOf('#');
-    const end = hashIndex === -1 ? url.length : hashIndex;
-    const queryIndex = url.indexOf('?');
-    if (queryIndex === -1 || queryIndex > end) return url;
-
-    const query = url.slice(queryIndex + 1, end);
-    const masked = maskFormEncoded(query, isSensitiveKey);
-    return masked === query ? url : url.slice(0, queryIndex + 1) + masked + url.slice(end);
-  } catch {
-    return url.split(/[?#]/)[0]; // fail-closed: 쿼리와 fragment를 통째로 제거
-  }
+/** URL에서 '#' 앞부분(beforeHash)의 쿼리를 마스킹. 쿼리가 없거나 가릴 값이 없으면 그대로 반환 */
+function maskQuery(beforeHash: string, isSensitiveKey: KeyMatcher): string {
+  const queryIndex = beforeHash.indexOf('?');
+  return queryIndex === -1 ? beforeHash : maskFieldsFrom(beforeHash, queryIndex + 1, isSensitiveKey);
 }
 
-/** application/x-www-form-urlencoded 형식(URL 쿼리 포함)에서 매칭된 필드의 값만 교체하고 나머지 바이트는 유지 */
+/**
+ * fragment('#' 뒤)를 마스킹. '='가 없으면(#section, #/users/1) 필드가 없으므로 그대로 둔다.
+ * 첫 '=' 앞의 마지막 '?' 뒤부터를 form 필드로 보므로, 값 안에 인코딩되지 않은 '?'가 있어도
+ * (#state=/home?tab=1&access_token=...) 뒤의 필드까지 검사한다.
+ */
+function maskFragment(fragment: string, isSensitiveKey: KeyMatcher): string {
+  const eq = fragment.indexOf('=');
+  if (eq === -1) return fragment;
+  return maskFieldsFrom(fragment, fragment.lastIndexOf('?', eq) + 1, isSensitiveKey);
+}
+
+/** text의 start 위치부터를 form 필드로 보고 마스킹. 가릴 값이 없으면 text를 그대로 반환 */
+function maskFieldsFrom(text: string, start: number, isSensitiveKey: KeyMatcher): string {
+  const fields = text.slice(start);
+  const masked = maskFormEncoded(fields, isSensitiveKey);
+  return masked === fields ? text : text.slice(0, start) + masked;
+}
+
+/** application/x-www-form-urlencoded 형식(URL 쿼리·fragment 포함)에서 매칭된 필드의 값만 교체하고 나머지 바이트는 유지 */
 function maskFormEncoded(text: string, isSensitiveKey: KeyMatcher): string {
   let masked = false;
   const fields = text.split('&').map((field) => {

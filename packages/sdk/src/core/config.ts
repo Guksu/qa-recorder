@@ -29,10 +29,23 @@ export interface QARecorderConfig {
   maskHeaders?: string[];
 
   /**
-   * Keys whose values are redacted (replaced with `"[MASKED]"`) in URL query parameters and in
-   * JSON or `application/x-www-form-urlencoded` request/response bodies. JSON bodies are
-   * searched recursively through nested objects and arrays; a matching key's whole value is
-   * masked, even if it is an object. `null` and empty-string values are kept as-is.
+   * Keys whose values are redacted (replaced with `"[MASKED]"`) before anything is stored, in:
+   *
+   * - Request URLs of captured `fetch` / XHR calls: query parameters (also in the HAR
+   *   `queryString`) and a fragment that contains `=` — an OAuth implicit-flow fragment such as
+   *   `#access_token=…&token_type=bearer`, or the query of a hash route such as `#/reset?token=…`.
+   * - JSON or `application/x-www-form-urlencoded` request and response bodies. JSON bodies are
+   *   searched recursively through nested objects and arrays; a matching key's whole value is
+   *   masked, even if it is an object.
+   * - The page URL that rrweb records in the replay (the `href` of the Meta event it emits with
+   *   each full snapshot), with the same query and fragment rules — so a reset-password `?token=`,
+   *   a magic-link token or an OAuth `#access_token=` in the address bar does not reach the
+   *   replay, the HTML report or the sessionStorage backup.
+   *
+   * `null` and empty-string values are kept as-is. Text and links inside the page's DOM are not
+   * covered (note that rrweb stores relative links such as `href="#"` as absolute URLs that
+   * include the page's query string): mask such text with `maskTextSelector`, and leave elements
+   * whose links carry a token out of the replay with the `rr-block` class.
    *
    * Matching: the key and each entry are lowercased and stripped of ASCII non-alphanumeric
    * characters (`_`, `-`, `.`, spaces, …). A key matches when it equals or ends with an entry,
@@ -46,8 +59,8 @@ export interface QARecorderConfig {
    * `access` / `refresh` pair some JWT libraries return — are not detected; add those keys to
    * the list if your API uses them.
    *
-   * Setting this replaces the default list; `[]` disables body and query-string masking
-   * (header masking is controlled separately by `maskHeaders`).
+   * Setting this replaces the default list; `[]` turns off all of the masking above (header
+   * masking is controlled separately by `maskHeaders`).
    *
    * @default ['password', 'passwd', 'pwd', 'passwordConfirm', 'passwordConfirmation', 'passphrase', 'passcode', 'secret', 'secretKey', 'token', 'jwt', 'apiKey', 'accessKey', 'clientSecret', 'privateKey', 'credential', 'authorization', 'sessionId', 'otp', 'otpCode', 'ssn', 'cardNumber', 'cvv', 'cvc']
    */

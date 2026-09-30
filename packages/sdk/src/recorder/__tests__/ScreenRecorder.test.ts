@@ -263,6 +263,94 @@ describe('ScreenRecorder', () => {
     expect((events[events.length - 1] as { type: number }).type).toBe(3);
   });
 
+  describe('페이지 URL 마스킹 (Meta 이벤트 href)', () => {
+    type Emit = (event: unknown, isCheckout?: boolean) => void;
+    const MASK_KEYS = ['token', 'password'];
+    const SECRET_HREF = 'https://app.example.com/reset?token=RESET-SECRET&lang=ko#access_token=AT-SECRET&token_type=bearer';
+    const MASKED_HREF = 'https://app.example.com/reset?token=[MASKED]&lang=ko#access_token=[MASKED]&token_type=bearer';
+
+    const meta = (href: string, timestamp = 1000) => ({ type: 4, data: { href, width: 1280, height: 720 }, timestamp });
+
+    /** record()가 주어진 이벤트를 순서대로 emit하도록 설정 */
+    function emitOnRecord(...calls: [event: unknown, isCheckout?: boolean][]) {
+      mocks.record.mockImplementation(({ emit }: { emit: Emit }) => {
+        calls.forEach(([event, isCheckout]) => emit(event, isCheckout));
+        return mocks.stopFn;
+      });
+    }
+
+    it('maskKeys에 매칭되는 쿼리·fragment 값을 Meta 이벤트의 href에서 가린다 (체크아웃 스냅샷 포함)', () => {
+      emitOnRecord(
+        [meta(SECRET_HREF, 1000)],
+        [{ type: 2, data: {}, timestamp: 1001 }],
+        [meta(SECRET_HREF, 5000), true], // 체크아웃 → 새 구간
+        [{ type: 2, data: {}, timestamp: 5001 }],
+      );
+      const recorder = new ScreenRecorder('normal', { maskKeys: MASK_KEYS });
+      recorder.start();
+
+      const metas = recorder.getEvents().filter((e) => (e as { type: number }).type === 4);
+      expect(metas).toEqual([
+        { type: 4, data: { href: MASKED_HREF, width: 1280, height: 720 }, timestamp: 1000 },
+        { type: 4, data: { href: MASKED_HREF, width: 1280, height: 720 }, timestamp: 5000 },
+      ]);
+    });
+
+    it('rrweb이 넘긴 Meta 이벤트 객체는 수정하지 않고 새 객체로 저장한다', () => {
+      const original = meta(SECRET_HREF);
+      emitOnRecord([original]);
+      const recorder = new ScreenRecorder('normal', { maskKeys: MASK_KEYS });
+      recorder.start();
+
+      const [stored] = recorder.getEvents() as (typeof original)[];
+      expect(stored).not.toBe(original);
+      expect(stored!.data).not.toBe(original.data);
+      expect(stored!.data.href).toBe(MASKED_HREF);
+      expect(original).toEqual(meta(SECRET_HREF));
+    });
+
+    it('Meta 이외의 이벤트와 가릴 값이 없거나 href가 없는 Meta 이벤트는 받은 객체 그대로 저장한다', () => {
+      const emitted = [
+        { type: 2, data: { node: { type: 0, childNodes: [] } }, timestamp: 1000 },
+        { type: 3, data: { source: 0, adds: [], removes: [] }, timestamp: 1001 },
+        { type: 5, data: { tag: 'route', payload: { path: '/reset' } }, timestamp: 1002 },
+        meta('https://app.example.com/search?q=token#section', 1003),
+        { type: 4, data: {}, timestamp: 1004 },
+      ];
+      emitOnRecord(...emitted.map((event): [unknown] => [event]));
+      const recorder = new ScreenRecorder('normal', { maskKeys: MASK_KEYS });
+      recorder.start();
+
+      const events = recorder.getEvents();
+      expect(events).toHaveLength(emitted.length);
+      events.forEach((event, i) => expect(event).toBe(emitted[i]));
+    });
+
+    it('maskKeys: []이거나 미지정이면 페이지 URL을 마스킹하지 않는다', () => {
+      const original = meta(SECRET_HREF);
+      emitOnRecord([original]);
+      const disabled = new ScreenRecorder('normal', { maskKeys: [] });
+      const unset = new ScreenRecorder();
+      disabled.start();
+      unset.start();
+
+      expect(disabled.getEvents()[0]).toBe(original);
+      expect(unset.getEvents()[0]).toBe(original);
+      expect(original.data.href).toBe(SECRET_HREF);
+    });
+
+    it('prependEvents()로 복원한 백업의 Meta href도 가린다 (마스킹 이전 버전이 저장한 백업 대비)', () => {
+      const recorder = new ScreenRecorder('normal', { maskKeys: MASK_KEYS });
+      recorder.start();
+      const restoredMeta = meta(SECRET_HREF, Date.now() - 2000);
+      recorder.prependEvents([restoredMeta, { type: 2, data: {}, timestamp: Date.now() - 1000 }]);
+
+      const first = recorder.getEvents()[0] as typeof restoredMeta;
+      expect(first.data.href).toBe(MASKED_HREF);
+      expect(restoredMeta.data.href).toBe(SECRET_HREF);
+    });
+  });
+
   describe('mode preset', () => {
     it("mode='light'는 checkoutEveryNms 30분, sampling 없음을 전달한다", () => {
       const recorder = new ScreenRecorder('light');

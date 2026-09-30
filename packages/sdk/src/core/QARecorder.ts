@@ -58,6 +58,7 @@ export class QARecorder {
       maskAllInputs: this.config.maskAllInputs,
       maskTextSelector: this.config.maskTextSelector,
       blockSelector: this.config.blockSelector,
+      maskKeys: this.config.maskKeys,
     });
     this.consoleCapture = new ConsoleCapture(this.config.maxConsoleEntries, this.config.consoleLevels);
     this.floatingButton = new FloatingButton(this.onButtonClick.bind(this), this.config.zIndex);

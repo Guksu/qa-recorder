@@ -124,6 +124,27 @@ describe('NetworkCapture', () => {
       capture.stop();
     });
 
+    it('요청 URL fragment의 민감 키 값도 쿼리와 함께 마스킹한다', async () => {
+      const mockFetch = makeMockFetch();
+      vi.stubGlobal('fetch', mockFetch);
+      const capture = new NetworkCapture(100, [], ['token']);
+      capture.start();
+
+      const url = 'https://example.com/callback?code=1&token=abc#access_token=xyz&token_type=bearer';
+      await window.fetch(url);
+
+      const entry = capture.snapshot()[0];
+      expect(entry.request.url).toBe(
+        'https://example.com/callback?code=1&token=[MASKED]#access_token=[MASKED]&token_type=bearer',
+      );
+      expect(entry.request.queryString).toEqual([
+        { name: 'code', value: '1' },
+        { name: 'token', value: '[MASKED]' },
+      ]);
+      expect(mockFetch).toHaveBeenCalledWith(url, undefined); // 실제 요청은 원본 URL
+      capture.stop();
+    });
+
     it('비동기로 채워지는 응답 body도 마스킹하고, 앱이 받는 응답은 원본 그대로다', async () => {
       const body = '{"access_token":"a","user":"kim"}';
       vi.stubGlobal('fetch', makeMockFetch(200, body));
@@ -325,6 +346,19 @@ describe('NetworkCapture', () => {
       expect(entry.request.postData?.text).toBe('user=kim&password=[MASKED]');
       expect(entry.response.content.text).toBe('{"refreshToken":"[MASKED]","ok":true}');
       expect(xhr.responseText).toBe('{"refreshToken":"r","ok":true}'); // 앱이 받는 응답은 원본
+      capture.stop();
+    });
+
+    it('XHR 요청 URL의 해시 라우트 쿼리도 마스킹하고, 원본 XHR에는 원래 URL을 전달한다', () => {
+      const capture = new NetworkCapture(100, [], ['token']);
+      capture.start();
+
+      const xhr = new window.XMLHttpRequest();
+      xhr.open('GET', '/app?lang=ko#/reset?token=abc&step=2');
+      xhr.send();
+
+      expect(capture.snapshot()[0].request.url).toBe('/app?lang=ko#/reset?token=[MASKED]&step=2');
+      expect(MockXHR.lastInstance!.openedWith?.url).toBe('/app?lang=ko#/reset?token=abc&step=2');
       capture.stop();
     });
 

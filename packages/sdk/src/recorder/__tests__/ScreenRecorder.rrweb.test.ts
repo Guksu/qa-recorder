@@ -1,7 +1,10 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { ScreenRecorder } from '../ScreenRecorder.js';
+import { resolveConfig } from '../../core/config.js';
+import { HARBuilder } from '../../network/HARBuilder.js';
+import { UnifiedViewer } from '../../viewer/UnifiedViewer.js';
 
-/* rrweb을 mock하지 않고 실제 record()로 입력값 마스킹 결과를 검증 */
+/* rrweb을 mock하지 않고 실제 record()로 입력값·페이지 URL 마스킹 결과를 검증 */
 
 /** MutationObserver 콜백과 rrweb 내부 처리가 끝날 때까지 대기 */
 const flush = () => new Promise((r) => setTimeout(r, 0));
@@ -117,5 +120,63 @@ describe('ScreenRecorder 입력값 마스킹 (실제 rrweb)', () => {
     expect(json).toContain('VISIBLE-NAME');
     expect(json).toContain('VISIBLE-TYPELESS');
     expect(json).toContain('VISIBLE-TEXTAREA');
+  });
+});
+
+describe('ScreenRecorder 페이지 URL 마스킹 (실제 rrweb)', () => {
+  const originalHref = window.location.href;
+  /** QARecorder가 ScreenRecorder에 넘기는 기본 maskKeys */
+  const maskKeys = resolveConfig().maskKeys;
+  let recorder: ScreenRecorder | null = null;
+
+  afterEach(() => {
+    recorder?.stop();
+    recorder = null;
+    document.body.innerHTML = '';
+    history.replaceState(null, '', originalHref);
+  });
+
+  it('Meta 이벤트 href의 ?token=과 #access_token= 값이 이벤트 JSON과 HTML 리포트에 남지 않는다', () => {
+    // 링크 없는 본문 — 상대 링크(href="#")는 rrweb이 페이지 URL 기준 절대 URL로 기록하며 maskKeys 대상이 아니다
+    document.body.innerHTML = '<h1>Reset password</h1><input id="pw" type="password">';
+    history.replaceState(
+      null, '', '/reset-password?token=RESET-TOKEN-SECRET&lang=ko#access_token=IMPLICIT-TOKEN-SECRET&token_type=bearer',
+    );
+
+    recorder = new ScreenRecorder('normal', { maskKeys });
+    recorder.start();
+
+    const events = recorder.getEvents();
+    const meta = events.find((e) => (e as { type: number }).type === 4) as { data: { href: string } };
+    expect(meta.data.href).toBe(
+      `${location.origin}/reset-password?token=[MASKED]&lang=ko#access_token=[MASKED]&token_type=bearer`,
+    );
+
+    const html = UnifiedViewer.generate(events, HARBuilder.build([]), []);
+    expect(html).toContain('access_token=[MASKED]'); // 이벤트가 리포트에 실제로 임베드됐는지 확인
+    for (const output of [JSON.stringify(events), html]) {
+      expect(output).not.toContain('RESET-TOKEN-SECRET');
+      expect(output).not.toContain('IMPLICIT-TOKEN-SECRET');
+    }
+  });
+
+  it('clearBuffer()가 새로 찍는 스냅샷의 Meta href(해시 라우트 쿼리)도 가린다', () => {
+    recorder = new ScreenRecorder('normal', { maskKeys });
+    recorder.start();
+    history.replaceState(null, '', '/app#/magic-link?token=MAGIC-LINK-SECRET');
+    recorder.clearBuffer();
+
+    const json = JSON.stringify(recorder.getEvents());
+    expect(json).toContain(`"href":"${location.origin}/app#/magic-link?token=[MASKED]"`);
+    expect(json).not.toContain('MAGIC-LINK-SECRET');
+  });
+
+  it('maskKeys: []이면 rrweb이 기록한 페이지 URL을 그대로 둔다', () => {
+    history.replaceState(null, '', '/reset-password?token=RESET-TOKEN-SECRET');
+    recorder = new ScreenRecorder('normal', { maskKeys: [] });
+    recorder.start();
+
+    expect(JSON.stringify(recorder.getEvents()))
+      .toContain(`"href":"${location.origin}/reset-password?token=RESET-TOKEN-SECRET"`);
   });
 });
