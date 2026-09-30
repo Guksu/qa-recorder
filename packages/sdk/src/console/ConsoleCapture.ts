@@ -149,10 +149,22 @@ function formatError(err: object): string {
   return message ? `${name}: ${message}` : name;
 }
 
-/** 객체/배열 안에 중첩된 Error를 { name, message }로 직렬화 (크기를 위해 stack은 제외) */
-function errorReplacer(_key: string, value: unknown): unknown {
-  if (!isErrorLike(value)) return value;
-  const { name, message } = value as { name?: unknown; message?: unknown };
+/**
+ * 객체/배열 안에 중첩된 Error를 { name, message }로 직렬화 (크기를 위해 stack은 제외).
+ * JSON.stringify는 replacer보다 toJSON을 먼저 호출하므로, toJSON을 정의한 Error
+ * (예: stack·요청 config를 노출하는 AxiosError)는 value만 보면 놓친다.
+ * 그래서 holder(this)에서 toJSON 적용 전 원본 값을 다시 읽어 판별한다.
+ */
+function errorReplacer(this: unknown, key: string, value: unknown): unknown {
+  let raw: unknown = value;
+  try {
+    raw = (this as Record<string, unknown>)[key];
+  } catch {
+    // holder 접근이 throw하면(revoked Proxy 등) toJSON 결과 기준으로만 판별
+  }
+  const err = isErrorLike(raw) ? raw : value;
+  if (!isErrorLike(err)) return value;
+  const { name, message } = err as { name?: unknown; message?: unknown };
   return { name, message };
 }
 

@@ -209,6 +209,38 @@ describe('ConsoleCapture', () => {
       expect(capture.snapshot()[0].message).toBe('[{"name":"RangeError","message":"out of range"}]');
     });
 
+    it('toJSON을 정의한 중첩 Error도 toJSON 결과 대신 { name, message }로 기록된다', () => {
+      // AxiosError처럼 toJSON이 stack/config(요청 헤더 포함)를 노출하는 경우
+      class HttpError extends Error {
+        config = { headers: { Authorization: 'Bearer SECRET' } };
+        constructor(message: string) {
+          super(message);
+          this.name = 'HttpError';
+        }
+        toJSON() {
+          return { name: this.name, message: this.message, stack: this.stack, config: this.config };
+        }
+      }
+      const err = new HttpError('Request failed');
+      capture.start();
+      console.error('ctx', { error: err }, [err]);
+      const msg = capture.snapshot()[0].message;
+      expect(msg).toBe(
+        'ctx {"error":{"name":"HttpError","message":"Request failed"}} [{"name":"HttpError","message":"Request failed"}]',
+      );
+      expect(msg).not.toContain('SECRET');
+      expect(msg).not.toContain('stack');
+    });
+
+    it('toJSON이 Error를 반환하는 객체도 { name, message }로 기록된다', () => {
+      const wrapper = { toJSON: () => new TypeError('from toJSON') };
+      capture.start();
+      console.error({ wrapped: wrapper });
+      expect(capture.snapshot()[0].message).toBe(
+        '{"wrapped":{"name":"TypeError","message":"from toJSON"}}',
+      );
+    });
+
     it('Error 인자의 stack이 엔트리 stack으로 기록된다', () => {
       const err = new Error('with stack');
       capture.start();
