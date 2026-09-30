@@ -96,9 +96,9 @@ export class MaskingFilter {
 
   /**
    * URL의 쿼리와 fragment에서 민감 키의 값만 [MASKED]로 바꾼다. 요청 URL과 rrweb이 기록하는 페이지 URL에 사용.
-   * fragment는 '='를 포함할 때만 form 필드로 보며, 첫 '=' 앞에 '?'가 있으면 해시 라우트(`#/reset?token=...`)로 보고
-   * 그 뒤를, 없으면 OAuth implicit flow(`#access_token=...&token_type=bearer`)처럼 fragment 전체를 마스킹한다.
-   * URLSearchParams로 재직렬화하면 인코딩이 바뀌므로(공백 → '+') 매칭된 값만 문자열 치환하고,
+   * fragment는 '='를 포함할 때만 form 필드로 보며, 해시 라우트의 쿼리(`#/reset?token=...`)와
+   * OAuth implicit flow처럼 fragment 자체가 form 필드인 경우(`#access_token=...&token_type=bearer`)를 모두 검사한다
+   * (maskFragment 참고). URLSearchParams로 재직렬화하면 인코딩이 바뀌므로(공백 → '+') 매칭된 값만 문자열 치환하고,
    * 가릴 값이 없으면 원본 URL을 그대로 반환한다.
    * 앱의 fetch/XHR과 rrweb emit 경로에서 호출되므로 throw하지 않는다. 예기치 못한 예외 시에는
    * 쿼리와 fragment를 통째로 제거한다 (fail-closed).
@@ -151,13 +151,17 @@ function maskQuery(beforeHash: string, isSensitiveKey: KeyMatcher): string {
 
 /**
  * fragment('#' 뒤)를 마스킹. '='가 없으면(#section, #/users/1) 필드가 없으므로 그대로 둔다.
- * 첫 '=' 앞의 마지막 '?' 뒤부터를 form 필드로 보므로, 값 안에 인코딩되지 않은 '?'가 있어도
- * (#state=/home?tab=1&access_token=...) 뒤의 필드까지 검사한다.
+ * 두 형태를 차례로 검사하고, 어느 쪽에도 가릴 값이 없으면 fragment를 그대로 반환한다.
+ * 1. 해시 라우트의 쿼리: 해시 라우터(React Router, Vue Router, Angular)처럼 첫 '?'에서 경로와 쿼리를 나눠 그 뒤를
+ *    form 필드로 본다. 경로에 '='가 있어도(#/reset;lang=ko?token=..., #/share/YQ==/view?token=...) 쿼리를 검사한다.
+ * 2. fragment 자체가 form 필드인 경우(OAuth implicit flow): 첫 '=' 앞의 마지막 '?' 뒤부터, 그런 '?'가 없으면
+ *    fragment 전체를 form 필드로 본다. 값 안에 인코딩되지 않은 '?'가 있어도(#access_token=...&state=/home?tab=1)
+ *    그 앞의 필드까지 검사하고, 라우트 경로를 쿼리 키에 이어 붙여 비교하지 않는다(#/session?id=1은 매칭 안 됨).
  */
 function maskFragment(fragment: string, isSensitiveKey: KeyMatcher): string {
-  const eq = fragment.indexOf('=');
-  if (eq === -1) return fragment;
-  return maskFieldsFrom(fragment, fragment.lastIndexOf('?', eq) + 1, isSensitiveKey);
+  if (!fragment.includes('=')) return fragment;
+  const routed = maskFieldsFrom(fragment, fragment.indexOf('?') + 1, isSensitiveKey);
+  return maskFieldsFrom(routed, routed.lastIndexOf('?', routed.indexOf('=')) + 1, isSensitiveKey);
 }
 
 /** text의 start 위치부터를 form 필드로 보고 마스킹. 가릴 값이 없으면 text를 그대로 반환 */

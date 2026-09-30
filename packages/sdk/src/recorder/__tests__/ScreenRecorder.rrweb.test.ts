@@ -171,6 +171,19 @@ describe('ScreenRecorder 페이지 URL 마스킹 (실제 rrweb)', () => {
     expect(json).not.toContain('MAGIC-LINK-SECRET');
   });
 
+  it.each([
+    ['/app#/users/VXNlcjoxMg==/verify?token=B64-ROUTE-SECRET', '/app#/users/VXNlcjoxMg==/verify?token=[MASKED]'],
+    ['/app#/reset;mode=email?token=MATRIX-ROUTE-SECRET', '/app#/reset;mode=email?token=[MASKED]'],
+  ])('라우트 경로에 "="가 있는 해시 라우트의 쿼리도 Meta href에서 가린다: %s', (path, maskedPath) => {
+    history.replaceState(null, '', path);
+    recorder = new ScreenRecorder('normal', { maskKeys });
+    recorder.start();
+
+    const json = JSON.stringify(recorder.getEvents());
+    expect(json).toContain(`"href":"${location.origin}${maskedPath}"`);
+    expect(json).not.toContain('ROUTE-SECRET');
+  });
+
   it('maskKeys: []이면 rrweb이 기록한 페이지 URL을 그대로 둔다', () => {
     history.replaceState(null, '', '/reset-password?token=RESET-TOKEN-SECRET');
     recorder = new ScreenRecorder('normal', { maskKeys: [] });

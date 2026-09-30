@@ -403,9 +403,31 @@ describe('MaskingFilter.maskUrl', () => {
       .toBe('https://app.example.com/#/oauth/done?credentials=[MASKED]');
   });
 
-  it('fragment의 첫 "=" 뒤에 나오는 "?"는 값의 일부로 보고 뒤의 필드도 검사한다', () => {
+  it('라우트 경로에 "="가 있어도(매트릭스 파라미터, base64 패딩) 해시 라우트의 쿼리를 가린다', () => {
+    // 해시 라우터처럼 첫 "?"에서 경로와 쿼리를 나눈다 — 같은 모양의 실제 쿼리(/reset;lang=ko?token=...)와 동일한 결과
+    expect(MaskingFilter.maskUrl('https://app.example.com/#/reset;lang=ko?token=MATRIX-SECRET', matcher))
+      .toBe('https://app.example.com/#/reset;lang=ko?token=[MASKED]');
+    expect(MaskingFilter.maskUrl('https://app.example.com/reset;lang=ko?token=QUERY-SECRET', matcher))
+      .toBe('https://app.example.com/reset;lang=ko?token=[MASKED]');
+    expect(MaskingFilter.maskUrl('https://app.example.com/#/users/VXNlcjoxMg==/verify?token=B64-SECRET&lang=ko', matcher))
+      .toBe('https://app.example.com/#/users/VXNlcjoxMg==/verify?token=[MASKED]&lang=ko');
+    expect(MaskingFilter.maskUrl('https://app.example.com/#/verify/email=a@b.com?otp=123456', matcher))
+      .toBe('https://app.example.com/#/verify/email=a@b.com?otp=[MASKED]');
+  });
+
+  it('OAuth fragment 값 안의 인코딩되지 않은 "?"가 토큰 앞이나 뒤에 있어도 토큰을 가린다', () => {
+    // 첫 "?" 뒤만 검사하면 "?"가 들어간 state보다 앞에 오는 토큰을 놓친다
+    expect(MaskingFilter.maskUrl('https://app.example.com/cb#access_token=AT-SECRET&state=/home?tab=1', matcher))
+      .toBe('https://app.example.com/cb#access_token=[MASKED]&state=/home?tab=1');
     expect(MaskingFilter.maskUrl('https://app.example.com/cb#state=/home?tab=1&access_token=AT-SECRET', matcher))
       .toBe('https://app.example.com/cb#state=/home?tab=1&access_token=[MASKED]');
+  });
+
+  it('해시 라우트의 경로를 쿼리 키에 이어 붙여 비교하지 않는다', () => {
+    // "/session?id"를 한 키로 보면 sessionId로 매칭된다 — 실제 쿼리(/session?id=42)처럼 id만 비교해야 한다
+    for (const url of ['https://app.example.com/#/session?id=42', 'https://app.example.com/#/api?key=public']) {
+      expect(MaskingFilter.maskUrl(url, matcher)).toBe(url);
+    }
   });
 
   it.each([

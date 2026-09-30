@@ -38,14 +38,21 @@ export interface QARecorderConfig {
    *   searched recursively through nested objects and arrays; a matching key's whole value is
    *   masked, even if it is an object.
    * - The page URL that rrweb records in the replay (the `href` of the Meta event it emits with
-   *   each full snapshot), with the same query and fragment rules — so a reset-password `?token=`,
-   *   a magic-link token or an OAuth `#access_token=` in the address bar does not reach the
-   *   replay, the HTML report or the sessionStorage backup.
+   *   each full snapshot), with the same query and fragment rules — so the page URL stored with
+   *   the replay no longer carries a reset-password or magic-link `?token=` or an OAuth
+   *   `#access_token=`.
    *
-   * `null` and empty-string values are kept as-is. Text and links inside the page's DOM are not
-   * covered (note that rrweb stores relative links such as `href="#"` as absolute URLs that
-   * include the page's query string): mask such text with `maskTextSelector`, and leave elements
-   * whose links carry a token out of the replay with the `rr-block` class.
+   * `null` and empty-string values are kept as-is.
+   *
+   * The address-bar URL can still reach the replay, the HTML report and the sessionStorage
+   * backup in two ways that `maskKeys` does not cover:
+   *
+   * - Text and links inside the page's DOM. rrweb stores relative links such as `href="#main"`
+   *   and SVG `<use href="#icon">` as absolute URLs that include the page's query string. Mask
+   *   such text with `maskTextSelector`, and leave elements whose links carry a token out of the
+   *   replay with the `rr-block` class.
+   * - Console entries. The message and stack trace of an uncaught error thrown from an inline
+   *   script include the page URL.
    *
    * Matching: the key and each entry are lowercased and stripped of ASCII non-alphanumeric
    * characters (`_`, `-`, `.`, spaces, …). A key matches when it equals or ends with an entry,
@@ -55,9 +62,9 @@ export interface QARecorderConfig {
    * are not masked.
    *
    * Trade-offs: non-secret keys with a matching suffix are masked too (e.g. a pagination cursor
-   * named `nextPageToken`). Secrets under generic names that contain no entry — such as the
-   * `access` / `refresh` pair some JWT libraries return — are not detected; add those keys to
-   * the list if your API uses them.
+   * named `nextPageToken`). Secrets under names that contain no entry — such as the
+   * `access` / `refresh` pair some JWT libraries return, or the `oobCode` of a Firebase
+   * email-action link — are not detected; add those keys to the list if your app uses them.
    *
    * Setting this replaces the default list; `[]` turns off all of the masking above (header
    * masking is controlled separately by `maskHeaders`).

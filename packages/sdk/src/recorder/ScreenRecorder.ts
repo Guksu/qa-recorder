@@ -177,8 +177,10 @@ function alignToFullSnapshot(events: unknown[]): unknown[] {
 
 /**
  * Meta 이벤트의 data.href — rrweb이 스냅샷마다 기록하는 window.location.href — 에서 민감 키 값을 가린 새 이벤트를 반환
- * (MaskingFilter.maskUrl: 쿼리와 '='가 있는 fragment). 비밀번호 재설정 링크의 `?token=`, 매직 링크 토큰,
- * OAuth implicit flow의 `#access_token=`이 rr.json·HTML 리포트·sessionStorage 백업에 남지 않게 한다.
+ * (MaskingFilter.maskUrl: 쿼리와 '='가 있는 fragment). 비밀번호 재설정·매직 링크의 `?token=`이나
+ * OAuth implicit flow의 `#access_token=`이 Meta href에 담겨 rr.json·HTML 리포트·sessionStorage 백업에 남지 않게 한다.
+ * 페이지 URL이 다른 경로로 기록되는 것은 막지 않는다 — DOM의 상대 링크(href="#main" 등, rrweb이 페이지 쿼리가 붙은
+ * 절대 URL로 기록)와 인라인 스크립트 에러의 메시지·스택 트레이스(ConsoleCapture)에는 페이지 URL이 그대로 남는다.
  * rrweb 1.1.3 Replayer는 Meta 이벤트에서 width/height(와 type·timestamp)만 읽고 href는 쓰지 않으므로 재생에는 영향이 없다.
  * rrweb이 넘긴 객체는 수정하지 않는다 (emit 직후에도 rrweb의 wrappedEmit이 같은 객체를 읽는다).
  * Meta가 아니거나 가릴 값이 없으면 받은 이벤트를 그대로 반환한다.
