@@ -5,6 +5,10 @@ import fs from 'fs';
 import path from 'path';
 
 const UPLOADS_PREFIX = '/uploads/';
+const INDEX_FILE = 'index.html';
+
+// busboy는 urlencoded 본문도 받아들이므로 multipart/form-data인지 직접 확인한다
+const MULTIPART_FORM_DATA = /^\s*multipart\/form-data\s*(?:;|$)/i;
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -57,6 +61,8 @@ function sanitizeFilename(name: string | undefined, fallback: string): string {
   // NUL 등 제어 문자는 fs 호출을 실패시키므로 제거
   const cleaned = base.replace(/[\x00-\x1f\x7f]/g, '').trim();
   if (cleaned === '' || cleaned === '.' || cleaned === '..') return fallback;
+  // 생성되는 목록 페이지(index.html)를 덮어쓰거나 대신 서빙되지 않도록 이름을 바꾼다
+  if (cleaned.toLowerCase() === INDEX_FILE) return `${fallback}-${cleaned}`;
   return cleaned;
 }
 
@@ -112,45 +118,91 @@ function renderIndex(ts: number, filenames: string[]): string {
 </html>`;
 }
 
+/** 같은 밀리초에 들어온 업로드가 디렉터리를 공유하지 않도록 아직 없는 타임스탬프 디렉터리를 만든다 */
+function createUploadDir(root: string): { ts: number; dir: string } {
+  fs.mkdirSync(root, { recursive: true });
+  for (let ts = Date.now(); ; ts++) {
+    const dir = path.join(root, String(ts));
+    try {
+      fs.mkdirSync(dir);
+      return { ts, dir };
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+    }
+  }
+}
+
+function waitForClose(stream: fs.WriteStream): Promise<void> {
+  return new Promise((resolve) => {
+    if (stream.closed) resolve();
+    else stream.once('close', () => resolve());
+  });
+}
+
 /** POST /upload — multipart를 파싱해 파일을 저장하고 공유 URL을 반환 */
 function createUploadHandler(root: string): Connect.NextHandleFunction {
   return (req, res, next) => {
     if (req.url !== '/upload' || req.method !== 'POST') return next();
 
-    // multipart가 아니면 busboy 생성자가 동기적으로 throw — 디렉터리를 만들기 전에 거른다
+    const reject = (status: number, message: string) => {
+      req.resume();
+      sendText(res, status, message);
+    };
+
+    // multipart/form-data가 아니면 디렉터리를 만들기 전에 거른다.
+    // (busboy는 urlencoded를 그대로 받아들이고, 그 밖의 형식이나 boundary 누락은 생성자가 동기적으로 throw)
+    if (!MULTIPART_FORM_DATA.test(req.headers['content-type'] ?? '')) {
+      reject(400, 'Expected a multipart/form-data request');
+      return;
+    }
     let bb: busboy.Busboy;
     try {
       bb = busboy({ headers: req.headers });
     } catch {
-      req.resume();
-      sendText(res, 400, 'Expected a multipart/form-data request');
+      reject(400, 'Expected a multipart/form-data request');
       return;
     }
 
-    const ts = Date.now();
-    const dir = path.join(root, String(ts));
-    fs.mkdirSync(dir, { recursive: true });
+    let ts: number;
+    let dir: string;
+    try {
+      ({ ts, dir } = createUploadDir(root));
+    } catch {
+      reject(500, 'Failed to create upload directory');
+      return;
+    }
 
     const saved: string[] = [];
+    const outs: fs.WriteStream[] = [];
     let pendingWrites = 0;
     let parsed = false;
     let failed = false;
 
-    // 실패 시 요청을 버리고 만들던 디렉터리를 지운다
+    // 실패하면 먼저 응답한 뒤 파서와 열린 파일 스트림을 모두 닫고, 전부 닫힌 다음에 디렉터리를 비동기로 지운다.
+    // 열리는 중인 스트림이 남은 상태에서 동기 rmSync를 하면 ENOTEMPTY로 throw해 dev 서버가 죽고,
+    // busboy를 파기하지 않으면 받는 중이던 파일 스트림이 끝나지 않아 fd가 샌다.
     const fail = (status: number, message: string) => {
       if (failed || res.headersSent) return;
       failed = true;
       req.unpipe(bb);
       req.resume();
-      fs.rmSync(dir, { recursive: true, force: true });
       sendText(res, status, message);
+
+      bb.destroy();
+      const closed = outs.map(waitForClose);
+      for (const out of outs) out.destroy();
+      Promise.all(closed)
+        .then(() => fs.promises.rm(dir, { recursive: true, force: true, maxRetries: 3 }))
+        .catch((err: unknown) => {
+          console.warn(`[qa-upload-mock] failed to clean up ${path.relative(process.cwd(), dir)}/`, err);
+        });
     };
 
     // 파싱이 끝나고 모든 파일이 디스크에 써진 뒤에 목록을 만들고 응답한다
     const complete = () => {
       if (failed || !parsed || pendingWrites > 0) return;
       try {
-        fs.writeFileSync(path.join(dir, 'index.html'), renderIndex(ts, saved));
+        fs.writeFileSync(path.join(dir, INDEX_FILE), renderIndex(ts, saved));
       } catch {
         fail(500, 'Failed to save upload index');
         return;
@@ -167,6 +219,7 @@ function createUploadHandler(root: string): Connect.NextHandleFunction {
 
     bb.on('file', (_field, stream, info) => {
       if (failed) {
+        stream.on('error', () => {});
         stream.resume();
         return;
       }
@@ -175,6 +228,7 @@ function createUploadHandler(root: string): Connect.NextHandleFunction {
       pendingWrites++;
 
       const out = fs.createWriteStream(path.join(dir, filename));
+      outs.push(out);
       out.on('finish', () => {
         pendingWrites--;
         complete();
@@ -200,8 +254,18 @@ function createUploadHandler(root: string): Connect.NextHandleFunction {
       complete();
     });
 
+    // 본문을 다 받기 전에 클라이언트가 연결을 끊으면 busboy가 끝나지 않으므로 여기서 정리한다
+    req.on('close', () => {
+      if (!req.complete) fail(400, 'Upload aborted');
+    });
+
     req.pipe(bb);
   };
+}
+
+/** <uploadsDir>/<ts>/index.html — 업로드 내용이 아니라 플러그인이 직접 만든 목록 페이지 */
+function isGeneratedIndex(root: string, file: string): boolean {
+  return path.basename(file) === INDEX_FILE && path.dirname(path.dirname(file)) === root;
 }
 
 /** GET /uploads/* — Vite가 하위 디렉터리를 자동 서빙하지 않으므로 직접 처리 */
@@ -220,7 +284,7 @@ function createServeHandler(root: string): Connect.NextHandleFunction {
     try {
       stat = fs.statSync(file);
       if (stat.isDirectory()) {
-        file = path.join(file, 'index.html');
+        file = path.join(file, INDEX_FILE);
         stat = fs.statSync(file);
       }
     } catch {
@@ -235,6 +299,9 @@ function createServeHandler(root: string): Connect.NextHandleFunction {
     }
 
     res.setHeader('Content-Type', MIME[path.extname(file)] ?? 'application/octet-stream');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    // 업로드된 파일은 LAN의 누구나 올릴 수 있는 내용이다 — HTML이어도 dev origin에서 스크립트가 돌지 않게 격리
+    if (!isGeneratedIndex(root, file)) res.setHeader('Content-Security-Policy', 'sandbox');
     res.end(fs.readFileSync(file));
   };
 }

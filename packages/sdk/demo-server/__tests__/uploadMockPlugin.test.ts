@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi, type MockInstance } from 'vitest';
 import http from 'http';
 import type { AddressInfo } from 'net';
 import fs from 'fs';
@@ -102,6 +102,39 @@ function request(
   });
 }
 
+/** 본문 일부만 보내고 요청을 열어 둔다 (끝내거나 끊는 것은 호출한 쪽에서) */
+function openUpload(
+  headers: http.OutgoingHttpHeaders,
+  partialBody: Buffer,
+): { req: http.ClientRequest; response: Promise<RawResponse> } {
+  const req = http.request({
+    host: '127.0.0.1',
+    port,
+    path: '/upload',
+    method: 'POST',
+    headers,
+    agent: false,
+  });
+  const response = new Promise<RawResponse>((resolve, reject) => {
+    req.on('response', (res) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (c: Buffer) => chunks.push(c));
+      res.on('end', () =>
+        resolve({
+          status: res.statusCode ?? 0,
+          headers: res.headers,
+          body: Buffer.concat(chunks).toString('utf8'),
+        }),
+      );
+    });
+    req.on('error', reject);
+  });
+  // 연결을 일부러 끊는 테스트에서 unhandled rejection이 되지 않도록
+  response.catch(() => {});
+  req.write(partialBody);
+  return { req, response };
+}
+
 function multipart(parts: Part[]): { body: Buffer; headers: http.OutgoingHttpHeaders } {
   const body = Buffer.from(
     parts
@@ -131,8 +164,32 @@ async function upload(parts: Part[]): Promise<{ res: RawResponse; base: string; 
   return { res, base, dir: path.join(uploadsDir, base.slice('/uploads/'.length)) };
 }
 
+/** 플러그인이 이번 테스트에서 연 파일 쓰기 스트림 목록 */
+function writeStreams(): fs.WriteStream[] {
+  return createWriteStreamSpy.mock.results
+    .filter((r) => r.type === 'return')
+    .map((r) => r.value as fs.WriteStream);
+}
+
+/** 열린 파일 스트림이 하나도 남지 않아야 한다 (fd 누수 방지) */
+async function expectAllWriteStreamsClosed(): Promise<void> {
+  await vi.waitFor(() => {
+    expect(writeStreams().filter((s) => !s.closed)).toEqual([]);
+  });
+}
+
+/** 실패한 업로드의 디렉터리는 응답 뒤에 비동기로 정리된다 */
+async function waitForEmptyUploads(): Promise<void> {
+  await vi.waitFor(() => {
+    expect(fs.readdirSync(uploadsDir)).toEqual([]);
+  });
+}
+
+let createWriteStreamSpy: MockInstance<typeof fs.createWriteStream>;
+
 beforeEach(async () => {
   vi.spyOn(console, 'log').mockImplementation(() => {});
+  createWriteStreamSpy = vi.spyOn(fs, 'createWriteStream');
   // macOS의 /tmp 심볼릭 링크 등을 피하기 위해 실제 경로 기준으로 사용
   tmpRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'qa-upload-mock-')));
   uploadsDir = path.join(tmpRoot, 'uploads');
@@ -366,7 +423,64 @@ describe('uploadMockPlugin — POST /upload 입력 검증', () => {
     const noType = await request('/upload', { method: 'POST', body: 'plain' });
     expect(noType.status).toBe(400);
 
+    // busboy는 urlencoded도 파싱하므로 생성자가 throw하지 않는다 — 별도로 거부해야 한다
+    const urlencoded = await request('/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'a=b',
+    });
+    expect(urlencoded.status).toBe(400);
+
+    const mixed = await request('/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': `multipart/mixed; boundary=${BOUNDARY}` },
+      body: `--${BOUNDARY}--\r\n`,
+    });
+    expect(mixed.status).toBe(400);
+
     expect(fs.readdirSync(uploadsDir)).toEqual([]);
+  });
+
+  it('Content-Type 대소문자와 무관하게 multipart/form-data 업로드를 받는다', async () => {
+    const { body } = multipart([{ filename: 'network.har', content: '{}' }]);
+    const res = await request('/upload', {
+      method: 'POST',
+      headers: {
+        'Content-Type': `Multipart/Form-Data; boundary=${BOUNDARY}`,
+        'Content-Length': body.length,
+      },
+      body,
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("업로드 파일명 'index.html'은 생성되는 목록 페이지를 덮어쓰지 않도록 이름을 바꿔 저장한다", async () => {
+    const attack = '<script>alert(document.domain)</script>';
+    const { base, dir } = await upload([
+      { filename: 'index.html', content: attack },
+      { filename: 'INDEX.HTML', content: attack },
+    ]);
+
+    expect(fs.readdirSync(dir).sort()).toEqual([
+      'index.html',
+      'upload-1-index.html',
+      'upload-2-INDEX.HTML',
+    ]);
+    const index = await request(base);
+    expect(index.status).toBe(200);
+    expect(index.body).not.toContain('<script>');
+    expect(index.body).toContain(`<a href="${base}upload-1-index.html">upload-1-index.html</a>`);
+  });
+
+  it('같은 밀리초에 들어온 업로드는 서로 다른 디렉터리에 저장한다', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
+    const first = await upload([{ filename: 'a.har', content: 'first' }]);
+    const second = await upload([{ filename: 'b.har', content: 'second' }]);
+    vi.mocked(Date.now).mockRestore();
+
+    expect(first.base).not.toBe(second.base);
+    expect(fs.readdirSync(first.dir).sort()).toEqual(['a.har', 'index.html']);
+    expect(fs.readdirSync(second.dir).sort()).toEqual(['b.har', 'index.html']);
   });
 
   it('잘린 multipart 본문은 400을 반환하고 디렉터리를 남기지 않는다', async () => {
@@ -379,9 +493,108 @@ describe('uploadMockPlugin — POST /upload 입력 검증', () => {
       body: truncated,
     });
     expect(res.status).toBe(400);
-    expect(fs.readdirSync(uploadsDir)).toEqual([]);
+    await waitForEmptyUploads();
 
     // 서버는 계속 요청을 처리할 수 있어야 한다
     await upload([{ filename: 'network.har', content: '{}' }]);
+  });
+});
+
+describe('uploadMockPlugin — 실패한 업로드 정리', () => {
+  it('파일 파트가 많은 본문이 중간에 잘려도 서버가 죽지 않고 디렉터리를 정리한다', async () => {
+    const parts = Array.from({ length: 300 }, (_, i) => ({ filename: `f${i}.har`, content: 'x' }));
+    const { body, headers } = multipart(parts);
+    const truncated = body.subarray(0, body.length - `--${BOUNDARY}--\r\n`.length);
+
+    const res = await request('/upload', {
+      method: 'POST',
+      headers: { ...headers, 'Content-Length': truncated.length },
+      body: truncated,
+    });
+    expect(res.status).toBe(400);
+    await waitForEmptyUploads();
+    await expectAllWriteStreamsClosed();
+
+    await upload([{ filename: 'network.har', content: '{}' }]);
+  });
+
+  it('파일 저장이 실패해도(ENAMETOOLONG) 서버가 죽지 않고 디렉터리를 정리한다', async () => {
+    const parts = [
+      { filename: `${'a'.repeat(300)}.har`, content: '{}' },
+      ...Array.from({ length: 200 }, (_, i) => ({ filename: `f${i}.har`, content: 'x' })),
+    ];
+    const { body, headers } = multipart(parts);
+
+    const res = await request('/upload', { method: 'POST', headers, body });
+    expect(res.status).toBe(500);
+    await waitForEmptyUploads();
+    await expectAllWriteStreamsClosed();
+
+    await upload([{ filename: 'network.har', content: '{}' }]);
+  });
+
+  it('실패 시점에 받는 중이던 파일 파트의 스트림도 닫는다 (fd 누수 방지)', async () => {
+    const { body, headers } = multipart([
+      { filename: 'ok.har', content: '{}' },
+      { filename: `${'a'.repeat(300)}.har`, content: '{}' },
+      { filename: 'pending.har', content: 'x'.repeat(64) },
+    ]);
+    // 세 번째 파트의 내용 중간까지만 보내고 요청은 열어 둔다
+    const partial = body.subarray(0, body.length - `\r\n--${BOUNDARY}--\r\n`.length - 32);
+    const { req, response } = openUpload(headers, partial);
+
+    try {
+      const res = await response;
+      expect(res.status).toBe(500);
+      expect(writeStreams().length).toBeGreaterThanOrEqual(2);
+      // 연결이 아직 열려 있어도 받는 중이던 파일의 스트림까지 닫혀야 한다
+      await expectAllWriteStreamsClosed();
+      await waitForEmptyUploads();
+    } finally {
+      req.destroy();
+    }
+  });
+
+  it('클라이언트가 업로드 도중 연결을 끊으면 스트림을 닫고 디렉터리를 정리한다', async () => {
+    const { body, headers } = multipart([{ filename: 'network.har', content: 'x'.repeat(256) }]);
+    const { req } = openUpload(headers, body.subarray(0, body.length - 128));
+
+    await vi.waitFor(() => expect(writeStreams().length).toBe(1));
+    req.destroy();
+
+    await expectAllWriteStreamsClosed();
+    await waitForEmptyUploads();
+    await upload([{ filename: 'network.har', content: '{}' }]);
+  });
+});
+
+describe('uploadMockPlugin — 업로드된 내용의 격리', () => {
+  it('업로드된 HTML 파일은 기존 MIME으로 주되 sandbox CSP와 nosniff로 격리한다', async () => {
+    const { base } = await upload([
+      { filename: 'evil.html', content: '<script>alert(document.domain)</script>' },
+      { filename: 'qa-network.har', content: '{}' },
+    ]);
+
+    const evil = await request(`${base}evil.html`);
+    expect(evil.status).toBe(200);
+    expect(evil.headers['content-type']).toBe('text/html; charset=utf-8');
+    expect(evil.headers['content-security-policy']).toBe('sandbox');
+    expect(evil.headers['x-content-type-options']).toBe('nosniff');
+
+    const har = await request(`${base}qa-network.har`);
+    expect(har.headers['content-security-policy']).toBe('sandbox');
+    expect(har.headers['x-content-type-options']).toBe('nosniff');
+  });
+
+  it('생성된 목록 페이지는 sandbox 없이 서빙한다', async () => {
+    const { base } = await upload([{ filename: 'qa-network.har', content: '{}' }]);
+
+    for (const url of [base, `${base}index.html`]) {
+      const res = await request(url);
+      expect(res.status).toBe(200);
+      expect(res.headers['content-type']).toBe('text/html; charset=utf-8');
+      expect(res.headers['content-security-policy']).toBeUndefined();
+      expect(res.headers['x-content-type-options']).toBe('nosniff');
+    }
   });
 });
