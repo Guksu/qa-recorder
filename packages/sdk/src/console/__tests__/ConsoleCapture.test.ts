@@ -436,6 +436,31 @@ describe('ConsoleCapture', () => {
       expect(capture.snapshot().map((e) => e.message)).toEqual(['ctx {}']);
     });
 
+    it('없는 키를 읽으면 get trap이 throw하는 Proxy 인자도 호출이 throw하지 않고 [unserializable]로 기록된다', () => {
+      // instanceof는 throw 없이 false이고, Object.prototype.toString이 Symbol.toStringTag를 읽을 때 throw
+      // (JSON.stringify는 toJSON, String()은 Symbol.toPrimitive를 읽다가 throw)
+      const strict = new Proxy({ a: 1 }, {
+        get(target, key, receiver) {
+          if (!(key in target)) throw new Error(`unknown key ${String(key)}`);
+          return Reflect.get(target, key, receiver);
+        },
+      });
+      expectForwardedWithoutThrow(['ctx', strict]);
+      expect(capture.snapshot().map((e) => e.message)).toEqual(['ctx [unserializable]']);
+    });
+
+    it('Symbol.toStringTag getter가 throw하는 인자도 호출이 throw하지 않고 {}로 기록된다', () => {
+      // instanceof는 false이고, Object.prototype.toString이 태그를 읽을 때 getter가 throw.
+      // JSON.stringify는 심볼 키를 무시하므로 {}로 직렬화된다
+      const tagged = {
+        get [Symbol.toStringTag]() {
+          throw new Error('tag getter');
+        },
+      };
+      expectForwardedWithoutThrow(['ctx', tagged]);
+      expect(capture.snapshot().map((e) => e.message)).toEqual(['ctx {}']);
+    });
+
     it('JSON.stringify와 String()이 모두 throw하는 인자는 [unserializable]로 남고 나머지 인자는 그대로 기록된다', () => {
       // 순환 참조라 JSON.stringify가 throw하고, null 프로토타입이라 toString이 없어 String()도 throw
       const bag: Record<string, unknown> = Object.create(null);
