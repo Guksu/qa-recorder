@@ -70,6 +70,23 @@ describe('QARecorder', () => {
     recorder.destroy();
   });
 
+  it('기본 설정에서 fetch 요청 body의 민감 키가 마스킹되어 기록된다', async () => {
+    vi.unstubAllGlobals(); // 요청 URL 파싱에 실제 URL이 필요 — beforeEach의 URL stub 해제
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}')));
+    const recorder = new QARecorder();
+    await recorder.init();
+
+    await window.fetch('https://example.com/login', {
+      method: 'POST',
+      body: '{"email":"a@b.com","password":"pw"}',
+    });
+
+    expect(recorder.getNetworkEntries()[0].request.postData?.text)
+      .toBe('{"email":"a@b.com","password":"[MASKED]"}');
+    recorder.destroy();
+    vi.unstubAllGlobals();
+  });
+
   it('버튼 클릭 시 ConfirmModal이 표시된다', async () => {
     const recorder = new QARecorder();
     await recorder.init();

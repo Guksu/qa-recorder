@@ -22,11 +22,30 @@ export interface QARecorderConfig {
 
   /**
    * HTTP header names to redact before saving. Values are replaced with `"[MASKED]"`.
-   * Matching is case-insensitive.
+   * Matching is case-insensitive. Setting this replaces the default list.
    *
-   * @default ['Authorization', 'Cookie', 'Set-Cookie']
+   * @default ['Authorization', 'Cookie', 'Set-Cookie', 'Proxy-Authorization', 'X-API-Key', 'X-Auth-Token', 'X-CSRF-Token', 'X-XSRF-Token']
    */
   maskHeaders?: string[];
+
+  /**
+   * Keys whose values are redacted (replaced with `"[MASKED]"`) in URL query parameters and in
+   * JSON or `application/x-www-form-urlencoded` request/response bodies. JSON bodies are
+   * searched recursively through nested objects and arrays; a matching key's whole value is
+   * masked, even if it is an object. `null` and empty-string values are kept as-is.
+   *
+   * Matching: the key and each entry are lowercased and stripped of ASCII non-alphanumeric
+   * characters (`_`, `-`, `.`, spaces, …). A key matches when it equals or ends with an entry,
+   * ignoring trailing digits — so `access_token`, `x-api-key`, `newPassword`, `refreshToken`
+   * and `password2` all match. Trade-off: non-secret keys with a matching suffix are masked too
+   * (e.g. a pagination cursor named `nextPageToken`).
+   *
+   * Setting this replaces the default list; `[]` disables body and query-string masking
+   * (header masking is controlled separately by `maskHeaders`).
+   *
+   * @default ['password', 'passwd', 'pwd', 'passwordConfirm', 'passwordConfirmation', 'secret', 'token', 'apiKey', 'clientSecret', 'privateKey', 'authorization', 'sessionId', 'otp', 'ssn', 'cardNumber', 'cvv', 'cvc']
+   */
+  maskKeys?: string[];
 
   /**
    * CSS `z-index` applied to all UI elements (floating button, progress bar, share panel).
@@ -80,7 +99,15 @@ export interface QARecorderConfig {
 const DEFAULT_CONFIG: Required<QARecorderConfig> = {
   endpoint: '',
   maxRequests: 100,
-  maskHeaders: ['Authorization', 'Cookie', 'Set-Cookie'],
+  maskHeaders: [
+    'Authorization', 'Cookie', 'Set-Cookie',
+    'Proxy-Authorization', 'X-API-Key', 'X-Auth-Token', 'X-CSRF-Token', 'X-XSRF-Token',
+  ],
+  maskKeys: [
+    'password', 'passwd', 'pwd', 'passwordConfirm', 'passwordConfirmation',
+    'secret', 'token', 'apiKey', 'clientSecret', 'privateKey', 'authorization',
+    'sessionId', 'otp', 'ssn', 'cardNumber', 'cvv', 'cvc',
+  ],
   zIndex: 2147483647,
   consoleLevels: ['error', 'warn'],
   maxConsoleEntries: 200,

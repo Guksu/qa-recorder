@@ -1,4 +1,4 @@
-import { MaskingFilter } from './MaskingFilter.js';
+import { MaskingFilter, type KeyMatcher } from './MaskingFilter.js';
 import type { HAREntry } from '@qa-recorder/shared';
 
 /**
@@ -11,12 +11,15 @@ export class NetworkCapture {
   private originalXHR: typeof XMLHttpRequest;
   private recordingStartedAt: Date | null = null;
   private readonly maskSet: Set<string>;
+  private readonly isSensitiveKey: KeyMatcher | null;
 
   constructor(
     private readonly maxRequests: number,
     maskHeaders: string[],
+    maskKeys: string[] = [],
   ) {
     this.maskSet = new Set(maskHeaders.map((h) => h.toLowerCase()));
+    this.isSensitiveKey = MaskingFilter.createKeyMatcher(maskKeys);
     this.originalFetch = window.fetch;
     this.originalXHR = window.XMLHttpRequest;
   }
@@ -136,12 +139,15 @@ export class NetworkCapture {
             timings: { send: 0, wait: elapsed, receive: 0 },
           },
           this.maskSet,
+          this.isSensitiveKey,
         ),
       );
 
       if (response) {
         response.clone().text().then((text) => {
-          stored.response.content.text = text;
+          // body는 엔트리 기록 이후에 도착하므로 여기서 따로 마스킹 (size/bodySize는 원본 기준)
+          stored.response.content.text =
+            MaskingFilter.maskBody(text, stored.response.content.mimeType, this.isSensitiveKey);
           stored.response.content.size = text.length;
           stored.response.bodySize = text.length;
         }).catch(() => { /* body 읽기 실패 무시 */ });
@@ -237,6 +243,7 @@ export class NetworkCapture {
                 timings: { send: 0, wait: elapsed, receive: 0 },
               },
               self.maskSet,
+              self.isSensitiveKey,
             ),
           );
         }, { once: true });

@@ -40,7 +40,7 @@
 | 🖥️ | **콘솔 캡처** | `console.error`, `console.warn`, `window.onerror`, `unhandledrejection` 자동 수집. |
 | 📋 | **통합 QA 리포트** | 하나의 HTML 파일: 세션 리플레이(좌) + 네트워크 인스펙터 + 콘솔 로그(우). 시간 동기화 — 네트워크 행이나 콘솔 항목 클릭 시 해당 시점으로 즉시 이동. |
 | 🔍 | **네트워크 상세 패널** | 요청 행 클릭 시 Headers, Payload, Response, Timing 탭 — Chrome 개발자도구 스타일. |
-| 🔒 | **헤더 마스킹** | `Authorization`, `Cookie` 등 민감 헤더 자동 마스킹. |
+| 🔒 | **민감 정보 마스킹** | 요청/응답 body(JSON, form)와 URL 쿼리 속 비밀번호·토큰·API 키 등 민감 키의 값과 `Authorization`, `Cookie` 등 인증 헤더를 저장 전에 자동 마스킹. |
 | 📦 | **로컬 저장** | 파일 3종을 로컬에 다운로드 — 백엔드 불필요. |
 | ☁️ | **원격 업로드** | 서버 endpoint 설정 시 POST 업로드. 응답 URL이 있으면 링크 복사 버튼 노출. |
 | 📝 | **버그 메모** | 저장 시 입력하는 선택적 텍스트 메모 — 통합 HTML 리포트에 포함되고 원격 업로드 시 함께 전송. |
@@ -147,6 +147,16 @@ window.__QA_RECORDER_CONFIG__ = {
     'Authorization',
     'Cookie',
     'Set-Cookie',
+    'Proxy-Authorization',
+    'X-API-Key',
+    'X-Auth-Token',
+    'X-CSRF-Token',
+    'X-XSRF-Token',
+  ],
+  maskKeys: [                // 저장 전 마스킹할 body/쿼리 키 (기본값 표시). []이면 비활성.
+    'password', 'passwd', 'pwd', 'passwordConfirm', 'passwordConfirmation',
+    'secret', 'token', 'apiKey', 'clientSecret', 'privateKey', 'authorization',
+    'sessionId', 'otp', 'ssn', 'cardNumber', 'cvv', 'cvc',
   ],
   zIndex: 2147483647,        // UI 요소의 z-index (기본값: 최대 정수).
   consoleLevels: ['error', 'warn'],  // 캡처할 콘솔 레벨 (기본값 표시).
@@ -160,7 +170,8 @@ window.__QA_RECORDER_CONFIG__ = {
 |---|---|---|---|
 | `endpoint` | `string` | `''` | 원격 업로드 URL. 비어있으면 로컬 다운로드. |
 | `maxRequests` | `number` | `100` | 순환 버퍼에 유지할 최대 네트워크 기록 수. |
-| `maskHeaders` | `string[]` | `['Authorization', 'Cookie', 'Set-Cookie']` | 마스킹할 헤더 이름 목록. |
+| `maskHeaders` | `string[]` | `['Authorization', 'Cookie', 'Set-Cookie', 'Proxy-Authorization', 'X-API-Key', 'X-Auth-Token', 'X-CSRF-Token', 'X-XSRF-Token']` | 마스킹할 헤더 이름 목록 (대소문자 무시). 지정하면 기본 목록을 대체. |
+| `maskKeys` | `string[]` | `['password', 'passwd', 'pwd', 'passwordConfirm', 'passwordConfirmation', 'secret', 'token', 'apiKey', 'clientSecret', 'privateKey', 'authorization', 'sessionId', 'otp', 'ssn', 'cardNumber', 'cvv', 'cvc']` | URL 쿼리 파라미터와 요청/응답 body(JSON은 중첩 객체·배열까지 재귀 탐색, `application/x-www-form-urlencoded`는 필드 단위)에서 값을 `"[MASKED]"`로 바꿀 키 목록. 대소문자와 `_`, `-`, `.` 등 기호를 무시하고 비교하며, 키가 항목과 같거나 항목으로 끝나면 매칭 (끝의 숫자는 무시) — `access_token`, `x-api-key`, `newPassword`, `password2` 모두 매칭. 트레이드오프: 페이지네이션 커서 `nextPageToken`처럼 접미사가 같은 비민감 키도 마스킹됨. `null`과 빈 값은 유지. 지정하면 기본 목록을 대체하며, `[]`이면 body/쿼리 마스킹 비활성. |
 | `zIndex` | `number` | `2147483647` | UI 요소(버튼, 프로그레스 바, 공유 패널)의 z-index. |
 | `consoleLevels` | `string[]` | `['error', 'warn']` | 캡처할 콘솔 레벨. 유효값: `'error'`, `'warn'`, `'log'`, `'info'`. |
 | `maxConsoleEntries` | `number` | `200` | 순환 버퍼에 유지할 최대 콘솔 기록 수. |
@@ -184,7 +195,7 @@ window.__QA_RECORDER_CONFIG__ = {
   ├─ ScreenRecorder.stop()
   ├─ NetworkCapture.snapshot()  → HAR 1.2 JSON 생성
   ├─ ConsoleCapture.snapshot()  → 콘솔 엔트리 배열 생성
-  ├─ MaskingFilter.apply()      → 민감 헤더 마스킹
+  ├─ MaskingFilter.apply()      → 민감 헤더·body 키·쿼리 파라미터 마스킹
   ├─ ProgressBar.show()         → "Saving..."
   │
   ├─ [endpoint 설정된 경우]

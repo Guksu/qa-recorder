@@ -36,7 +36,7 @@ No backend required. No browser extension. No screen share permission. Just add 
 | 🖥️ | **Console capture** | Captures `console.error`, `console.warn`, `window.onerror`, and `unhandledrejection`. |
 | 📋 | **Unified QA report** | Single self-contained HTML: session replay (left) + network inspector + console log (right). Time-synchronized — clicking a network row or console entry seeks to that exact moment. |
 | 🔍 | **Network detail panel** | Click any request row to inspect Headers, Payload, Response, and Timing — Chrome DevTools style. |
-| 🔒 | **Header masking** | `Authorization`, `Cookie`, and custom headers are automatically redacted. |
+| 🔒 | **Sensitive data masking** | Passwords, tokens, API keys and other sensitive keys in request/response bodies (JSON, form) and URL query strings are redacted before anything is stored — along with `Authorization`, `Cookie` and other auth headers. |
 | 📦 | **Local save** | Downloads a single ZIP file directly — no backend needed. |
 | ☁️ | **Remote upload** | Optionally POST files to your own server. Shows a share-link copy button on success. |
 | 📝 | **Bug memo** | Optional text note added at save time — embedded in the unified HTML report and sent with remote uploads. |
@@ -178,6 +178,16 @@ window.__QA_RECORDER_CONFIG__ = {
     'Authorization',
     'Cookie',
     'Set-Cookie',
+    'Proxy-Authorization',
+    'X-API-Key',
+    'X-Auth-Token',
+    'X-CSRF-Token',
+    'X-XSRF-Token',
+  ],
+  maskKeys: [                // Body / query-string keys to redact (default shown). [] disables.
+    'password', 'passwd', 'pwd', 'passwordConfirm', 'passwordConfirmation',
+    'secret', 'token', 'apiKey', 'clientSecret', 'privateKey', 'authorization',
+    'sessionId', 'otp', 'ssn', 'cardNumber', 'cvv', 'cvc',
   ],
   zIndex: 2147483647,        // z-index for all UI elements (default: max int).
   consoleLevels: ['error', 'warn'],  // Console levels to capture (default shown).
@@ -191,7 +201,8 @@ window.__QA_RECORDER_CONFIG__ = {
 |---|---|---|---|
 | `endpoint` | `string` | `''` | Remote upload URL. Empty = local download. |
 | `maxRequests` | `number` | `100` | Max network entries to keep. |
-| `maskHeaders` | `string[]` | `['Authorization', 'Cookie', 'Set-Cookie']` | Headers to redact. |
+| `maskHeaders` | `string[]` | `['Authorization', 'Cookie', 'Set-Cookie', 'Proxy-Authorization', 'X-API-Key', 'X-Auth-Token', 'X-CSRF-Token', 'X-XSRF-Token']` | Headers to redact (case-insensitive). Setting this replaces the default list. |
+| `maskKeys` | `string[]` | `['password', 'passwd', 'pwd', 'passwordConfirm', 'passwordConfirmation', 'secret', 'token', 'apiKey', 'clientSecret', 'privateKey', 'authorization', 'sessionId', 'otp', 'ssn', 'cardNumber', 'cvv', 'cvc']` | Keys whose values are replaced with `"[MASKED]"` in URL query parameters and in JSON (searched recursively through nested objects and arrays) or `application/x-www-form-urlencoded` request/response bodies. Keys are compared case-insensitively, ignoring `_`, `-`, `.` and other symbols; a key matches when it equals or ends with an entry, ignoring trailing digits — so `access_token`, `x-api-key`, `newPassword` and `password2` all match. Trade-off: non-secret keys with a matching suffix, such as a `nextPageToken` pagination cursor, are masked too. `null` and empty values are kept. Setting this replaces the default list; `[]` disables body and query-string masking. |
 | `zIndex` | `number` | `2147483647` | z-index for all UI elements (button, progress bar, share panel). |
 | `consoleLevels` | `string[]` | `['error', 'warn']` | Console levels to capture. Valid values: `'error'`, `'warn'`, `'log'`, `'info'`. |
 | `maxConsoleEntries` | `number` | `200` | Max console entries to keep in the circular buffer. |
@@ -215,7 +226,7 @@ User clicks the button
   ├─ ScreenRecorder.stop()
   ├─ NetworkCapture.snapshot()  → HAR 1.2 JSON
   ├─ ConsoleCapture.snapshot()  → console entries array
-  ├─ MaskingFilter.apply()      → redact sensitive headers
+  ├─ MaskingFilter.apply()      → redact sensitive headers, body keys and query params
   ├─ ProgressBar.show()         → "Saving..."
   │
   ├─ [endpoint set]
