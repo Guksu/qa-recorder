@@ -74,6 +74,20 @@ export class ScreenRecorder {
     this.state = 'stopped';
   }
 
+  /**
+   * 정지된 녹화를 기존 이벤트를 유지한 채 재개 (저장 실패 시 녹화 보존용).
+   * 새 record()는 Meta + FullSnapshot부터 emit하므로 [...기존, ...신규] 순서로 이어 붙여도 재생 가능하다.
+   * 보존된 이벤트는 prevEvents로 들어가므로 일반 직전 구간과 마찬가지로 다음 체크아웃 때 폐기된다.
+   * recording 중이면 무시하고, idle이면 보존할 녹화가 없으므로 start()와 동일하게 동작한다.
+   */
+  resume(): void {
+    if (this.state === 'recording') return;
+    const kept = this.state === 'stopped' ? this.getEvents() : [];
+    this.start();
+    // start()가 비운 버퍼의 앞쪽(prevEvents)에 기존 이벤트를 되돌려 놓는다
+    this.prevEvents = kept;
+  }
+
   getEvents(): unknown[] {
     if (this.state === 'idle') throw new Error('No recording available');
     return [...this.prevEvents, ...this.events];

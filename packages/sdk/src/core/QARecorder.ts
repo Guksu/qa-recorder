@@ -9,10 +9,12 @@ import { SharePanel } from '../ui/SharePanel.js';
 import { LocalStorage } from '../storage/LocalStorage.js';
 import { RemoteDelivery } from '../storage/RemoteDelivery.js';
 import { HARBuilder } from '../network/HARBuilder.js';
-import type { HAREntry } from '@qa-recorder/shared';
+import type { HAREntry, HARLog } from '@qa-recorder/shared';
 import type { ConsoleEntry } from '../console/ConsoleCapture.js';
 
 const SESSION_KEY = 'qa-recorder-backup';
+
+const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 export class QARecorder {
   private static _instance: QARecorder | null = null;
@@ -118,39 +120,74 @@ export class QARecorder {
 
     ProgressBar.show('Saving...', this.config.zIndex);
 
-    if (this.config.endpoint) {
-      try {
-        const url = await new RemoteDelivery(this.config.endpoint).send(
-          this.screenRecorder.getBlob(),
-          harLog,
-          memo,
-        );
-        ProgressBar.hide();
-        if (url) SharePanel.show(url, this.config.zIndex);
-        else alert('Upload complete.');
-      } catch (err) {
-        ProgressBar.hide();
-        alert(`Upload failed: ${err instanceof Error ? err.message : String(err)}`);
+    const saved = this.config.endpoint
+      ? await this.uploadOrSaveLocally(this.config.endpoint, harLog, consoleLogs, memo)
+      : await this.saveLocally(harLog, consoleLogs, memo);
+
+    if (saved) {
+      if (this.config.enableBackup) {
+        sessionStorage.removeItem(SESSION_KEY);
       }
+
+      this.screenRecorder.reset();
+      this.networkCapture.clearBuffer();
+      this.consoleCapture.clearBuffer();
+      this.screenRecorder.start();
     } else {
-      try {
-        await LocalStorage.save(this.screenRecorder.getEvents(), harLog, consoleLogs, memo);
-      } catch (err) {
-        alert(`Save failed: ${err instanceof Error ? err.message : String(err)}`);
-      } finally {
-        ProgressBar.hide();
-      }
+      /* 저장 실패 — 버퍼를 비우지 않고 기존 이벤트 뒤에 이어서 녹화해 다시 저장할 수 있게 한다 */
+      this.screenRecorder.resume();
     }
-
-    if (this.config.enableBackup) {
-      sessionStorage.removeItem(SESSION_KEY);
-    }
-
-    this.screenRecorder.reset();
-    this.networkCapture.clearBuffer();
-    this.consoleCapture.clearBuffer();
-    this.screenRecorder.start();
     this.floatingButton.setState('recording');
+  }
+
+  /**
+   * 원격 업로드. 실패하면 업로드에 쓰인 것과 같은 데이터로 로컬 ZIP 저장을 시도한다.
+   * 둘 중 하나라도 성공하면 true. alert는 블로킹이므로 항상 ProgressBar를 먼저 숨긴다.
+   */
+  private async uploadOrSaveLocally(
+    endpoint: string,
+    harLog: HARLog,
+    consoleLogs: ConsoleEntry[],
+    memo: string,
+  ): Promise<boolean> {
+    let url: string | undefined;
+    try {
+      url = await new RemoteDelivery(endpoint).send(this.screenRecorder.getBlob(), harLog, memo);
+    } catch (uploadErr) {
+      try {
+        // 녹화는 정지 상태이므로 getEvents()는 업로드에 쓰인 이벤트와 동일하다
+        await LocalStorage.save(this.screenRecorder.getEvents(), harLog, consoleLogs, memo);
+      } catch (saveErr) {
+        ProgressBar.hide();
+        alert(
+          `Upload failed: ${errorMessage(uploadErr)}\n` +
+          `Save failed: ${errorMessage(saveErr)}\n` +
+          'The recording was kept. Please try again.',
+        );
+        return false;
+      }
+      ProgressBar.hide();
+      alert(`Upload failed: ${errorMessage(uploadErr)}\nA local ZIP was downloaded instead.`);
+      return true;
+    }
+
+    ProgressBar.hide();
+    if (url) SharePanel.show(url, this.config.zIndex);
+    else alert('Upload complete.');
+    return true;
+  }
+
+  /** 로컬 ZIP 저장. 성공하면 true */
+  private async saveLocally(harLog: HARLog, consoleLogs: ConsoleEntry[], memo: string): Promise<boolean> {
+    try {
+      await LocalStorage.save(this.screenRecorder.getEvents(), harLog, consoleLogs, memo);
+    } catch (err) {
+      ProgressBar.hide();
+      alert(`Save failed: ${errorMessage(err)}\nThe recording was kept. Please try again.`);
+      return false;
+    }
+    ProgressBar.hide();
+    return true;
   }
 
   destroy(): void {

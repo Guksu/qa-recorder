@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { QARecorder } from '../QARecorder.js';
+import type { HAREntry } from '@qa-recorder/shared';
+import type { ScreenRecorder } from '../../recorder/ScreenRecorder.js';
+import type { NetworkCapture } from '../../network/NetworkCapture.js';
+import type { ConsoleCapture } from '../../console/ConsoleCapture.js';
 
 const mocks = vi.hoisted(() => ({
   stopFn: vi.fn(),
@@ -38,6 +42,46 @@ const sessionStorageMock = (() => {
   };
 })();
 
+/** record() mock이 (재)시작될 때마다 emit하는 FullSnapshot */
+const START_SNAPSHOT = { type: 2, data: {}, timestamp: 1000 };
+
+const isProgressVisible = () => document.querySelector('[data-qa="progress-bar"]') !== null;
+
+const internalsOf = (recorder: QARecorder) => recorder as unknown as {
+  screenRecorder: ScreenRecorder;
+  networkCapture: NetworkCapture;
+  consoleCapture: ConsoleCapture;
+};
+
+/** 내부 버퍼 상태 조회 (rrweb 이벤트 / 네트워크 / 콘솔) */
+function buffersOf(recorder: QARecorder) {
+  const { screenRecorder, networkCapture, consoleCapture } = internalsOf(recorder);
+  return {
+    events: screenRecorder.getEvents(),
+    network: networkCapture.snapshot(),
+    console: consoleCapture.snapshot(),
+  };
+}
+
+/** 녹화 중인 각 버퍼에 식별 가능한 항목을 하나씩 추가하고 그 상태를 반환 */
+function seedBuffers(recorder: QARecorder) {
+  const seededEvent = { type: 3, data: { seeded: true }, timestamp: 1500 };
+  const { emit } = mocks.record.mock.lastCall![0] as { emit: (event: unknown) => void };
+  emit(seededEvent);
+  // URL이 stub되어 있어 fetch 캡처 대신 버퍼에 직접 추가
+  internalsOf(recorder).networkCapture.restoreEntries([
+    { request: { url: 'https://example.com/api' } } as unknown as HAREntry,
+  ]);
+  // console.error 대신 window.onerror 경유로 캡처 (테스트 출력 오염 방지)
+  window.onerror?.('seeded error');
+
+  const seeded = buffersOf(recorder);
+  expect(seeded.events).toContainEqual(seededEvent);
+  expect(seeded.network).toHaveLength(1);
+  expect(seeded.console).toHaveLength(1);
+  return seeded;
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   sessionStorageMock.clear();
@@ -45,7 +89,7 @@ beforeEach(() => {
   vi.stubGlobal('URL', { createObjectURL: vi.fn(() => 'blob:mock'), revokeObjectURL: vi.fn() });
   vi.stubGlobal('sessionStorage', sessionStorageMock);
   mocks.record.mockImplementation(({ emit }: { emit: (event: unknown) => void }) => {
-    emit({ type: 2, data: {}, timestamp: 1000 });
+    emit({ ...START_SNAPSHOT });
     return mocks.stopFn;
   });
   mocks.confirmModalShow.mockResolvedValue({ confirmed: true, memo: '' });
@@ -183,21 +227,193 @@ describe('QARecorder', () => {
     alertSpy.mockRestore();
   });
 
-  it('로컬 저장 실패 시에도 ProgressBar가 사라지고 녹화가 재시작된다', async () => {
-    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
+  it('로컬 저장 실패 시에도 ProgressBar가 사라지고, 녹화를 보존한 채 이어서 녹화한다', async () => {
+    let progressVisibleOnAlert: boolean | undefined;
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {
+      progressVisibleOnAlert = isProgressVisible();
+    });
     mocks.localStorageSave.mockRejectedValue(new Error('quota exceeded'));
+    const recorder = new QARecorder({ enableBackup: true });
+    await recorder.init();
+    const before = seedBuffers(recorder);
+    sessionStorageMock.removeItem.mockClear(); // init()의 백업 복원 시 호출분 제외
+
+    const host = document.getElementById('qa-recorder-root')!;
+    const btn = host.shadowRoot!.querySelector('button')!;
+    btn.click();
+
+    // 녹화 재개(record 2회 호출)까지 진행되어야 함
+    await vi.waitFor(() => expect(mocks.record).toHaveBeenCalledTimes(2));
+    expect(alertSpy).toHaveBeenCalledWith(expect.stringContaining('quota exceeded'));
+    expect(alertSpy).toHaveBeenCalledWith(expect.stringContaining('The recording was kept'));
+    expect(progressVisibleOnAlert).toBe(false); // alert(블로킹) 전에 숨김
+    expect(isProgressVisible()).toBe(false);
+    expect(btn.title).toBe('Stop and save recording');
+
+    // 버퍼 보존: 기존 rrweb 이벤트 뒤에 새 녹화가 이어지고, 네트워크/콘솔은 그대로
+    const after = buffersOf(recorder);
+    expect(after.events).toEqual([...before.events, START_SNAPSHOT]);
+    expect(after.network).toEqual(before.network);
+    expect(after.console).toEqual(before.console);
+    // 저장되지 않았으므로 sessionStorage 백업도 유지
+    expect(sessionStorageMock.removeItem).not.toHaveBeenCalled();
+    recorder.destroy();
+    alertSpy.mockRestore();
+  });
+
+  it('로컬 저장 실패 후 다시 저장하면 보존된 녹화가 함께 저장되고 버퍼가 초기화된다', async () => {
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    mocks.localStorageSave.mockRejectedValueOnce(new Error('quota exceeded'));
     const recorder = new QARecorder();
     await recorder.init();
+    const before = seedBuffers(recorder);
+
+    const host = document.getElementById('qa-recorder-root')!;
+    const btn = host.shadowRoot!.querySelector('button')!;
+    btn.click();
+    await vi.waitFor(() => expect(mocks.record).toHaveBeenCalledTimes(2));
+
+    btn.click();
+    await vi.waitFor(() => expect(mocks.record).toHaveBeenCalledTimes(3));
+
+    const [events, harLog, consoleLogs] = mocks.localStorageSave.mock.calls[1]!;
+    expect(events).toEqual([...before.events, START_SNAPSHOT]);
+    expect(harLog.entries).toEqual(before.network);
+    expect(consoleLogs).toEqual(before.console);
+
+    const after = buffersOf(recorder);
+    expect(after.events).toEqual([START_SNAPSHOT]);
+    expect(after.network).toHaveLength(0);
+    expect(after.console).toHaveLength(0);
+    recorder.destroy();
+    alertSpy.mockRestore();
+  });
+
+  it('로컬 저장 성공 시 버퍼를 초기화하고 녹화를 새로 시작한다', async () => {
+    const recorder = new QARecorder();
+    await recorder.init();
+    seedBuffers(recorder);
 
     const host = document.getElementById('qa-recorder-root')!;
     host.shadowRoot!.querySelector('button')!.click();
 
-    // 녹화 재시작(record 2회 호출)까지 진행되어야 함
     await vi.waitFor(() => expect(mocks.record).toHaveBeenCalledTimes(2));
-    expect(alertSpy).toHaveBeenCalledWith(expect.stringContaining('quota exceeded'));
-    expect(document.querySelector('[data-qa="progress-bar"]')).toBeNull();
+    const after = buffersOf(recorder);
+    expect(after.events).toEqual([START_SNAPSHOT]);
+    expect(after.network).toHaveLength(0);
+    expect(after.console).toHaveLength(0);
     recorder.destroy();
-    alertSpy.mockRestore();
+  });
+
+  describe('원격 업로드', () => {
+    const endpoint = 'https://example.com/upload';
+
+    it('업로드 성공 시 URL이 있으면 SharePanel을 표시하고, 로컬 저장 없이 버퍼를 초기화한다', async () => {
+      mocks.remoteDeliverySend.mockResolvedValue('https://example.com/share/abc');
+      const recorder = new QARecorder({ endpoint, enableBackup: true });
+      await recorder.init();
+      seedBuffers(recorder);
+      sessionStorageMock.removeItem.mockClear();
+
+      const host = document.getElementById('qa-recorder-root')!;
+      host.shadowRoot!.querySelector('button')!.click();
+
+      await vi.waitFor(() => expect(mocks.record).toHaveBeenCalledTimes(2));
+      expect(document.querySelector('[data-qa="share-panel"]')).not.toBeNull();
+      expect(isProgressVisible()).toBe(false);
+      expect(mocks.localStorageSave).not.toHaveBeenCalled();
+      expect(sessionStorageMock.removeItem).toHaveBeenCalledWith('qa-recorder-backup');
+      const after = buffersOf(recorder);
+      expect(after.events).toEqual([START_SNAPSHOT]);
+      expect(after.network).toHaveLength(0);
+      expect(after.console).toHaveLength(0);
+      recorder.destroy();
+    });
+
+    it('업로드 실패 시 같은 데이터로 로컬 ZIP 저장으로 대체하고 버퍼를 초기화한다', async () => {
+      let progressVisibleOnAlert: boolean | undefined;
+      const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {
+        progressVisibleOnAlert = isProgressVisible();
+      });
+      mocks.confirmModalShow.mockResolvedValue({ confirmed: true, memo: 'bug memo' });
+      mocks.remoteDeliverySend.mockRejectedValue(new Error('network down'));
+      const recorder = new QARecorder({ endpoint, enableBackup: true });
+      await recorder.init();
+      const before = seedBuffers(recorder);
+      sessionStorageMock.removeItem.mockClear();
+
+      const host = document.getElementById('qa-recorder-root')!;
+      host.shadowRoot!.querySelector('button')!.click();
+
+      await vi.waitFor(() => expect(mocks.record).toHaveBeenCalledTimes(2));
+      expect(mocks.localStorageSave).toHaveBeenCalledOnce();
+
+      const [blob, uploadedHar, uploadedMemo] = mocks.remoteDeliverySend.mock.calls[0]!;
+      const [events, harLog, consoleLogs, memo] = mocks.localStorageSave.mock.calls[0]!;
+      expect(events).toEqual(JSON.parse(await (blob as Blob).text()));
+      expect(events).toEqual(before.events);
+      expect(harLog).toBe(uploadedHar);
+      expect(harLog.entries).toEqual(before.network);
+      expect(consoleLogs).toEqual(before.console);
+      expect(memo).toBe('bug memo');
+      expect(uploadedMemo).toBe('bug memo');
+
+      expect(alertSpy).toHaveBeenCalledOnce();
+      expect(alertSpy).toHaveBeenCalledWith(expect.stringContaining('Upload failed: network down'));
+      expect(alertSpy).toHaveBeenCalledWith(expect.stringContaining('local ZIP'));
+      expect(progressVisibleOnAlert).toBe(false);
+      expect(isProgressVisible()).toBe(false);
+      expect(sessionStorageMock.removeItem).toHaveBeenCalledWith('qa-recorder-backup');
+
+      const after = buffersOf(recorder);
+      expect(after.events).toEqual([START_SNAPSHOT]);
+      expect(after.network).toHaveLength(0);
+      expect(after.console).toHaveLength(0);
+      recorder.destroy();
+      alertSpy.mockRestore();
+    });
+
+    it('업로드와 로컬 저장이 모두 실패하면 녹화를 보존한 채 이어서 녹화한다', async () => {
+      const progressVisible: Record<string, boolean> = {};
+      const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {
+        progressVisible.onAlert = isProgressVisible();
+      });
+      mocks.remoteDeliverySend.mockRejectedValue(new Error('network down'));
+      mocks.localStorageSave.mockImplementation(async () => {
+        progressVisible.onSave = isProgressVisible();
+        throw new Error('quota exceeded');
+      });
+      const recorder = new QARecorder({ endpoint, enableBackup: true });
+      await recorder.init();
+      const before = seedBuffers(recorder);
+      sessionStorageMock.removeItem.mockClear();
+
+      const host = document.getElementById('qa-recorder-root')!;
+      const btn = host.shadowRoot!.querySelector('button')!;
+      btn.click();
+
+      // 녹화 재개(record 2회 호출)까지 진행되어야 함
+      await vi.waitFor(() => expect(mocks.record).toHaveBeenCalledTimes(2));
+      expect(alertSpy).toHaveBeenCalledOnce();
+      const message = alertSpy.mock.calls[0]![0] as string;
+      expect(message).toContain('Upload failed: network down');
+      expect(message).toContain('Save failed: quota exceeded');
+      expect(message).toContain('The recording was kept');
+
+      // 대체 저장 중에는 ProgressBar가 유지되고, alert 전에 사라진다
+      expect(progressVisible).toEqual({ onSave: true, onAlert: false });
+      expect(isProgressVisible()).toBe(false);
+      expect(btn.title).toBe('Stop and save recording');
+
+      // 버퍼 보존: 기존 rrweb 이벤트 뒤에 새 녹화가 이어지고, 네트워크/콘솔은 그대로
+      const after = buffersOf(recorder);
+      expect(after.events).toEqual([...before.events, START_SNAPSHOT]);
+      expect(after.network).toEqual(before.network);
+      expect(after.console).toEqual(before.console);
+      expect(sessionStorageMock.removeItem).not.toHaveBeenCalled();
+      recorder.destroy();
+      alertSpy.mockRestore();
+    });
   });
 
   it('저장 완료 후 sessionStorage 백업이 초기화된다', async () => {
