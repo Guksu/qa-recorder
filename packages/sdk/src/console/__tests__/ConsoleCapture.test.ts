@@ -382,4 +382,66 @@ describe('ConsoleCapture', () => {
       expect(msg).not.toContain('SECRET');
     });
   });
+
+  describe('검사·직렬화 중 throw하는 인자', () => {
+    /**
+     * findErrorStack은 push()의 인자별 try/catch 밖에서 실행되므로, 호스트의 console 호출이 throw하지
+     * 않는 것은 isErrorLike·findErrorStack 안의 try/catch에만 달려 있다.
+     * 원본 console.error를 무음 spy로 바꾸고(capture가 spy를 감싸도록 start() 전에) console.error(...args)를
+     * 호출해, throw하지 않는지와 인자가 그대로 원본에 전달됐는지 확인한다.
+     * hostile 인자는 동등성 비교(toHaveBeenCalledWith) 중에도 throw할 수 있어 동일성만 비교한다.
+     */
+    function expectForwardedWithoutThrow(args: unknown[]): void {
+      const originalError = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        capture.start();
+        expect(() => console.error(...args)).not.toThrow();
+        expect(originalError).toHaveBeenCalledTimes(1);
+        const forwarded = originalError.mock.calls[0];
+        expect(forwarded.length).toBe(args.length);
+        args.forEach((arg, i) => expect(forwarded[i]).toBe(arg));
+      } finally {
+        capture.stop();
+        originalError.mockRestore();
+      }
+    }
+
+    it('revoked Proxy 인자가 있어도 호출이 throw하지 않고 [unserializable]로 기록된다', () => {
+      const { proxy, revoke } = Proxy.revocable({}, {});
+      revoke();
+      expectForwardedWithoutThrow(['ctx', proxy]);
+      expect(capture.snapshot().map((e) => e.message)).toEqual(['ctx [unserializable]']);
+    });
+
+    it('stack getter가 throw하는 Error 인자는 호출이 throw하지 않고 stack 없이 name: message로 기록된다', () => {
+      const err = new Error('y');
+      Object.defineProperty(err, 'stack', {
+        get() {
+          throw new Error('stack unavailable');
+        },
+      });
+      expectForwardedWithoutThrow(['ctx', err]);
+      const entries = capture.snapshot();
+      expect(entries.map((e) => e.message)).toEqual(['ctx Error: y']);
+      expect(entries[0].stack).toBeUndefined();
+    });
+
+    it('getPrototypeOf trap이 throw하는 Proxy 인자도 호출이 throw하지 않고 {}로 기록된다', () => {
+      const hostile = new Proxy({}, {
+        getPrototypeOf() {
+          throw new Error('getPrototypeOf trap');
+        },
+      });
+      expectForwardedWithoutThrow(['ctx', hostile]);
+      expect(capture.snapshot().map((e) => e.message)).toEqual(['ctx {}']);
+    });
+
+    it('JSON.stringify와 String()이 모두 throw하는 인자는 [unserializable]로 남고 나머지 인자는 그대로 기록된다', () => {
+      // 순환 참조라 JSON.stringify가 throw하고, null 프로토타입이라 toString이 없어 String()도 throw
+      const bag: Record<string, unknown> = Object.create(null);
+      bag.self = bag;
+      expectForwardedWithoutThrow(['ctx', bag, 'tail']);
+      expect(capture.snapshot().map((e) => e.message)).toEqual(['ctx [unserializable] tail']);
+    });
+  });
 });
