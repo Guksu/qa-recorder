@@ -93,12 +93,17 @@ export class ConsoleCapture {
         if (a === null) return 'null';
         if (a === undefined) return 'undefined';
         try {
-          return typeof a === 'object' ? JSON.stringify(a) : String(a);
+          // Error는 own enumerable 프로퍼티가 없어 JSON.stringify 시 "{}"가 되므로 별도 포맷
+          if (isErrorLike(a)) return formatError(a);
+          return typeof a === 'object' ? JSON.stringify(a, errorReplacer) : String(a);
         } catch {
           try { return String(a); } catch { return '[unserializable]'; }
         }
       })
       .join(' ');
+
+    // 명시적 stack(window.onerror 등)이 우선, 없으면 첫 번째 Error 인자의 stack 사용
+    const entryStack = stack ?? findErrorStack(args);
 
     const entry: ConsoleEntry = {
       timestamp: new Date().toISOString(),
@@ -107,12 +112,58 @@ export class ConsoleCapture {
       _offsetMs: this.recordingStartedAt
         ? Date.now() - this.recordingStartedAt.getTime()
         : 0,
-      ...(stack ? { stack } : {}),
+      ...(entryStack ? { stack: entryStack } : {}),
     };
 
     if (this.buffer.length >= this.maxEntries) {
       this.buffer.shift();
     }
     this.buffer.push(entry);
+  }
+}
+
+/**
+ * Error 여부 판별. iframe 등 다른 realm의 Error는 instanceof가 false이므로 태그로도 확인.
+ * DOMException은 환경에 따라 Error를 상속하지 않을 수 있어 태그를 별도로 허용.
+ */
+function isErrorLike(value: unknown): value is object {
+  try {
+    if (value instanceof Error) return true;
+    if (value === null || typeof value !== 'object') return false;
+    const tag = Object.prototype.toString.call(value);
+    return tag === '[object Error]' || tag === '[object DOMException]';
+  } catch {
+    // revoked Proxy 등은 검사 자체가 throw
+    return false;
+  }
+}
+
+/**
+ * `${name}: ${message}` 형태로 변환 (Error.prototype.toString과 동일하게 한쪽이 비어 있으면 나머지만).
+ * message가 문자열이 아니면 String()으로 폴백.
+ */
+function formatError(err: object): string {
+  const { name, message } = err as { name?: unknown; message?: unknown };
+  if (typeof message !== 'string') return String(err);
+  if (typeof name !== 'string' || !name) return message;
+  return message ? `${name}: ${message}` : name;
+}
+
+/** 객체/배열 안에 중첩된 Error를 { name, message }로 직렬화 (크기를 위해 stack은 제외) */
+function errorReplacer(_key: string, value: unknown): unknown {
+  if (!isErrorLike(value)) return value;
+  const { name, message } = value as { name?: unknown; message?: unknown };
+  return { name, message };
+}
+
+/** 인자 중 첫 번째 Error의 stack (없거나 읽을 수 없으면 undefined) */
+function findErrorStack(args: unknown[]): string | undefined {
+  const err = args.find(isErrorLike);
+  if (!err) return undefined;
+  try {
+    const { stack } = err as { stack?: unknown };
+    return typeof stack === 'string' && stack ? stack : undefined;
+  } catch {
+    return undefined;
   }
 }

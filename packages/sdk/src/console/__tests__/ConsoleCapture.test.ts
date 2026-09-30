@@ -137,4 +137,133 @@ describe('ConsoleCapture', () => {
     expect(capture.snapshot()).toHaveLength(1);
     expect(capture.snapshot()[0].level).toBe('log');
   });
+
+  it('null/undefined 인자는 문자열로 기록된다', () => {
+    capture.start();
+    console.error(null, undefined);
+    expect(capture.snapshot()[0].message).toBe('null undefined');
+  });
+
+  it('일반 객체는 JSON 문자열로 기록된다', () => {
+    capture.start();
+    console.error({ a: 1, b: [2, 'x'] });
+    expect(capture.snapshot()[0].message).toBe('{"a":1,"b":[2,"x"]}');
+  });
+
+  describe('Error 인자', () => {
+    it('Error 인자는 "{}"가 아니라 name: message로 기록된다', () => {
+      capture.start();
+      console.error(new Error('boom'));
+      expect(capture.snapshot()[0].message).toBe('Error: boom');
+    });
+
+    it('문자열 뒤에 오는 Error 인자도 name: message로 기록된다', () => {
+      capture.start();
+      console.error('ctx', new Error('boom'));
+      expect(capture.snapshot()[0].message).toBe('ctx Error: boom');
+    });
+
+    it('TypeError는 TypeError 이름으로 기록된다', () => {
+      capture.start();
+      console.error(new TypeError('bad type'));
+      expect(capture.snapshot()[0].message).toBe('TypeError: bad type');
+    });
+
+    it('커스텀 name을 가진 Error 서브클래스는 해당 name으로 기록된다', () => {
+      class ValidationError extends Error {
+        constructor(message: string) {
+          super(message);
+          this.name = 'ValidationError';
+        }
+      }
+      capture.start();
+      console.error(new ValidationError('invalid input'));
+      expect(capture.snapshot()[0].message).toBe('ValidationError: invalid input');
+    });
+
+    it('name이 비어 있으면 message만 기록된다', () => {
+      const err = new Error('no name');
+      err.name = '';
+      capture.start();
+      console.error(err);
+      expect(capture.snapshot()[0].message).toBe('no name');
+    });
+
+    it('DOMException도 name: message로 기록된다', () => {
+      capture.start();
+      console.error(new DOMException('node missing', 'NotFoundError'));
+      expect(capture.snapshot()[0].message).toBe('NotFoundError: node missing');
+    });
+
+    it('객체 안에 중첩된 Error는 stack 없이 { name, message }로 기록된다', () => {
+      capture.start();
+      console.error({ err: new Error('boom') });
+      const msg = capture.snapshot()[0].message;
+      expect(msg).toBe('{"err":{"name":"Error","message":"boom"}}');
+      expect(msg).not.toContain('stack');
+    });
+
+    it('배열 안에 중첩된 Error도 { name, message }로 기록된다', () => {
+      capture.start();
+      console.error([new RangeError('out of range')]);
+      expect(capture.snapshot()[0].message).toBe('[{"name":"RangeError","message":"out of range"}]');
+    });
+
+    it('Error 인자의 stack이 엔트리 stack으로 기록된다', () => {
+      const err = new Error('with stack');
+      capture.start();
+      console.error('ctx', err);
+      expect(err.stack).toBeTruthy();
+      expect(capture.snapshot()[0].stack).toBe(err.stack);
+    });
+
+    it('Error 인자가 여러 개면 첫 번째 Error의 stack이 기록된다', () => {
+      const first = new Error('first');
+      const second = new Error('second');
+      first.stack = 'Error: first\n    at first.js:1:1';
+      second.stack = 'Error: second\n    at second.js:1:1';
+      capture.start();
+      console.error(first, second);
+      expect(capture.snapshot()[0].stack).toBe(first.stack);
+    });
+
+    it('Error 인자가 없으면 stack이 기록되지 않는다', () => {
+      capture.start();
+      console.error('plain', { err: new Error('nested') });
+      expect(capture.snapshot()[0].stack).toBeUndefined();
+    });
+
+    it('window.onerror 경로는 전달받은 error의 stack을 그대로 사용한다', () => {
+      const err = new Error('Uncaught TypeError');
+      err.stack = 'TypeError: explicit\n    at app.js:10:5';
+      capture.start();
+      window.onerror?.('Uncaught TypeError', 'app.js', 10, 5, err);
+      const entry = capture.snapshot()[0];
+      expect(entry.message).toBe('[Uncaught] Uncaught TypeError at app.js:10:5');
+      expect(entry.stack).toBe('TypeError: explicit\n    at app.js:10:5');
+    });
+
+    it('window.onerror에 error 객체가 없으면 stack이 기록되지 않는다', () => {
+      capture.start();
+      window.onerror?.('Script error.', '', 0, 0, undefined);
+      const entry = capture.snapshot()[0];
+      expect(entry.message).toBe('[Uncaught] Script error.');
+      expect(entry.stack).toBeUndefined();
+    });
+
+    it('다른 realm의 Error처럼 instanceof가 false여도 태그가 Error면 Error로 처리된다', () => {
+      const foreign = {
+        name: 'RangeError',
+        message: 'from iframe',
+        stack: 'RangeError: from iframe\n    at frame.js:3:7',
+        [Symbol.toStringTag]: 'Error',
+      };
+      expect(foreign instanceof Error).toBe(false);
+      capture.start();
+      console.error(foreign);
+      const entry = capture.snapshot()[0];
+      expect(entry.message).toBe('RangeError: from iframe');
+      expect(entry.stack).toBe('RangeError: from iframe\n    at frame.js:3:7');
+    });
+  });
 });
