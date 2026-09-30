@@ -1,4 +1,5 @@
 import { buildStyles } from './styles.js';
+import { excludeFromRecording } from './recordingExclusion.js';
 
 export class SharePanel {
   private static host: HTMLElement | null = null;
@@ -28,6 +29,7 @@ export class SharePanel {
       navigator.clipboard.writeText(url);
     });
 
+    excludeFromRecording(this.host, style, panel);
     shadow.append(style, panel);
     document.body.appendChild(this.host);
   }

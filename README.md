@@ -36,7 +36,7 @@ No backend required. No browser extension. No screen share permission. Just add 
 | 🖥️ | **Console capture** | Captures `console.error`, `console.warn`, `window.onerror`, and `unhandledrejection`. |
 | 📋 | **Unified QA report** | Single self-contained HTML: session replay (left) + network inspector + console log (right). Time-synchronized — clicking a network row or console entry seeks to that exact moment. |
 | 🔍 | **Network detail panel** | Click any request row to inspect Headers, Payload, Response, and Timing — Chrome DevTools style. |
-| 🔒 | **Sensitive data masking** | Passwords, tokens, API keys and other sensitive keys in request/response bodies (JSON, form) and URL query strings are redacted before anything is stored — along with `Authorization`, `Cookie` and other auth headers. |
+| 🔒 | **Sensitive data masking** | Passwords, tokens, API keys and other sensitive keys in request/response bodies (JSON, form) and URL query strings are redacted before anything is stored — along with `Authorization`, `Cookie` and other auth headers. The SDK's own UI (button, save dialog with the bug memo) is never recorded into the replay, and `maskAllInputs`, `maskTextSelector` and `blockSelector` hide inputs, text or whole elements from it. |
 | 📦 | **Local save** | Downloads a single ZIP file directly — no backend needed. |
 | ☁️ | **Remote upload** | Optionally POST files to your own server. Shows a share-link copy button on success. |
 | 📝 | **Bug memo** | Optional text note added at save time — embedded in the unified HTML report and sent with remote uploads. |
@@ -194,6 +194,9 @@ window.__QA_RECORDER_CONFIG__ = {
   maxConsoleEntries: 200,    // Max console entries in the circular buffer (default: 200).
   enableBackup: false,       // Auto-save session to sessionStorage on tab hide and restore after refresh (default: false). Cleared on tab close.
   mode: 'normal',            // Recording intensity preset: 'light' | 'normal' | 'heavy' (default: 'normal').
+  maskAllInputs: false,      // Mask every input/textarea/select value in the replay (default: false = passwords only).
+  maskTextSelector: null,    // CSS selector for elements whose text is masked in the replay (default: null).
+  blockSelector: null,       // CSS selector for elements left out of the replay (default: null).
 };
 ```
 
@@ -208,6 +211,9 @@ window.__QA_RECORDER_CONFIG__ = {
 | `maxConsoleEntries` | `number` | `200` | Max console entries to keep in the circular buffer. |
 | `enableBackup` | `boolean` | `false` | When `true`, auto-saves the current session to sessionStorage whenever the tab becomes hidden (refresh, navigate). On the next `init()`, the backup is silently restored into the current session buffers before recording continues. The rolling window matches `mode` (light: 30m / normal: 20m / heavy: 5m). Note: data is cleared when the tab is closed. |
 | `mode` | `'light' \| 'normal' \| 'heavy'` | `'normal'` | Recording intensity preset that controls rrweb's checkout interval and event sampling to keep the in-memory buffer bounded. Use `'heavy'` for pages with frequent DOM mutations, animations, or long sessions — 5-minute checkout plus throttled `mousemove`/`scroll`/`input`. Use `'light'` for lightweight pages where you want a longer 30-minute history. |
+| `maskAllInputs` | `boolean` | `false` | When `true`, the replay masks the values of every `<input>`, `<textarea>` and `<select>`. When `false`, only password inputs are masked (rrweb's default). |
+| `maskTextSelector` | `string \| null` | `null` | CSS selector for elements whose text is masked in the replay (non-whitespace characters become `*`). Elements with the `rr-mask` class are always masked. |
+| `blockSelector` | `string \| null` | `null` | CSS selector for elements left out of the replay — they are recorded as an empty placeholder of the same size. rrweb applies it only when serializing the DOM, so values typed into form fields inside a matched element are still captured; for those, add the `rr-block` class (also honoured for input and interaction events) or use `maskAllInputs`. |
 
 ---
 

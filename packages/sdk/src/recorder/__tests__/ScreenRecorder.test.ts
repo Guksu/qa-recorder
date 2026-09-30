@@ -34,6 +34,37 @@ describe('ScreenRecorder', () => {
     );
   });
 
+  it('프라이버시 옵션 미지정 시 rrweb 기본값(비밀번호 입력만 마스킹, 셀렉터 없음)을 유지한다', () => {
+    const recorder = new ScreenRecorder();
+    recorder.start();
+    const opts = mocks.record.mock.calls[0]![0] as Record<string, unknown>;
+    expect(opts.maskAllInputs).toBe(false);
+    expect(opts).not.toHaveProperty('maskTextSelector');
+    expect(opts).not.toHaveProperty('blockSelector');
+  });
+
+  it('maskAllInputs / maskTextSelector / blockSelector를 record()에 전달한다', () => {
+    const recorder = new ScreenRecorder('normal', {
+      maskAllInputs: true,
+      maskTextSelector: '.pii',
+      blockSelector: '[data-private]',
+    });
+    recorder.start();
+    expect(mocks.record).toHaveBeenCalledWith(expect.objectContaining({
+      maskAllInputs: true,
+      maskTextSelector: '.pii',
+      blockSelector: '[data-private]',
+    }));
+  });
+
+  it('셀렉터가 null이면 record()에 전달하지 않는다', () => {
+    const recorder = new ScreenRecorder('normal', { maskTextSelector: null, blockSelector: null });
+    recorder.start();
+    const opts = mocks.record.mock.calls[0]![0] as Record<string, unknown>;
+    expect(opts).not.toHaveProperty('maskTextSelector');
+    expect(opts).not.toHaveProperty('blockSelector');
+  });
+
   it('start()를 중복 호출해도 record는 한 번만 호출된다', () => {
     const recorder = new ScreenRecorder();
     recorder.start();

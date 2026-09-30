@@ -1,7 +1,10 @@
 import { record } from 'rrweb';
-import type { RecorderMode } from '../core/config.js';
+import type { QARecorderConfig, RecorderMode } from '../core/config.js';
 
 export type RecorderState = 'idle' | 'recording' | 'stopped';
+
+/** rrweb record()에 그대로 전달하는 프라이버시 옵션 (미지정 시 rrweb 기본 동작과 동일) */
+export type RecordPrivacyOptions = Pick<QARecorderConfig, 'maskAllInputs' | 'maskTextSelector' | 'blockSelector'>;
 
 interface ModePreset {
   checkoutEveryNms: number;
@@ -34,7 +37,7 @@ export class ScreenRecorder {
   private state: RecorderState = 'idle';
   private preset: ModePreset;
 
-  constructor(mode: RecorderMode = 'normal') {
+  constructor(mode: RecorderMode = 'normal', private readonly privacy: RecordPrivacyOptions = {}) {
     this.preset = MODE_PRESETS[mode];
   }
 
@@ -53,8 +56,12 @@ export class ScreenRecorder {
         }
       },
       checkoutEveryNms: this.preset.checkoutEveryNms,
+      maskAllInputs: this.privacy.maskAllInputs ?? false,
     };
     if (this.preset.sampling) opts.sampling = this.preset.sampling;
+    // null/빈 문자열은 rrweb 기본값(셀렉터 없음)과 같으므로 전달하지 않는다
+    if (this.privacy.maskTextSelector) opts.maskTextSelector = this.privacy.maskTextSelector;
+    if (this.privacy.blockSelector) opts.blockSelector = this.privacy.blockSelector;
 
     this.stopFn = record(opts) ?? null;
     this.state = 'recording';

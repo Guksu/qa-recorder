@@ -46,6 +46,20 @@ describe('resolveConfig', () => {
     expect(resolveConfig({ maskKeys: [] }).maskKeys).toEqual([]);
   });
 
+  it('rrweb 프라이버시 옵션 기본값은 rrweb 기본 동작과 같다 (비밀번호 입력만 마스킹, 셀렉터 없음)', () => {
+    const config = resolveConfig();
+    expect(config.maskAllInputs).toBe(false);
+    expect(config.maskTextSelector).toBeNull();
+    expect(config.blockSelector).toBeNull();
+  });
+
+  it('overrides로 rrweb 프라이버시 옵션을 설정한다', () => {
+    const config = resolveConfig({ maskAllInputs: true, maskTextSelector: '.pii', blockSelector: '.private' });
+    expect(config.maskAllInputs).toBe(true);
+    expect(config.maskTextSelector).toBe('.pii');
+    expect(config.blockSelector).toBe('.private');
+  });
+
   it('window.__QA_RECORDER_CONFIG__ 값을 반영한다', () => {
     (window as Window & { __QA_RECORDER_CONFIG__?: object }).__QA_RECORDER_CONFIG__ = {
       maxRequests: 200,

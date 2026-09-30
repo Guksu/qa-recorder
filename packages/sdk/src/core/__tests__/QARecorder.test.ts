@@ -70,6 +70,15 @@ describe('QARecorder', () => {
     recorder.destroy();
   });
 
+  it('rrweb 프라이버시 옵션을 record()에 전달한다', async () => {
+    const recorder = new QARecorder({ maskAllInputs: true, blockSelector: '.private' });
+    await recorder.init();
+    expect(mocks.record).toHaveBeenCalledWith(
+      expect.objectContaining({ maskAllInputs: true, blockSelector: '.private' }),
+    );
+    recorder.destroy();
+  });
+
   it('기본 설정에서 fetch 요청 body의 민감 키가 마스킹되어 기록된다', async () => {
     vi.unstubAllGlobals(); // 요청 URL 파싱에 실제 URL이 필요 — beforeEach의 URL stub 해제
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}')));

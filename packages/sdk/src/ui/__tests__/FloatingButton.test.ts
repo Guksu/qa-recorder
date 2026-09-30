@@ -12,6 +12,17 @@ describe('FloatingButton', () => {
     expect(document.getElementById('qa-recorder-root')).not.toBeNull();
   });
 
+  it('host와 shadow 최상위 요소에 rr-block 클래스를 붙여 리플레이 녹화에서 제외한다', () => {
+    const btn = new FloatingButton(vi.fn());
+    btn.mount();
+    btn.setState('recording');
+    const host = document.getElementById('qa-recorder-root')!;
+    expect(host.classList.contains('rr-block')).toBe(true);
+    for (const child of Array.from(host.shadowRoot!.children)) {
+      expect(child.classList.contains('rr-block')).toBe(true);
+    }
+  });
+
   it('버튼 클릭 시 onClick 콜백이 호출된다', () => {
     const onClick = vi.fn();
     const btn = new FloatingButton(onClick);

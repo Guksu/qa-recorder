@@ -12,6 +12,15 @@ describe('ProgressBar', () => {
     expect(host).not.toBeNull();
   });
 
+  it('host와 shadow 최상위 요소에 rr-block 클래스를 붙여 리플레이 녹화에서 제외한다', () => {
+    ProgressBar.show();
+    const host = document.querySelector('[data-qa="progress-bar"]') as HTMLElement;
+    expect(host.classList.contains('rr-block')).toBe(true);
+    for (const child of Array.from(host.shadowRoot!.children)) {
+      expect(child.classList.contains('rr-block')).toBe(true);
+    }
+  });
+
   it('show()를 중복 호출해도 하나만 노출된다', () => {
     ProgressBar.show();
     ProgressBar.show();

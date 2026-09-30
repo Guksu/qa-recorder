@@ -94,6 +94,34 @@ export interface QARecorderConfig {
    * @default 'normal'
    */
   mode?: RecorderMode;
+
+  /**
+   * When `true`, the replay masks the values of every `<input>`, `<textarea>` and `<select>`.
+   * When `false`, only password inputs are masked (rrweb's default).
+   *
+   * @default false
+   */
+  maskAllInputs?: boolean;
+
+  /**
+   * CSS selector for elements whose text is masked in the replay (non-whitespace characters
+   * become `*`).
+   * Elements with the `rr-mask` class are always masked.
+   *
+   * @default null
+   */
+  maskTextSelector?: string | null;
+
+  /**
+   * CSS selector for elements to leave out of the replay — they are recorded as an empty
+   * placeholder of the same size. rrweb applies this selector only when serializing the DOM,
+   * so values typed into form fields inside a matched element are still captured; for those,
+   * use the `rr-block` class (which rrweb also honours for input and interaction events) or
+   * `maskAllInputs`.
+   *
+   * @default null
+   */
+  blockSelector?: string | null;
 }
 
 const DEFAULT_CONFIG: Required<QARecorderConfig> = {
@@ -113,6 +141,9 @@ const DEFAULT_CONFIG: Required<QARecorderConfig> = {
   maxConsoleEntries: 200,
   enableBackup: false,
   mode: 'normal',
+  maskAllInputs: false,
+  maskTextSelector: null,
+  blockSelector: null,
 };
 
 /** 명시적으로 undefined가 담긴 키가 기본값을 덮어쓰지 않도록 제거 */

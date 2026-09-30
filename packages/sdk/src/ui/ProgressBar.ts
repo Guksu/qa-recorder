@@ -1,4 +1,5 @@
 import { buildStyles } from './styles.js';
+import { excludeFromRecording } from './recordingExclusion.js';
 
 export class ProgressBar {
   private static host: HTMLElement | null = null;
@@ -23,6 +24,7 @@ export class ProgressBar {
       <div class="qa-progress-label" id="label">${label}</div>
     `;
 
+    excludeFromRecording(this.host, style, wrap);
     this.shadow.append(style, wrap);
     document.body.appendChild(this.host);
   }
