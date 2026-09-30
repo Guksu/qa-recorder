@@ -194,7 +194,7 @@ function createUploadHandler(root: string): Connect.NextHandleFunction {
       Promise.all(closed)
         .then(() => fs.promises.rm(dir, { recursive: true, force: true, maxRetries: 3 }))
         .catch((err: unknown) => {
-          console.warn(`[qa-upload-mock] failed to clean up ${path.relative(process.cwd(), dir)}/`, err);
+          console.warn(`[qa-upload-mock] failed to clean up ${dir}${path.sep}`, err);
         });
     };
 
@@ -208,9 +208,8 @@ function createUploadHandler(root: string): Connect.NextHandleFunction {
         return;
       }
 
-      console.log(
-        `[qa-upload-mock] saved ${saved.length} file(s) → ${path.relative(process.cwd(), dir)}/`,
-      );
+      // 업로드 디렉터리는 작업 디렉터리 밖에 있으므로(vite.config.ts는 OS 임시 디렉터리를 쓴다) 절대 경로로 출력한다
+      console.log(`[qa-upload-mock] saved ${saved.length} file(s) → ${dir}${path.sep}`);
 
       res.setHeader('Content-Type', 'application/json');
       res.statusCode = 200;
@@ -268,7 +267,10 @@ function isGeneratedIndex(root: string, file: string): boolean {
   return path.basename(file) === INDEX_FILE && path.dirname(path.dirname(file)) === root;
 }
 
-/** GET /uploads/* — Vite가 하위 디렉터리를 자동 서빙하지 않으므로 직접 처리 */
+/**
+ * GET /uploads/* — 업로드 파일을 sandbox 헤더와 함께 서빙한다.
+ * '/uploads/'로 시작하는 요청은 없는 파일이어도(404) 모두 여기서 응답하고 다음 미들웨어(Vite)로 넘기지 않는다.
+ */
 function createServeHandler(root: string): Connect.NextHandleFunction {
   return (req, res, next) => {
     if (!req.url?.startsWith(UPLOADS_PREFIX)) return next();
@@ -280,7 +282,7 @@ function createServeHandler(root: string): Connect.NextHandleFunction {
     }
 
     let file = resolved.target;
-    let stat: fs.Stats;
+    let stat: fs.Stats | undefined;
     try {
       stat = fs.statSync(file);
       if (stat.isDirectory()) {
@@ -288,9 +290,14 @@ function createServeHandler(root: string): Connect.NextHandleFunction {
         stat = fs.statSync(file);
       }
     } catch {
-      return next();
+      stat = undefined;
     }
-    if (!stat.isFile()) return next();
+    // 없거나 일반 파일이 아니어도 Vite로 넘기지 않는다. 넘기면 Vite가 root에 남은 예전 uploads/ 폴더에서 같은 경로의 파일
+    // (확장자가 없으면 '.html'을 붙인 파일)을 sandbox 헤더 없이 서빙하거나 SPA fallback으로 데모 페이지를 돌려준다
+    if (!stat?.isFile()) {
+      sendText(res, 404, 'Not Found');
+      return;
+    }
 
     // 심볼릭 링크로 업로드 디렉터리 밖을 가리키는 경우 차단
     if (!isRealInside(root, resolved.target) || !isRealInside(root, file)) {
@@ -306,14 +313,52 @@ function createServeHandler(root: string): Connect.NextHandleFunction {
   };
 }
 
+/** 링크를 따라가지 않고, 그 경로에 무엇이든(디렉터리, 파일, 가리키는 곳이 없는 링크 포함) 있는지 확인 */
+function entryExists(p: string): boolean {
+  try {
+    fs.lstatSync(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 플러그인의 api — 테스트가 vite.config.ts가 넘긴 업로드 디렉터리를 확인할 때 쓴다 */
+export interface UploadMockPluginApi {
+  /** 업로드 파일을 저장하는 디렉터리 (절대 경로) */
+  uploadsDir: string;
+}
+
 /**
  * `pnpm demo` 전용 업로드 목 서버.
- * RemoteDelivery가 보내는 multipart를 uploadsDir/<timestamp>/ 에 저장하고 다시 서빙한다.
+ * RemoteDelivery가 보내는 multipart를 uploadsDir/<timestamp>/ 에 저장하고 GET /uploads/* 로 다시 서빙한다.
+ * 업로드 파일은 sandbox 헤더(Content-Security-Policy: sandbox, X-Content-Type-Options: nosniff)를 붙이는
+ * GET /uploads/* 로만 서빙하려는 것이고, '/uploads/'로 시작하는 요청은 없는 파일이어도(404) 모두 이 플러그인이 응답한다.
+ *
+ * uploadsDir는 Vite root와 server.fs.allow 밖이어야 한다 (vite.config.ts는 시작할 때마다 새로 만든 임시 디렉터리를 넘긴다).
+ * 그러면 Vite의 root·server.fs.allow 검사 때문에 Vite의 정적 파일 서빙과 /@fs/ 경로는 그 안의 파일을 서빙하지 않는다
+ * (Vite 5.4가 fs.allow 검사 없이 JSON으로 답하는 optimized deps의 sourcemap(.map) 요청은 Vite 쪽 예외다).
+ * root나 server.fs.allow 안에 두면 Vite가 이 플러그인을 거치지 않는 다른 URL('//uploads/<ts>/<file>', '/@fs/..' 등)로
+ * 업로드된 HTML/SVG를 sandbox 헤더 없이 dev origin에서 서빙한다. 예전 버전의 데모는 업로드를 <Vite root>/uploads 에
+ * 저장했으므로, configResolved는 그 자리에 무엇이든 남아 있으면 지우라고 경고한다.
  */
-export function uploadMockPlugin(uploadsDir: string): Plugin {
+export function uploadMockPlugin(uploadsDir: string): Plugin<UploadMockPluginApi> {
   const root = path.resolve(uploadsDir);
   return {
     name: 'qa-upload-mock',
+    api: { uploadsDir: root },
+    configResolved(config) {
+      const legacyDir = path.join(config.root, 'uploads');
+      if (!entryExists(legacyDir)) return;
+      config.logger.warn(
+        [
+          `[qa-upload-mock] Found ${legacyDir}. Older versions of the demo saved uploads there.`,
+          'Vite can serve files inside its root directly through other URL spellings (e.g. //uploads/<ts>/<file>)',
+          'without the "Content-Security-Policy: sandbox" and "X-Content-Type-Options: nosniff" headers that GET /uploads/* adds.',
+          `Delete it (uploads are now saved in ${root}).`,
+        ].join('\n'),
+      );
+    },
     configureServer(server) {
       server.middlewares.use(createUploadHandler(root));
       server.middlewares.use(createServeHandler(root));

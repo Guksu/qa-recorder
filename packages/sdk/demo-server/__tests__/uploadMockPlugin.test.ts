@@ -5,8 +5,16 @@ import type { AddressInfo } from 'net';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import type { Connect, ViteDevServer } from 'vite';
-import { uploadMockPlugin } from '../uploadMockPlugin.js';
+import { fileURLToPath } from 'url';
+import {
+  createServer,
+  loadConfigFromFile,
+  type Connect,
+  type Plugin,
+  type ResolvedConfig,
+  type ViteDevServer,
+} from 'vite';
+import { uploadMockPlugin, type UploadMockPluginApi } from '../uploadMockPlugin.js';
 
 interface RawResponse {
   status: number;
@@ -21,6 +29,8 @@ interface Part {
 
 const SECRET = 'TOP-SECRET-OUTSIDE-UPLOADS';
 const BOUNDARY = '----qa-upload-mock-boundary';
+/** 플러그인 미들웨어가 모두 next()로 넘긴 요청에 하네스가 보내는 응답 본문 (Vite였다면 Vite의 미들웨어가 처리했을 요청) */
+const FELL_THROUGH = 'Fell through the plugin middlewares';
 
 let tmpRoot: string;
 let uploadsDir: string;
@@ -54,7 +64,7 @@ async function startServer(dir: string): Promise<http.Server> {
       const handler = handlers[i++];
       if (!handler) {
         res.statusCode = 404;
-        res.end('Not Found');
+        res.end(FELL_THROUGH);
         return;
       }
       // connect와 동일하게 동기 throw는 500으로 변환
@@ -70,16 +80,16 @@ async function startServer(dir: string): Promise<http.Server> {
   return srv;
 }
 
-/** 경로를 정규화하지 않고 그대로 보내는 요청 */
+/** 경로를 정규화하지 않고 그대로 보내는 요청 (port를 주지 않으면 플러그인 미들웨어만으로 만든 서버로 보낸다) */
 function request(
   rawPath: string,
-  opts: { method?: string; headers?: http.OutgoingHttpHeaders; body?: Buffer | string } = {},
+  opts: { method?: string; headers?: http.OutgoingHttpHeaders; body?: Buffer | string; port?: number } = {},
 ): Promise<RawResponse> {
   return new Promise((resolve, reject) => {
     const req = http.request(
       {
         host: '127.0.0.1',
-        port,
+        port: opts.port ?? port,
         path: rawPath,
         method: opts.method ?? 'GET',
         headers: opts.headers,
@@ -156,12 +166,15 @@ function multipart(parts: Part[]): { body: Buffer; headers: http.OutgoingHttpHea
   };
 }
 
-async function upload(parts: Part[]): Promise<{ res: RawResponse; base: string; dir: string }> {
+async function upload(
+  parts: Part[],
+  target: { port?: number; uploadsDir?: string } = {},
+): Promise<{ res: RawResponse; base: string; dir: string }> {
   const { body, headers } = multipart(parts);
-  const res = await request('/upload', { method: 'POST', headers, body });
+  const res = await request('/upload', { method: 'POST', headers, body, port: target.port });
   expect(res.status).toBe(200);
   const base = new URL(JSON.parse(res.body).url).pathname;
-  return { res, base, dir: path.join(uploadsDir, base.slice('/uploads/'.length)) };
+  return { res, base, dir: path.join(target.uploadsDir ?? uploadsDir, base.slice('/uploads/'.length)) };
 }
 
 /** 플러그인이 이번 테스트에서 연 파일 쓰기 스트림 목록 */
@@ -356,10 +369,27 @@ describe('uploadMockPlugin — 정상 업로드와 조회', () => {
     expect(res.body).toBe('{}');
   });
 
-  it('존재하지 않는 파일은 다음 미들웨어로 넘긴다', async () => {
-    const res = await request('/uploads/12345/missing.har');
-    expect(res.status).toBe(404);
-    expect(res.body).toBe('Not Found');
+  it('업로드 디렉터리에 없는 경로는 다음 미들웨어로 넘기지 않고 플러그인이 404로 답한다', async () => {
+    // 전제: 플러그인이 넘긴 요청에는 하네스의 마지막 핸들러가 FELL_THROUGH로 답한다
+    expect((await request('/not-uploads')).body).toBe(FELL_THROUGH);
+
+    const { base } = await upload([{ filename: 'qa-network.har', content: '{}' }]);
+    fs.mkdirSync(path.join(uploadsDir, 'dir', 'index.html'), { recursive: true });
+
+    for (const rawPath of [
+      '/uploads/12345/missing.har',
+      `${base}missing.har`,
+      // 확장자를 뺀 경로 — Vite로 넘어가면 html fallback이 '.html'을 붙인 파일을 찾는다
+      `${base}qa-network`,
+      // index.html이 없는 업로드 디렉터리 자체
+      '/uploads/',
+      // 있지만 일반 파일이 아닌 경우 (index.html이 디렉터리)
+      '/uploads/dir/',
+    ]) {
+      const res = await request(rawPath);
+      expect({ rawPath, status: res.status, body: res.body }).toEqual({ rawPath, status: 404, body: 'Not Found' });
+      expect(res.headers['content-type']).toBe('text/plain; charset=utf-8');
+    }
   });
 });
 
@@ -595,6 +625,203 @@ describe('uploadMockPlugin — 업로드된 내용의 격리', () => {
       expect(res.headers['content-type']).toBe('text/html; charset=utf-8');
       expect(res.headers['content-security-policy']).toBeUndefined();
       expect(res.headers['x-content-type-options']).toBe('nosniff');
+    }
+  });
+});
+
+describe('uploadMockPlugin — Vite root에 남은 예전 uploads 경고 (configResolved)', () => {
+  let viteRoot: string;
+  let legacy: string;
+
+  beforeEach(() => {
+    viteRoot = path.join(tmpRoot, 'demo');
+    fs.mkdirSync(viteRoot);
+    legacy = path.join(viteRoot, 'uploads');
+  });
+
+  /** root와 logger만 있는 설정으로 configResolved를 호출하고 logger.warn으로 남긴 메시지를 돌려준다 */
+  async function configResolvedWarnings(): Promise<string[]> {
+    const warn = vi.fn<(msg: string) => void>();
+    const hook = uploadMockPlugin(uploadsDir).configResolved;
+    const handler = typeof hook === 'function' ? hook : hook?.handler;
+    await handler?.({ root: viteRoot, logger: { warn } } as unknown as ResolvedConfig);
+    return warn.mock.calls.map(([msg]) => msg);
+  }
+
+  it.each<[string, () => void]>([
+    [
+      '업로드가 남은 디렉터리',
+      () => {
+        fs.mkdirSync(path.join(legacy, '1700000000000'), { recursive: true });
+        fs.writeFileSync(path.join(legacy, '1700000000000', 'evil.html'), '<script>alert(1)</script>');
+      },
+    ],
+    ['일반 파일', () => fs.writeFileSync(legacy, '')],
+    ['가리키는 곳이 없는 심볼릭 링크', () => fs.symlinkSync(path.join(tmpRoot, 'missing'), legacy)],
+  ])('Vite root에 uploads(%s)가 있으면 지우라고 한 번 경고한다', async (_kind, createLegacy) => {
+    createLegacy();
+
+    const warnings = await configResolvedWarnings();
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain(`Found ${legacy}. Older versions of the demo saved uploads there.`);
+    expect(warnings[0]).toContain('//uploads/<ts>/<file>');
+    expect(warnings[0]).toContain('Content-Security-Policy: sandbox');
+    expect(warnings[0]).toContain('Delete it');
+  });
+
+  it('Vite root에 uploads가 없으면 경고하지 않는다', async () => {
+    expect(await configResolvedWarnings()).toEqual([]);
+  });
+});
+
+/** pnpm 워크스페이스를 흉내 낸 임시 디렉터리 구조 */
+interface Workspace {
+  /** pnpm-workspace.yaml이 있는 워크스페이스 루트 — Vite의 기본 server.fs.allow가 된다 */
+  dir: string;
+  /** Vite root (packages/sdk/demo) */
+  demoRoot: string;
+  /** pnpm이 만드는 링크 node_modules/.pnpm/node_modules/qa-recorder -> packages/sdk */
+  alias: string;
+}
+
+function createWorkspace(dir: string): Workspace {
+  const pkgDir = path.join(dir, 'packages', 'sdk');
+  const demoRoot = path.join(pkgDir, 'demo');
+  const alias = path.join(dir, 'node_modules', '.pnpm', 'node_modules', 'qa-recorder');
+  fs.mkdirSync(demoRoot, { recursive: true });
+  fs.mkdirSync(path.dirname(alias), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'pnpm-workspace.yaml'), "packages:\n  - 'packages/*'\n");
+  fs.writeFileSync(path.join(pkgDir, 'package.json'), '{ "name": "qa-recorder" }\n');
+  fs.writeFileSync(path.join(demoRoot, 'index.html'), '<!DOCTYPE html>\n<title>demo</title>\n');
+  // pnpm처럼 상대 경로 링크(../../../packages/sdk)로 만든다
+  fs.symlinkSync(path.relative(path.dirname(alias), pkgDir), alias, 'dir');
+  return { dir, demoRoot, alias };
+}
+
+/** '/@fs/<절대 경로>' URL (Vite가 파일 시스템 경로를 직접 서빙하는 경로) */
+function fsUrl(file: string): string {
+  return `/@fs/${encodeURI(file.replace(/\\/g, '/').replace(/^\//, ''))}`;
+}
+
+describe('uploadMockPlugin — Vite dev 서버 위에서의 격리', () => {
+  const PAYLOAD = 'PWNED-BY-UPLOADED-CONTENT';
+
+  let ws: Workspace;
+  let viteUploads: string;
+  let vite: ViteDevServer;
+  let viteHttp: http.Server;
+  let vitePort: number;
+
+  beforeEach(async () => {
+    // vite.config.ts와 같은 배치: Vite root(demo/)는 pnpm 워크스페이스(= server.fs.allow) 안에 있고,
+    // 업로드 디렉터리는 워크스페이스 밖의 별도 임시 디렉터리다
+    ws = createWorkspace(path.join(tmpRoot, 'workspace'));
+    viteUploads = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'qa-upload-mock-uploads-')));
+    // Vite 5는 port 0을 기본 포트로 바꾸므로 middlewareMode로 같은 미들웨어 스택을 임의 포트의 서버에 붙인다
+    vite = await createServer({
+      configFile: false,
+      root: ws.demoRoot,
+      logLevel: 'silent',
+      plugins: [uploadMockPlugin(viteUploads)],
+      optimizeDeps: { noDiscovery: true },
+      server: { middlewareMode: true, ws: false, watch: null },
+    });
+    viteHttp = http.createServer(vite.middlewares);
+    await new Promise<void>((resolve) => viteHttp.listen(0, '127.0.0.1', resolve));
+    vitePort = (viteHttp.address() as AddressInfo).port;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => viteHttp.close(() => resolve()));
+    await vite.close();
+    fs.rmSync(viteUploads, { recursive: true, force: true });
+  });
+
+  it('/uploads/ 경로는 sandbox와 함께 서빙하고, /@fs/·다른 URL 표기·pnpm 링크를 거친 예전 위치로는 업로드 내용이 나가지 않는다', async () => {
+    const { base } = await upload(
+      [
+        { filename: 'evil.html', content: `<script>document.title='${PAYLOAD}'</script>` },
+        { filename: 'evil.svg', content: `<svg xmlns="http://www.w3.org/2000/svg" onload="alert('${PAYLOAD}')"/>` },
+      ],
+      { port: vitePort, uploadsDir: viteUploads },
+    );
+    const ts = base.slice('/uploads/'.length, -1);
+    const get = (rawPath: string) => request(rawPath, { port: vitePort, headers: { Accept: 'text/html' } });
+
+    // 전제: pnpm-workspace.yaml이 있으므로 server.fs.allow는 워크스페이스 루트다
+    expect(vite.config.server.fs.allow).toContain(ws.dir);
+
+    for (const file of ['evil.html', 'evil.svg']) {
+      const res = await get(`${base}${file}`);
+      expect(res.status).toBe(200);
+      expect(res.body).toContain(PAYLOAD);
+      expect(res.headers['content-security-policy']).toBe('sandbox');
+      expect(res.headers['x-content-type-options']).toBe('nosniff');
+
+      // 업로드 디렉터리는 server.fs.allow 밖이므로 /@fs/로 직접 요청하면 Vite가 403으로 거부한다
+      const direct = await get(fsUrl(path.join(viteUploads, ts, file)));
+      expect({ file, status: direct.status }).toEqual({ file, status: 403 });
+      expect(direct.body).not.toContain(PAYLOAD);
+    }
+
+    // 확장자를 뺀 경로는 Vite(html fallback)로 넘어가지 않고 플러그인이 404로 답한다
+    const extensionless = await get(`/uploads/${ts}/evil`);
+    expect({ status: extensionless.status, body: extensionless.body }).toEqual({ status: 404, body: 'Not Found' });
+
+    for (const rawPath of [
+      // 플러그인이 처리하지 않는 표기 — Vite의 미들웨어로 넘어간다
+      `//uploads/${ts}/evil.html`,
+      `/%75ploads/${ts}/evil.html`,
+      `//uploads/${ts}/evil.svg`,
+      `/%75ploads/${ts}/evil.svg`,
+      // pnpm 링크를 거친 예전 업로드 위치(demo/uploads)
+      fsUrl(path.join(ws.alias, 'demo', 'uploads', ts, 'evil.html')),
+      fsUrl(path.join(ws.alias, 'demo', 'uploads', ts, 'evil.svg')),
+    ]) {
+      const res = await get(rawPath);
+      expect({ rawPath, leaked: res.body.includes(PAYLOAD) }).toEqual({ rawPath, leaked: false });
+    }
+  });
+});
+
+/** child가 dir 자신이거나 그 하위 경로인지 */
+function isInsideDir(dir: string, child: string): boolean {
+  const rel = path.relative(dir, child);
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
+}
+
+describe('uploadMockPlugin — 실제 vite.config.ts', () => {
+  it('`pnpm demo` 설정은 Vite root와 저장소 밖에 소유자 전용(0700) 임시 업로드 디렉터리를 만든다', async () => {
+    // 설정 파일을 CJS로 불러오면서 Vite가 console.warn으로 남기는 CJS API 안내는 이 테스트와 무관하다
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const sdkDir = fileURLToPath(new URL('../..', import.meta.url));
+    const repoRoot = path.resolve(sdkDir, '../..');
+
+    const loaded = await loadConfigFromFile(
+      { command: 'serve', mode: 'development' },
+      path.join(sdkDir, 'vite.config.ts'),
+      sdkDir,
+      'silent',
+    );
+    const plugins = (loaded?.config.plugins ?? []) as Plugin<UploadMockPluginApi>[];
+    const uploads = plugins.find((p) => p?.name === 'qa-upload-mock')?.api?.uploadsDir;
+    if (!uploads) throw new Error('vite.config.ts does not register the qa-upload-mock plugin');
+
+    try {
+      // Vite root(demo/)나 저장소(= server.fs.allow인 워크스페이스 루트) 안이면 Vite가 업로드 파일을 sandbox 헤더 없이 서빙할 수 있다
+      for (const dir of [path.join(sdkDir, 'demo'), repoRoot]) {
+        expect({ dir, inside: isInsideDir(dir, uploads) }).toEqual({ dir, inside: false });
+      }
+      const stat = fs.lstatSync(uploads);
+      expect(stat.isDirectory()).toBe(true);
+      if (process.platform !== 'win32') expect((stat.mode & 0o777).toString(8)).toBe('700');
+    } finally {
+      // 설정이 엉뚱한 경로(예: 저장소 안)를 가리키게 바뀐 경우 그 디렉터리를 지우지 않도록, 이 설정이 만든 임시 디렉터리일 때만 지운다
+      const createdByConfig =
+        path.dirname(uploads) === fs.realpathSync(os.tmpdir()) || path.dirname(uploads) === path.resolve(os.tmpdir());
+      if (createdByConfig && path.basename(uploads).startsWith('qa-recorder-demo-uploads-')) {
+        fs.rmSync(uploads, { recursive: true, force: true });
+      }
     }
   });
 });
