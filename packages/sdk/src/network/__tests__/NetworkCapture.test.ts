@@ -306,6 +306,74 @@ describe('NetworkCapture', () => {
 
       expect(capture.snapshot()).toHaveLength(0);
     });
+
+    it('원본 생성자의 커스텀 정적 멤버도 패치 후 조회된다', () => {
+      const capture = new NetworkCapture(100, []);
+      capture.start();
+
+      new window.XMLHttpRequest();
+      const Patched = window.XMLHttpRequest as unknown as typeof MockXHR;
+      expect(Patched).not.toBe(MockXHR);
+      expect(Patched.lastInstance).not.toBeNull();
+      expect(Patched.lastInstance).toBe(MockXHR.lastInstance);
+      capture.stop();
+    });
+  });
+
+  describe('XHR 정적 멤버 (jsdom 원본 XMLHttpRequest)', () => {
+    const STATE_CONSTANTS = ['UNSENT', 'OPENED', 'HEADERS_RECEIVED', 'LOADING', 'DONE'] as const;
+    let originalXHR: typeof XMLHttpRequest;
+
+    beforeEach(() => {
+      originalXHR = window.XMLHttpRequest;
+    });
+
+    afterEach(() => {
+      window.XMLHttpRequest = originalXHR;
+    });
+
+    it('start() 후에도 readyState 정적 상수 5개가 원본과 동일하다', () => {
+      expect(STATE_CONSTANTS.map((k) => originalXHR[k])).toEqual([0, 1, 2, 3, 4]);
+
+      const capture = new NetworkCapture(100, []);
+      capture.start();
+
+      expect(window.XMLHttpRequest).not.toBe(originalXHR);
+      for (const key of STATE_CONSTANTS) {
+        expect(window.XMLHttpRequest[key]).toBe(originalXHR[key]);
+      }
+      capture.stop();
+    });
+
+    it('start() 후에도 new XMLHttpRequest()는 instanceof XMLHttpRequest이다', () => {
+      const capture = new NetworkCapture(100, []);
+      capture.start();
+
+      const xhr = new window.XMLHttpRequest();
+      expect(xhr instanceof window.XMLHttpRequest).toBe(true);
+      expect(xhr instanceof originalXHR).toBe(true);
+      capture.stop();
+    });
+
+    it('호스트 앱의 readyState === XMLHttpRequest.OPENED 비교가 패치 후에도 동작한다', () => {
+      const capture = new NetworkCapture(100, []);
+      capture.start();
+
+      const xhr = new window.XMLHttpRequest();
+      expect(xhr.readyState).toBe(window.XMLHttpRequest.UNSENT);
+      xhr.open('GET', 'https://example.com/data');
+      expect(xhr.readyState).toBe(window.XMLHttpRequest.OPENED);
+      capture.stop();
+    });
+
+    it('stop() 후 원본 생성자가 복원되고 정적 상수도 유지된다', () => {
+      const capture = new NetworkCapture(100, []);
+      capture.start();
+      capture.stop();
+
+      expect(window.XMLHttpRequest).toBe(originalXHR);
+      expect(window.XMLHttpRequest.DONE).toBe(4);
+    });
   });
 
   describe('순환 버퍼', () => {

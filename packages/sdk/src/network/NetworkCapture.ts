@@ -262,6 +262,8 @@ export class NetworkCapture {
     }
 
     PatchedXHR.prototype = OriginalXHR.prototype;
+    // XMLHttpRequest.DONE 등 정적 상수/멤버가 패치 후에도 조회되도록 원본 생성자를 상속
+    Object.setPrototypeOf(PatchedXHR, OriginalXHR);
     (window as Window & { XMLHttpRequest: typeof XMLHttpRequest }).XMLHttpRequest =
       PatchedXHR as unknown as typeof XMLHttpRequest;
   }
