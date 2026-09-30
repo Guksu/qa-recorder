@@ -40,7 +40,7 @@
 | 🖥️ | **콘솔 캡처** | `console.error`, `console.warn`, `window.onerror`, `unhandledrejection` 자동 수집. |
 | 📋 | **통합 QA 리포트** | 하나의 HTML 파일: 세션 리플레이(좌) + 네트워크 인스펙터 + 콘솔 로그(우). 시간 동기화 — 네트워크 행이나 콘솔 항목 클릭 시 해당 시점으로 즉시 이동. |
 | 🔍 | **네트워크 상세 패널** | 요청 행 클릭 시 Headers, Payload, Response, Timing 탭 — Chrome 개발자도구 스타일. |
-| 🔒 | **민감 정보 마스킹** | 요청/응답 body(JSON, form)와 URL 쿼리 속 비밀번호·토큰·API 키 등 민감 키의 값과 `Authorization`, `Cookie` 등 인증 헤더를 저장 전에 자동 마스킹. SDK 자체 UI(버튼, 버그 메모 입력 창 등)는 리플레이에 녹화되지 않으며, `maskAllInputs`·`maskTextSelector`·`blockSelector`로 입력값·텍스트·요소를 리플레이에서 가릴 수 있음. |
+| 🔒 | **민감 정보 마스킹** | 요청/응답 body(JSON, form)와 URL 쿼리 속 비밀번호·토큰·API 키 등 민감 키의 값과 `Authorization`, `Cookie` 등 인증 헤더를 저장 전에 자동 마스킹. SDK 자체 UI(버튼, 버그 메모 입력 창 등)는 리플레이에 녹화되지 않으며, `maskAllInputs`·`maskTextSelector`로 입력값·텍스트를 가리고 `rr-block` 클래스를 붙인 요소는 리플레이에서 제외 (`blockSelector`는 아래 제약 참고). |
 | 📦 | **로컬 저장** | 파일 3종을 로컬에 다운로드 — 백엔드 불필요. |
 | ☁️ | **원격 업로드** | 서버 endpoint 설정 시 POST 업로드. 응답 URL이 있으면 링크 복사 버튼 노출. |
 | 📝 | **버그 메모** | 저장 시 입력하는 선택적 텍스트 메모 — 통합 HTML 리포트에 포함되고 원격 업로드 시 함께 전송. |
@@ -86,7 +86,6 @@ await recorder.init();
 <script>
   window.__QA_RECORDER_CONFIG__ = {
     maxRequests: 100,
-    maskHeaders: ['Authorization', 'Cookie'],
   };
 </script>
 <script src="https://unpkg.com/qa-recorder/dist/qa-recorder.umd.js"></script>
@@ -154,9 +153,9 @@ window.__QA_RECORDER_CONFIG__ = {
     'X-XSRF-Token',
   ],
   maskKeys: [                // 저장 전 마스킹할 body/쿼리 키 (기본값 표시). []이면 비활성.
-    'password', 'passwd', 'pwd', 'passwordConfirm', 'passwordConfirmation',
-    'secret', 'token', 'apiKey', 'clientSecret', 'privateKey', 'authorization',
-    'sessionId', 'otp', 'ssn', 'cardNumber', 'cvv', 'cvc',
+    'password', 'passwd', 'pwd', 'passwordConfirm', 'passwordConfirmation', 'passphrase', 'passcode',
+    'secret', 'secretKey', 'token', 'jwt', 'apiKey', 'accessKey', 'clientSecret', 'privateKey',
+    'credential', 'authorization', 'sessionId', 'otp', 'otpCode', 'ssn', 'cardNumber', 'cvv', 'cvc',
   ],
   zIndex: 2147483647,        // UI 요소의 z-index (기본값: 최대 정수).
   consoleLevels: ['error', 'warn'],  // 캡처할 콘솔 레벨 (기본값 표시).
@@ -165,7 +164,7 @@ window.__QA_RECORDER_CONFIG__ = {
   mode: 'normal',            // 녹화 강도 프리셋: 'light' | 'normal' | 'heavy' (기본값: 'normal').
   maskAllInputs: false,      // 리플레이에서 모든 input/textarea/select 값 마스킹 (기본값: false = 비밀번호만).
   maskTextSelector: null,    // 리플레이에서 텍스트를 마스킹할 요소의 CSS 셀렉터 (기본값: null).
-  blockSelector: null,       // 리플레이에서 제외할 요소의 CSS 셀렉터 (기본값: null).
+  blockSelector: null,       // 리플레이에서 제외할 요소의 CSS 셀렉터 — 제약은 아래 표 참고 (기본값: null).
 };
 ```
 
@@ -174,15 +173,15 @@ window.__QA_RECORDER_CONFIG__ = {
 | `endpoint` | `string` | `''` | 원격 업로드 URL. 비어있으면 로컬 다운로드. |
 | `maxRequests` | `number` | `100` | 순환 버퍼에 유지할 최대 네트워크 기록 수. |
 | `maskHeaders` | `string[]` | `['Authorization', 'Cookie', 'Set-Cookie', 'Proxy-Authorization', 'X-API-Key', 'X-Auth-Token', 'X-CSRF-Token', 'X-XSRF-Token']` | 마스킹할 헤더 이름 목록 (대소문자 무시). 지정하면 기본 목록을 대체. |
-| `maskKeys` | `string[]` | `['password', 'passwd', 'pwd', 'passwordConfirm', 'passwordConfirmation', 'secret', 'token', 'apiKey', 'clientSecret', 'privateKey', 'authorization', 'sessionId', 'otp', 'ssn', 'cardNumber', 'cvv', 'cvc']` | URL 쿼리 파라미터와 요청/응답 body(JSON은 중첩 객체·배열까지 재귀 탐색, `application/x-www-form-urlencoded`는 필드 단위)에서 값을 `"[MASKED]"`로 바꿀 키 목록. 대소문자와 `_`, `-`, `.` 등 기호를 무시하고 비교하며, 키가 항목과 같거나 항목으로 끝나면 매칭 (끝의 숫자는 무시) — `access_token`, `x-api-key`, `newPassword`, `password2` 모두 매칭. 트레이드오프: 페이지네이션 커서 `nextPageToken`처럼 접미사가 같은 비민감 키도 마스킹됨. `null`과 빈 값은 유지. 지정하면 기본 목록을 대체하며, `[]`이면 body/쿼리 마스킹 비활성. |
+| `maskKeys` | `string[]` | `['password', 'passwd', 'pwd', 'passwordConfirm', 'passwordConfirmation', 'passphrase', 'passcode', 'secret', 'secretKey', 'token', 'jwt', 'apiKey', 'accessKey', 'clientSecret', 'privateKey', 'credential', 'authorization', 'sessionId', 'otp', 'otpCode', 'ssn', 'cardNumber', 'cvv', 'cvc']` | URL 쿼리 파라미터와 요청/응답 body(JSON은 중첩 객체·배열까지 재귀 탐색, `application/x-www-form-urlencoded`는 필드 단위)에서 값을 `"[MASKED]"`로 바꿀 키 목록. 대소문자와 `_`, `-`, `.` 등 기호를 무시하고 비교하며, 키가 항목과 같거나 항목으로 끝나면(끝의 숫자는 무시), 또는 키 전체가 항목의 복수형이면 매칭 — `access_token`, `x-api-key`, `newPassword`, `password2`, `tokens`, `apiKeys` 모두 매칭 (`max_tokens` 같은 카운터는 제외). 트레이드오프: 페이지네이션 커서 `nextPageToken`처럼 접미사가 같은 비민감 키도 마스킹되고, 일부 JWT 라이브러리가 반환하는 `access`/`refresh`처럼 항목을 포함하지 않는 일반적인 이름의 비밀 값은 감지되지 않음 — 이런 키는 기본 목록과 함께 `maskKeys`에 직접 지정. `null`과 빈 값은 유지. 지정하면 기본 목록을 대체하며, `[]`이면 body/쿼리 마스킹 비활성. |
 | `zIndex` | `number` | `2147483647` | UI 요소(버튼, 프로그레스 바, 공유 패널)의 z-index. |
 | `consoleLevels` | `string[]` | `['error', 'warn']` | 캡처할 콘솔 레벨. 유효값: `'error'`, `'warn'`, `'log'`, `'info'`. |
 | `maxConsoleEntries` | `number` | `200` | 순환 버퍼에 유지할 최대 콘솔 기록 수. |
 | `enableBackup` | `boolean` | `false` | `true`로 설정 시, 탭이 숨겨질 때(새로고침·이동) 현재 세션을 sessionStorage에 자동 저장. 다음 `init()` 호출 시 팝업 없이 현재 세션 버퍼에 조용히 복원. 롤링 윈도우는 `mode` 값에 따름 (light: 30분 / normal: 20분 / heavy: 5분). 탭 닫기 시 데이터 삭제. |
 | `mode` | `'light' \| 'normal' \| 'heavy'` | `'normal'` | rrweb의 checkout 주기와 이벤트 샘플링을 조정하는 녹화 강도 프리셋. 메모리 버퍼를 일정 수준으로 유지함. DOM 변화가 잦거나 애니메이션이 많은 페이지, 장시간 세션에는 `'heavy'` 사용 — 5분 checkout + `mousemove`/`scroll`/`input` 스로틀. 가벼운 페이지에서 더 긴 30분 이력을 원하면 `'light'`. |
-| `maskAllInputs` | `boolean` | `false` | `true`면 리플레이에서 모든 `<input>`, `<textarea>`, `<select>` 값을 마스킹. `false`면 비밀번호 입력만 마스킹 (rrweb 기본값). |
+| `maskAllInputs` | `boolean` | `false` | `true`면 리플레이에서 모든 `<input>`(hidden input과 `type` 속성이 없는 input 포함), `<textarea>`, `<select>` 값을 마스킹. 체크박스·라디오 버튼의 선택 상태는 기록됨. `false`면 비밀번호 입력만 마스킹 (rrweb 기본값). |
 | `maskTextSelector` | `string \| null` | `null` | 리플레이에서 텍스트를 마스킹할 요소의 CSS 셀렉터 (공백 외 문자가 `*`로 표시됨). `rr-mask` 클래스가 붙은 요소는 항상 마스킹. |
-| `blockSelector` | `string \| null` | `null` | 리플레이에서 제외할 요소의 CSS 셀렉터 — 같은 크기의 빈 placeholder로만 기록. rrweb은 이 셀렉터를 DOM 직렬화에만 적용하므로 해당 요소 안 입력 필드에 입력한 값은 여전히 기록됨. 입력 필드는 `rr-block` 클래스(입력·인터랙션 이벤트에도 적용)를 붙이거나 `maskAllInputs`를 사용. |
+| `blockSelector` | `string \| null` | `null` | 리플레이에서 제외할 요소의 CSS 셀렉터 — 전체 스냅샷에 포함된 요소는 같은 크기의 빈 placeholder로만 기록. rrweb 1.1.3은 이 셀렉터를 직렬화되는 요소 자신에만 검사하므로, 이후 해당 요소 안에 추가·변경된 콘텐츠(예: 녹화 시작 후 SPA가 렌더링한 영역)와 입력 필드에 입력한 값은 여전히 기록됨. 민감하거나 동적으로 바뀌는 영역과 입력 필드를 확실히 제외하려면 요소에 `rr-block` 클래스를 붙일 것. |
 
 ---
 

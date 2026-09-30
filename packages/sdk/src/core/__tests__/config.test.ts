@@ -20,9 +20,9 @@ describe('resolveConfig', () => {
   it('maskKeys 기본값은 비밀번호·토큰·카드 정보 등 민감 키 목록이다 (body/쿼리 마스킹 기본 활성)', () => {
     const config = resolveConfig();
     expect(config.maskKeys).toEqual([
-      'password', 'passwd', 'pwd', 'passwordConfirm', 'passwordConfirmation',
-      'secret', 'token', 'apiKey', 'clientSecret', 'privateKey', 'authorization',
-      'sessionId', 'otp', 'ssn', 'cardNumber', 'cvv', 'cvc',
+      'password', 'passwd', 'pwd', 'passwordConfirm', 'passwordConfirmation', 'passphrase', 'passcode',
+      'secret', 'secretKey', 'token', 'jwt', 'apiKey', 'accessKey', 'clientSecret', 'privateKey',
+      'credential', 'authorization', 'sessionId', 'otp', 'otpCode', 'ssn', 'cardNumber', 'cvv', 'cvc',
     ]);
   });
 

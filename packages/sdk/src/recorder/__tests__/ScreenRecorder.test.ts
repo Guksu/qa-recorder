@@ -39,6 +39,7 @@ describe('ScreenRecorder', () => {
     recorder.start();
     const opts = mocks.record.mock.calls[0]![0] as Record<string, unknown>;
     expect(opts.maskAllInputs).toBe(false);
+    expect(opts).not.toHaveProperty('maskInputOptions');
     expect(opts).not.toHaveProperty('maskTextSelector');
     expect(opts).not.toHaveProperty('blockSelector');
   });
@@ -51,9 +52,18 @@ describe('ScreenRecorder', () => {
     });
     recorder.start();
     expect(mocks.record).toHaveBeenCalledWith(expect.objectContaining({
-      maskAllInputs: true,
       maskTextSelector: '.pii',
       blockSelector: '[data-private]',
+    }));
+  });
+
+  it('maskAllInputs: true는 태그 이름 키(input)를 더한 maskInputOptions로 전달한다 (rrweb은 maskAllInputs: true면 이를 무시)', () => {
+    const recorder = new ScreenRecorder('normal', { maskAllInputs: true });
+    recorder.start();
+    const opts = mocks.record.mock.calls[0]![0] as Record<string, unknown>;
+    expect(opts).not.toHaveProperty('maskAllInputs');
+    expect(opts.maskInputOptions).toEqual(expect.objectContaining({
+      input: true, text: true, email: true, textarea: true, select: true, password: true,
     }));
   });
 

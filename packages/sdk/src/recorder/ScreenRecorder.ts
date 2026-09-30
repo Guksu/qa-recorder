@@ -3,13 +3,33 @@ import type { QARecorderConfig, RecorderMode } from '../core/config.js';
 
 export type RecorderState = 'idle' | 'recording' | 'stopped';
 
-/** rrweb record()에 그대로 전달하는 프라이버시 옵션 (미지정 시 rrweb 기본 동작과 동일) */
+/**
+ * rrweb record()에 전달하는 프라이버시 옵션 (미지정 시 rrweb 기본 동작과 동일).
+ * maskAllInputs는 rrweb의 빈틈을 메운 maskInputOptions로 바꿔 전달한다 (MASK_ALL_INPUT_OPTIONS 참고).
+ */
 export type RecordPrivacyOptions = Pick<QARecorderConfig, 'maskAllInputs' | 'maskTextSelector' | 'blockSelector'>;
 
 interface ModePreset {
   checkoutEveryNms: number;
   sampling?: { mousemove: number; scroll: number; input: 'last' };
 }
+
+type MaskInputOptions = NonNullable<Parameters<typeof record>[0]>['maskInputOptions'];
+
+/**
+ * maskAllInputs: true일 때 rrweb에 전달하는 maskInputOptions.
+ * rrweb 1.1.3의 maskAllInputs 목록은 type 속성으로만 판별해서, 전체 스냅샷에서 type 속성이 없는
+ * <input>과 type="hidden" input의 값은 그대로 기록된다. rrweb의 목록에 태그 이름 키 `input`을 더하면
+ * maskInputValue가 태그 이름으로도 매칭해 모든 input 값을 가린다 (radio/checkbox/submit/button은
+ * rrweb이 입력값 마스킹 대상에서 제외하므로 영향 없음). `input` 키는 rrweb 타입에 없어 캐스팅한다.
+ * rrweb은 maskAllInputs: true면 maskInputOptions를 무시하므로 둘 중 이것만 전달해야 한다.
+ */
+const MASK_ALL_INPUT_OPTIONS = {
+  color: true, date: true, 'datetime-local': true, email: true, month: true, number: true,
+  range: true, search: true, tel: true, text: true, time: true, url: true, week: true,
+  textarea: true, select: true, password: true,
+  input: true,
+} as MaskInputOptions;
 
 const MODE_PRESETS: Record<RecorderMode, ModePreset> = {
   light:  { checkoutEveryNms: 30 * 60 * 1000 },
@@ -56,8 +76,9 @@ export class ScreenRecorder {
         }
       },
       checkoutEveryNms: this.preset.checkoutEveryNms,
-      maskAllInputs: this.privacy.maskAllInputs ?? false,
     };
+    if (this.privacy.maskAllInputs) opts.maskInputOptions = MASK_ALL_INPUT_OPTIONS;
+    else opts.maskAllInputs = false; // rrweb 기본값: 비밀번호 입력만 마스킹
     if (this.preset.sampling) opts.sampling = this.preset.sampling;
     // null/빈 문자열은 rrweb 기본값(셀렉터 없음)과 같으므로 전달하지 않는다
     if (this.privacy.maskTextSelector) opts.maskTextSelector = this.privacy.maskTextSelector;

@@ -36,14 +36,20 @@ export interface QARecorderConfig {
    *
    * Matching: the key and each entry are lowercased and stripped of ASCII non-alphanumeric
    * characters (`_`, `-`, `.`, spaces, …). A key matches when it equals or ends with an entry,
-   * ignoring trailing digits — so `access_token`, `x-api-key`, `newPassword`, `refreshToken`
-   * and `password2` all match. Trade-off: non-secret keys with a matching suffix are masked too
-   * (e.g. a pagination cursor named `nextPageToken`).
+   * ignoring trailing digits, or when the whole key is the plural of an entry — so
+   * `access_token`, `x-api-key`, `newPassword`, `refreshToken`, `password2`, `tokens` and
+   * `apiKeys` all match. Plurals only count as the whole key, so counters such as `max_tokens`
+   * are not masked.
+   *
+   * Trade-offs: non-secret keys with a matching suffix are masked too (e.g. a pagination cursor
+   * named `nextPageToken`). Secrets under generic names that contain no entry — such as the
+   * `access` / `refresh` pair some JWT libraries return — are not detected; add those keys to
+   * the list if your API uses them.
    *
    * Setting this replaces the default list; `[]` disables body and query-string masking
    * (header masking is controlled separately by `maskHeaders`).
    *
-   * @default ['password', 'passwd', 'pwd', 'passwordConfirm', 'passwordConfirmation', 'secret', 'token', 'apiKey', 'clientSecret', 'privateKey', 'authorization', 'sessionId', 'otp', 'ssn', 'cardNumber', 'cvv', 'cvc']
+   * @default ['password', 'passwd', 'pwd', 'passwordConfirm', 'passwordConfirmation', 'passphrase', 'passcode', 'secret', 'secretKey', 'token', 'jwt', 'apiKey', 'accessKey', 'clientSecret', 'privateKey', 'credential', 'authorization', 'sessionId', 'otp', 'otpCode', 'ssn', 'cardNumber', 'cvv', 'cvc']
    */
   maskKeys?: string[];
 
@@ -96,8 +102,10 @@ export interface QARecorderConfig {
   mode?: RecorderMode;
 
   /**
-   * When `true`, the replay masks the values of every `<input>`, `<textarea>` and `<select>`.
-   * When `false`, only password inputs are masked (rrweb's default).
+   * When `true`, the replay masks the values of every `<input>` (including hidden inputs and
+   * inputs without a `type` attribute), `<textarea>` and `<select>`; the checked state of
+   * checkboxes and radio buttons is still recorded. When `false`, only password inputs are
+   * masked (rrweb's default).
    *
    * @default false
    */
@@ -113,11 +121,13 @@ export interface QARecorderConfig {
   maskTextSelector?: string | null;
 
   /**
-   * CSS selector for elements to leave out of the replay — they are recorded as an empty
-   * placeholder of the same size. rrweb applies this selector only when serializing the DOM,
-   * so values typed into form fields inside a matched element are still captured; for those,
-   * use the `rr-block` class (which rrweb also honours for input and interaction events) or
-   * `maskAllInputs`.
+   * CSS selector for elements to leave out of the replay — a matched element present in a full
+   * snapshot is recorded as an empty placeholder of the same size. rrweb (1.1.3) checks this
+   * selector only against the element being serialized, so content added to or changed inside a
+   * matched element after the snapshot (e.g. a region your SPA renders later) and values typed
+   * into its form fields are still recorded. For reliable exclusion of private or dynamic
+   * regions and form fields, add the `rr-block` class to the element instead (rrweb honours it
+   * for the element's whole subtree, including later mutations and input events).
    *
    * @default null
    */
@@ -132,9 +142,9 @@ const DEFAULT_CONFIG: Required<QARecorderConfig> = {
     'Proxy-Authorization', 'X-API-Key', 'X-Auth-Token', 'X-CSRF-Token', 'X-XSRF-Token',
   ],
   maskKeys: [
-    'password', 'passwd', 'pwd', 'passwordConfirm', 'passwordConfirmation',
-    'secret', 'token', 'apiKey', 'clientSecret', 'privateKey', 'authorization',
-    'sessionId', 'otp', 'ssn', 'cardNumber', 'cvv', 'cvc',
+    'password', 'passwd', 'pwd', 'passwordConfirm', 'passwordConfirmation', 'passphrase', 'passcode',
+    'secret', 'secretKey', 'token', 'jwt', 'apiKey', 'accessKey', 'clientSecret', 'privateKey',
+    'credential', 'authorization', 'sessionId', 'otp', 'otpCode', 'ssn', 'cardNumber', 'cvv', 'cvc',
   ],
   zIndex: 2147483647,
   consoleLevels: ['error', 'warn'],

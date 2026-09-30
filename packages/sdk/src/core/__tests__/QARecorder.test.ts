@@ -73,9 +73,10 @@ describe('QARecorder', () => {
   it('rrweb 프라이버시 옵션을 record()에 전달한다', async () => {
     const recorder = new QARecorder({ maskAllInputs: true, blockSelector: '.private' });
     await recorder.init();
-    expect(mocks.record).toHaveBeenCalledWith(
-      expect.objectContaining({ maskAllInputs: true, blockSelector: '.private' }),
-    );
+    expect(mocks.record).toHaveBeenCalledWith(expect.objectContaining({
+      maskInputOptions: expect.objectContaining({ input: true, text: true }),
+      blockSelector: '.private',
+    }));
     recorder.destroy();
   });
 

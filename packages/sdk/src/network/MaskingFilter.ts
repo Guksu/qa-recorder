@@ -10,15 +10,21 @@ export class MaskingFilter {
    * maskKeys로 민감 키 판별 함수를 만든다. 호출자가 한 번만 생성해 재사용할 것.
    * 키와 목록 항목을 모두 정규화한 뒤, 키가 항목과 같거나 항목으로 끝나면 매칭한다
    * (access_token, x-api-key, newPassword, refreshToken → 매칭). 키 끝의 숫자는 무시한다
-   * (Django 회원가입 폼의 password1/password2). 유효한 항목이 없으면 null — body/쿼리 마스킹 비활성.
+   * (Django 회원가입 폼의 password1/password2).
+   * 키 전체가 항목의 복수형이어도 매칭한다 (tokens, passwords, apiKeys, credentials — 하위 키가
+   * access/refresh처럼 일반적인 이름이라 래퍼 키에서 가려야 하는 경우). 복수형은 접미사로 보지 않아
+   * max_tokens, total_tokens 같은 카운터는 매칭하지 않는다.
+   * 유효한 항목이 없으면 null — body/쿼리 마스킹 비활성.
    */
   static createKeyMatcher(maskKeys: string[]): KeyMatcher | null {
     const entries = Array.from(new Set(maskKeys.map(normalizeKey).filter(Boolean)));
     if (entries.length === 0) return null;
+    const entrySet = new Set(entries);
     return (key) => {
       const normalized = normalizeKey(key);
       if (!normalized) return false;
       const withoutDigits = normalized.replace(/\d+$/, '');
+      if (withoutDigits.endsWith('s') && entrySet.has(withoutDigits.slice(0, -1))) return true;
       return entries.some((e) => normalized.endsWith(e) || withoutDigits.endsWith(e));
     };
   }

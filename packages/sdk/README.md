@@ -36,7 +36,7 @@ No backend required. No browser extension. No screen share permission. Just add 
 | 🖥️ | **Console capture** | Captures `console.error`, `console.warn`, `window.onerror`, and `unhandledrejection`. |
 | 📋 | **Unified QA report** | Single self-contained HTML: session replay (left) + network inspector + console log (right). Time-synchronized — clicking a network row or console entry seeks to that exact moment. |
 | 🔍 | **Network detail panel** | Click any request row to inspect Headers, Payload, Response, and Timing — Chrome DevTools style. |
-| 🔒 | **Sensitive data masking** | Passwords, tokens, API keys and other sensitive keys in request/response bodies (JSON, form) and URL query strings are redacted before anything is stored — along with `Authorization`, `Cookie` and other auth headers. The SDK's own UI (button, save dialog with the bug memo) is never recorded into the replay, and `maskAllInputs`, `maskTextSelector` and `blockSelector` hide inputs, text or whole elements from it. |
+| 🔒 | **Sensitive data masking** | Passwords, tokens, API keys and other sensitive keys in request/response bodies (JSON, form) and URL query strings are redacted before anything is stored — along with `Authorization`, `Cookie` and other auth headers. The SDK's own UI (button, save dialog with the bug memo) is never recorded into the replay. `maskAllInputs` and `maskTextSelector` mask input values and text in it, and elements with the `rr-block` class are left out (see `blockSelector` for its limits). |
 | 📦 | **Local save** | Downloads a single ZIP file directly — no backend needed. |
 | ☁️ | **Remote upload** | Optionally POST files to your own server. Shows a share-link copy button on success. |
 | 📝 | **Bug memo** | Optional text note added at save time — embedded in the unified HTML report and sent with remote uploads. |
@@ -117,7 +117,6 @@ createApp(App).mount('#app');
   window.__QA_RECORDER_CONFIG__ = {
     enableBackup: true,
     maxRequests: 100,
-    maskHeaders: ['Authorization', 'Cookie'],
   };
 </script>
 <script src="https://unpkg.com/qa-recorder/dist/qa-recorder.umd.js"></script>
@@ -185,9 +184,9 @@ window.__QA_RECORDER_CONFIG__ = {
     'X-XSRF-Token',
   ],
   maskKeys: [                // Body / query-string keys to redact (default shown). [] disables.
-    'password', 'passwd', 'pwd', 'passwordConfirm', 'passwordConfirmation',
-    'secret', 'token', 'apiKey', 'clientSecret', 'privateKey', 'authorization',
-    'sessionId', 'otp', 'ssn', 'cardNumber', 'cvv', 'cvc',
+    'password', 'passwd', 'pwd', 'passwordConfirm', 'passwordConfirmation', 'passphrase', 'passcode',
+    'secret', 'secretKey', 'token', 'jwt', 'apiKey', 'accessKey', 'clientSecret', 'privateKey',
+    'credential', 'authorization', 'sessionId', 'otp', 'otpCode', 'ssn', 'cardNumber', 'cvv', 'cvc',
   ],
   zIndex: 2147483647,        // z-index for all UI elements (default: max int).
   consoleLevels: ['error', 'warn'],  // Console levels to capture (default shown).
@@ -196,7 +195,7 @@ window.__QA_RECORDER_CONFIG__ = {
   mode: 'normal',            // Recording intensity preset: 'light' | 'normal' | 'heavy' (default: 'normal').
   maskAllInputs: false,      // Mask every input/textarea/select value in the replay (default: false = passwords only).
   maskTextSelector: null,    // CSS selector for elements whose text is masked in the replay (default: null).
-  blockSelector: null,       // CSS selector for elements left out of the replay (default: null).
+  blockSelector: null,       // CSS selector for elements left out of the replay; see limits below (default: null).
 };
 ```
 
@@ -205,15 +204,15 @@ window.__QA_RECORDER_CONFIG__ = {
 | `endpoint` | `string` | `''` | Remote upload URL. Empty = local download. |
 | `maxRequests` | `number` | `100` | Max network entries to keep. |
 | `maskHeaders` | `string[]` | `['Authorization', 'Cookie', 'Set-Cookie', 'Proxy-Authorization', 'X-API-Key', 'X-Auth-Token', 'X-CSRF-Token', 'X-XSRF-Token']` | Headers to redact (case-insensitive). Setting this replaces the default list. |
-| `maskKeys` | `string[]` | `['password', 'passwd', 'pwd', 'passwordConfirm', 'passwordConfirmation', 'secret', 'token', 'apiKey', 'clientSecret', 'privateKey', 'authorization', 'sessionId', 'otp', 'ssn', 'cardNumber', 'cvv', 'cvc']` | Keys whose values are replaced with `"[MASKED]"` in URL query parameters and in JSON (searched recursively through nested objects and arrays) or `application/x-www-form-urlencoded` request/response bodies. Keys are compared case-insensitively, ignoring `_`, `-`, `.` and other symbols; a key matches when it equals or ends with an entry, ignoring trailing digits — so `access_token`, `x-api-key`, `newPassword` and `password2` all match. Trade-off: non-secret keys with a matching suffix, such as a `nextPageToken` pagination cursor, are masked too. `null` and empty values are kept. Setting this replaces the default list; `[]` disables body and query-string masking. |
+| `maskKeys` | `string[]` | `['password', 'passwd', 'pwd', 'passwordConfirm', 'passwordConfirmation', 'passphrase', 'passcode', 'secret', 'secretKey', 'token', 'jwt', 'apiKey', 'accessKey', 'clientSecret', 'privateKey', 'credential', 'authorization', 'sessionId', 'otp', 'otpCode', 'ssn', 'cardNumber', 'cvv', 'cvc']` | Keys whose values are replaced with `"[MASKED]"` in URL query parameters and in JSON (searched recursively through nested objects and arrays) or `application/x-www-form-urlencoded` request/response bodies. Keys are compared case-insensitively, ignoring `_`, `-`, `.` and other symbols; a key matches when it equals or ends with an entry, ignoring trailing digits, or when the whole key is the plural of an entry — so `access_token`, `x-api-key`, `newPassword`, `password2`, `tokens` and `apiKeys` all match (counters such as `max_tokens` don't). Trade-offs: non-secret keys with a matching suffix, such as a `nextPageToken` pagination cursor, are masked too, while secrets under generic names that contain no entry — such as the `access` / `refresh` pair some JWT libraries return — are not detected; list such keys in `maskKeys` along with the defaults. `null` and empty values are kept. Setting this replaces the default list; `[]` disables body and query-string masking. |
 | `zIndex` | `number` | `2147483647` | z-index for all UI elements (button, progress bar, share panel). |
 | `consoleLevels` | `string[]` | `['error', 'warn']` | Console levels to capture. Valid values: `'error'`, `'warn'`, `'log'`, `'info'`. |
 | `maxConsoleEntries` | `number` | `200` | Max console entries to keep in the circular buffer. |
 | `enableBackup` | `boolean` | `false` | When `true`, auto-saves the current session to sessionStorage whenever the tab becomes hidden (refresh, navigate). On the next `init()`, the backup is silently restored into the current session buffers before recording continues. The rolling window matches `mode` (light: 30m / normal: 20m / heavy: 5m). Note: data is cleared when the tab is closed. |
 | `mode` | `'light' \| 'normal' \| 'heavy'` | `'normal'` | Recording intensity preset that controls rrweb's checkout interval and event sampling to keep the in-memory buffer bounded. Use `'heavy'` for pages with frequent DOM mutations, animations, or long sessions — 5-minute checkout plus throttled `mousemove`/`scroll`/`input`. Use `'light'` for lightweight pages where you want a longer 30-minute history. |
-| `maskAllInputs` | `boolean` | `false` | When `true`, the replay masks the values of every `<input>`, `<textarea>` and `<select>`. When `false`, only password inputs are masked (rrweb's default). |
+| `maskAllInputs` | `boolean` | `false` | When `true`, the replay masks the values of every `<input>` (including hidden inputs and inputs without a `type` attribute), `<textarea>` and `<select>`; the checked state of checkboxes and radio buttons is still recorded. When `false`, only password inputs are masked (rrweb's default). |
 | `maskTextSelector` | `string \| null` | `null` | CSS selector for elements whose text is masked in the replay (non-whitespace characters become `*`). Elements with the `rr-mask` class are always masked. |
-| `blockSelector` | `string \| null` | `null` | CSS selector for elements left out of the replay — they are recorded as an empty placeholder of the same size. rrweb applies it only when serializing the DOM, so values typed into form fields inside a matched element are still captured; for those, add the `rr-block` class (also honoured for input and interaction events) or use `maskAllInputs`. |
+| `blockSelector` | `string \| null` | `null` | CSS selector for elements left out of the replay: a matched element in a full snapshot is recorded as an empty placeholder of the same size. rrweb 1.1.3 checks the selector only against the element being serialized, so content added to or changed inside a matched element later (e.g. a region your SPA renders after recording starts) and values typed into its form fields are still recorded. For reliable exclusion of private or dynamic regions and form fields, add the `rr-block` class to the element instead. |
 
 ---
 

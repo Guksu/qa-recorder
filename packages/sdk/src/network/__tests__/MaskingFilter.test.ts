@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { MaskingFilter } from '../MaskingFilter.js';
+import { resolveConfig } from '../../core/config.js';
 import type { HAREntry } from '@qa-recorder/shared';
 
 function makeEntry(
@@ -50,12 +51,8 @@ function makeBodyEntry(opts: {
   return entry;
 }
 
-const DEFAULT_KEYS = [
-  'password', 'passwd', 'pwd', 'passwordConfirm', 'passwordConfirmation',
-  'secret', 'token', 'apiKey', 'clientSecret', 'privateKey', 'authorization',
-  'sessionId', 'otp', 'ssn', 'cardNumber', 'cvv', 'cvc',
-];
-const matcher = MaskingFilter.createKeyMatcher(DEFAULT_KEYS);
+/** 실제 기본 설정의 maskKeys로 검증 (목록 자체는 config.test.ts에서 고정) */
+const matcher = MaskingFilter.createKeyMatcher(resolveConfig().maskKeys);
 const JSON_MIME = 'application/json';
 const FORM_MIME = 'application/x-www-form-urlencoded';
 
@@ -250,6 +247,41 @@ describe('MaskingFilter.apply', () => {
       });
     });
 
+    it('AWS 임시 자격 증명 응답(Cognito GetCredentialsForIdentity)의 비밀 키를 가린다', () => {
+      const entry = makeBodyEntry({
+        responseText: '{"Credentials":{"AccessKeyId":"ASIA","Expiration":1,"SecretKey":"SKSK","SessionToken":"ST"},"IdentityId":"id-1"}',
+        responseMimeType: 'application/x-amz-json-1.1',
+      });
+      const result = MaskingFilter.apply(entry, new Set(), matcher);
+      expect(JSON.parse(result.response.content.text!)).toEqual({ Credentials: '[MASKED]', IdentityId: 'id-1' });
+    });
+
+    it('래퍼 키 이름이 없는 STS 형식에서도 SecretAccessKey와 SessionToken을 가린다', () => {
+      const entry = makeBodyEntry({
+        responseText: '{"AccessKeyId":"ASIA","SecretAccessKey":"wJalr","SessionToken":"IQo","aws_secret_access_key":"sk"}',
+      });
+      const result = MaskingFilter.apply(entry, new Set(), matcher);
+      expect(JSON.parse(result.response.content.text!)).toEqual({
+        AccessKeyId: 'ASIA', SecretAccessKey: '[MASKED]', SessionToken: '[MASKED]', aws_secret_access_key: '[MASKED]',
+      });
+    });
+
+    it('복수형 래퍼 키(tokens)의 값은 하위 키 이름이 일반적이어도 통째로 가린다', () => {
+      const entry = makeBodyEntry({
+        responseText: '{"tokens":{"access":"eyJA","refresh":"eyJR"},"usage":{"total_tokens":30}}',
+      });
+      const result = MaskingFilter.apply(entry, new Set(), matcher);
+      expect(JSON.parse(result.response.content.text!)).toEqual({
+        tokens: '[MASKED]', usage: { total_tokens: 30 },
+      });
+    });
+
+    it('로그인 응답의 jwt 키를 가린다 (Strapi 형식)', () => {
+      const entry = makeBodyEntry({ responseText: '{"jwt":"J_SECRET","user":{"id":1}}' });
+      const result = MaskingFilter.apply(entry, new Set(), matcher);
+      expect(result.response.content.text).toBe('{"jwt":"[MASKED]","user":{"id":1}}');
+    });
+
     it('응답 body의 mimeType으로 form-urlencoded를 판별한다', () => {
       const entry = makeBodyEntry({
         responseText: 'oauth_token=abc&oauth_token_secret=def&user_id=1',
@@ -292,13 +324,29 @@ describe('MaskingFilter.createKeyMatcher', () => {
     'access_token', 'refreshToken', 'id_token', 'x-api-key', 'API_KEY',
     'client_secret', 'JSESSIONID', 'card-number', 'cvv2',
     'password1', 'password2', 'password_confirmation', 'passwordConfirm',
+    // 클라우드 비밀 키 (AWS Cognito/STS 응답의 SecretKey·SecretAccessKey, ~/.aws 형식, access_key 쿼리)
+    'SecretKey', 'secret_key', 'SecretAccessKey', 'aws_secret_access_key', 'access_key',
+    // 기타 자격 증명 (Strapi {jwt}, Bluesky accessJwt, Google Identity Services {credential})
+    'jwt', 'accessJwt', 'credential', 'passphrase', 'passcode', 'otpCode', 'otp_code', 'totpCode',
   ])('기본 목록은 "%s" 키와 매칭된다 (대소문자·구분자 무시, 접미사/끝 숫자 허용)', (key) => {
+    expect(matcher!(key)).toBe(true);
+  });
+
+  it.each([
+    'tokens', 'Tokens', 'secrets', 'passwords', 'apiKeys', 'api_keys', 'credentials', 'Credentials', 'tokens2',
+  ])('키 전체가 항목의 복수형인 "%s"도 매칭된다', (key) => {
     expect(matcher!(key)).toBe(true);
   });
 
   it.each([
     'username', 'email', 'max_tokens', 'tokenType', 'tokenizer', 'passwordPolicy',
     'className', 'screenshotPath', 'description', 'page', 'id',
+    // 복수형은 접미사로 보지 않으므로 토큰 카운터는 그대로 둔다
+    'total_tokens', 'prompt_tokens', 'completion_tokens', 'withCredentials',
+    // 접두사 매칭을 하지 않으므로 password·otp·secret으로 시작하는 비밀이 아닌 키는 유지
+    'passwordExpiresAt', 'otpEnabled', 'secretary',
+    // 비밀이 아닌 AWS 식별자
+    'AccessKeyId', 'aws_access_key_id',
   ])('기본 목록은 "%s" 키와 매칭되지 않는다', (key) => {
     expect(matcher!(key)).toBe(false);
   });
