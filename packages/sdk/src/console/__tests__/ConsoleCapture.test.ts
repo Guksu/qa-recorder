@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ConsoleCapture } from '../ConsoleCapture.js';
 
 let capture: ConsoleCapture;
@@ -296,6 +296,90 @@ describe('ConsoleCapture', () => {
       const entry = capture.snapshot()[0];
       expect(entry.message).toBe('RangeError: from iframe');
       expect(entry.stack).toBe('RangeError: from iframe\n    at frame.js:3:7');
+    });
+  });
+
+  describe('직렬화가 호스트 객체에 주는 부수효과', () => {
+    /**
+     * 원본 console 출력이 getter·trap 호출 수에 섞이지 않도록 capture 시작 전에 무음 처리하고,
+     * 콜백이 끝나면 capture를 멈춘 뒤 원래 console로 되돌린다.
+     */
+    function captureSilently(run: () => void): void {
+      const spies = [
+        vi.spyOn(console, 'error').mockImplementation(() => {}),
+        vi.spyOn(console, 'warn').mockImplementation(() => {}),
+      ];
+      try {
+        capture.start();
+        run();
+      } finally {
+        capture.stop();
+        spies.forEach((spy) => spy.mockRestore());
+      }
+    }
+
+    it('중첩 객체의 getter는 한 번만 호출된다', () => {
+      let reads = 0;
+      const payload = {
+        get detail() {
+          reads++;
+          return { code: 42 };
+        },
+      };
+      captureSilently(() => console.error('ctx', payload));
+      expect(reads).toBe(1);
+      expect(capture.snapshot()[0].message).toBe('ctx {"detail":{"code":42}}');
+    });
+
+    it('getter 안에서 남긴 경고가 버퍼에 중복 기록되지 않는다', () => {
+      captureSilently(() =>
+        console.error('save failed', {
+          id: 1,
+          get oldField() {
+            console.warn('oldField is deprecated');
+            return 'x';
+          },
+        }),
+      );
+      expect(capture.snapshot().map((e) => `${e.level}:${e.message}`)).toEqual([
+        'warn:oldField is deprecated',
+        'error:save failed {"id":1,"oldField":"x"}',
+      ]);
+    });
+
+    it('Proxy의 get trap을 JSON.stringify보다 더 호출하지 않고, 안의 toJSON Error도 { name, message }로 기록된다', () => {
+      class HttpError extends Error {
+        config = { headers: { Authorization: 'Bearer SECRET' } };
+        constructor(message: string) {
+          super(message);
+          this.name = 'HttpError';
+        }
+        toJSON() {
+          return { name: this.name, message: this.message, stack: this.stack, config: this.config };
+        }
+      }
+      const err = new HttpError('Request failed');
+      const makeState = (onGet: () => void) =>
+        new Proxy({ a: 1, b: { c: 2 }, error: err }, {
+          get(target, key, receiver) {
+            if (typeof key === 'string') onGet();
+            return Reflect.get(target, key, receiver);
+          },
+        });
+
+      let baselineGets = 0;
+      JSON.stringify({ state: makeState(() => baselineGets++) });
+      expect(baselineGets).toBeGreaterThan(0);
+
+      let gets = 0;
+      captureSilently(() => console.error({ state: makeState(() => gets++) }));
+
+      expect(gets).toBe(baselineGets);
+      const msg = capture.snapshot()[0].message;
+      expect(msg).toBe(
+        '{"state":{"a":1,"b":{"c":2},"error":{"name":"HttpError","message":"Request failed"}}}',
+      );
+      expect(msg).not.toContain('SECRET');
     });
   });
 });
