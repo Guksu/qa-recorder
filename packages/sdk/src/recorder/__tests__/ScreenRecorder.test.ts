@@ -44,9 +44,8 @@ describe('ScreenRecorder', () => {
     expect(opts).not.toHaveProperty('blockSelector');
   });
 
-  it('maskAllInputs / maskTextSelector / blockSelector를 record()에 전달한다', () => {
+  it('maskTextSelector / blockSelector를 record()에 그대로 전달한다', () => {
     const recorder = new ScreenRecorder('normal', {
-      maskAllInputs: true,
       maskTextSelector: '.pii',
       blockSelector: '[data-private]',
     });
@@ -55,6 +54,15 @@ describe('ScreenRecorder', () => {
       maskTextSelector: '.pii',
       blockSelector: '[data-private]',
     }));
+  });
+
+  it('maskAllInputs: true는 textarea 텍스트 자식도 가리도록 maskTextSelector에 textarea를 더한다', () => {
+    new ScreenRecorder('normal', { maskAllInputs: true }).start();
+    new ScreenRecorder('normal', { maskAllInputs: true, maskTextSelector: '.pii', blockSelector: '[data-private]' }).start();
+    const [onlyInputs, withSelectors] = mocks.record.mock.calls.map(([opts]) => opts as Record<string, unknown>);
+    expect(onlyInputs!.maskTextSelector).toBe('textarea');
+    expect(withSelectors!.maskTextSelector).toBe('.pii, textarea');
+    expect(withSelectors!.blockSelector).toBe('[data-private]');
   });
 
   it('maskAllInputs: true는 태그 이름 키(input)를 더한 maskInputOptions로 전달한다 (rrweb은 maskAllInputs: true면 이를 무시)', () => {

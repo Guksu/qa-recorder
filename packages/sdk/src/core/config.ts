@@ -104,8 +104,10 @@ export interface QARecorderConfig {
   /**
    * When `true`, the replay masks the values of every `<input>` (including hidden inputs and
    * inputs without a `type` attribute), `<textarea>` and `<select>`; the checked state of
-   * checkboxes and radio buttons is still recorded. When `false`, only password inputs are
-   * masked (rrweb's default).
+   * checkboxes and radio buttons is still recorded. For a `<textarea>` this also covers its text
+   * content (text in the page markup, or written through `defaultValue` as React does for
+   * controlled textareas), whose non-whitespace characters become `*`. When `false`, only
+   * password inputs are masked (rrweb's default).
    *
    * @default false
    */

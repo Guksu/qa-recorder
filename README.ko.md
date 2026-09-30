@@ -179,7 +179,7 @@ window.__QA_RECORDER_CONFIG__ = {
 | `maxConsoleEntries` | `number` | `200` | 순환 버퍼에 유지할 최대 콘솔 기록 수. |
 | `enableBackup` | `boolean` | `false` | `true`로 설정 시, 탭이 숨겨질 때(새로고침·이동) 현재 세션을 sessionStorage에 자동 저장. 다음 `init()` 호출 시 팝업 없이 현재 세션 버퍼에 조용히 복원. 롤링 윈도우는 `mode` 값에 따름 (light: 30분 / normal: 20분 / heavy: 5분). 탭 닫기 시 데이터 삭제. |
 | `mode` | `'light' \| 'normal' \| 'heavy'` | `'normal'` | rrweb의 checkout 주기와 이벤트 샘플링을 조정하는 녹화 강도 프리셋. 메모리 버퍼를 일정 수준으로 유지함. DOM 변화가 잦거나 애니메이션이 많은 페이지, 장시간 세션에는 `'heavy'` 사용 — 5분 checkout + `mousemove`/`scroll`/`input` 스로틀. 가벼운 페이지에서 더 긴 30분 이력을 원하면 `'light'`. |
-| `maskAllInputs` | `boolean` | `false` | `true`면 리플레이에서 모든 `<input>`(hidden input과 `type` 속성이 없는 input 포함), `<textarea>`, `<select>` 값을 마스킹. 체크박스·라디오 버튼의 선택 상태는 기록됨. `false`면 비밀번호 입력만 마스킹 (rrweb 기본값). |
+| `maskAllInputs` | `boolean` | `false` | `true`면 리플레이에서 모든 `<input>`(hidden input과 `type` 속성이 없는 input 포함), `<textarea>`, `<select>` 값을 마스킹. 체크박스·라디오 버튼의 선택 상태는 기록됨. `<textarea>`는 텍스트 콘텐츠(마크업에 담긴 초기값, React 제어 컴포넌트처럼 `defaultValue`로 쓰인 값)도 마스킹되며 공백 외 문자가 `*`로 표시됨. `false`면 비밀번호 입력만 마스킹 (rrweb 기본값). |
 | `maskTextSelector` | `string \| null` | `null` | 리플레이에서 텍스트를 마스킹할 요소의 CSS 셀렉터 (공백 외 문자가 `*`로 표시됨). `rr-mask` 클래스가 붙은 요소는 항상 마스킹. |
 | `blockSelector` | `string \| null` | `null` | 리플레이에서 제외할 요소의 CSS 셀렉터 — 전체 스냅샷에 포함된 요소는 같은 크기의 빈 placeholder로만 기록. rrweb 1.1.3은 이 셀렉터를 직렬화되는 요소 자신에만 검사하므로, 이후 해당 요소 안에 추가·변경된 콘텐츠(예: 녹화 시작 후 SPA가 렌더링한 영역)와 입력 필드에 입력한 값은 여전히 기록됨. 민감하거나 동적으로 바뀌는 영역과 입력 필드를 확실히 제외하려면 요소에 `rr-block` 클래스를 붙일 것. |
 

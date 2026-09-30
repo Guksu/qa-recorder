@@ -5,7 +5,8 @@ export type RecorderState = 'idle' | 'recording' | 'stopped';
 
 /**
  * rrweb record()에 전달하는 프라이버시 옵션 (미지정 시 rrweb 기본 동작과 동일).
- * maskAllInputs는 rrweb의 빈틈을 메운 maskInputOptions로 바꿔 전달한다 (MASK_ALL_INPUT_OPTIONS 참고).
+ * maskAllInputs는 rrweb의 빈틈을 메운 maskInputOptions와 textarea 텍스트 마스킹 셀렉터로 바꿔 전달한다
+ * (MASK_ALL_INPUT_OPTIONS, MASK_ALL_INPUTS_TEXT_SELECTOR 참고).
  */
 export type RecordPrivacyOptions = Pick<QARecorderConfig, 'maskAllInputs' | 'maskTextSelector' | 'blockSelector'>;
 
@@ -30,6 +31,15 @@ const MASK_ALL_INPUT_OPTIONS = {
   textarea: true, select: true, password: true,
   input: true,
 } as MaskInputOptions;
+
+/**
+ * maskAllInputs: true일 때 maskTextSelector에 더하는 셀렉터.
+ * rrweb 1.1.3은 maskInputOptions를 textarea의 value(속성과 input 이벤트)에만 적용하고, textarea의 텍스트 자식
+ * 노드는 maskTextClass/maskTextSelector로만 가린다. 그래서 마크업에 담긴 초기값과, React 제어 textarea가 입력마다
+ * node.defaultValue로 교체하는 텍스트 자식이 평문으로 기록된다. rrweb의 needMaskingText는 텍스트 노드의 조상을
+ * 따라 올라가며 셀렉터를 검사하므로, 전체 스냅샷과 mutation(adds/characterData) 경로 모두에서 가려진다.
+ */
+const MASK_ALL_INPUTS_TEXT_SELECTOR = 'textarea';
 
 const MODE_PRESETS: Record<RecorderMode, ModePreset> = {
   light:  { checkoutEveryNms: 30 * 60 * 1000 },
@@ -81,7 +91,11 @@ export class ScreenRecorder {
     else opts.maskAllInputs = false; // rrweb 기본값: 비밀번호 입력만 마스킹
     if (this.preset.sampling) opts.sampling = this.preset.sampling;
     // null/빈 문자열은 rrweb 기본값(셀렉터 없음)과 같으므로 전달하지 않는다
-    if (this.privacy.maskTextSelector) opts.maskTextSelector = this.privacy.maskTextSelector;
+    const maskTextSelector = [
+      this.privacy.maskTextSelector,
+      this.privacy.maskAllInputs ? MASK_ALL_INPUTS_TEXT_SELECTOR : null,
+    ].filter(Boolean).join(', ');
+    if (maskTextSelector) opts.maskTextSelector = maskTextSelector;
     if (this.privacy.blockSelector) opts.blockSelector = this.privacy.blockSelector;
 
     this.stopFn = record(opts) ?? null;
