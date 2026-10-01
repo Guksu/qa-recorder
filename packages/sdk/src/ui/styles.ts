@@ -31,7 +31,7 @@ export const BASE_STYLES = `
     background: #0f172a;
     box-shadow: 0 6px 24px rgba(0,0,0,0.5);
   }
-  .qa-floating-btn { cursor: grab; }
+  .qa-floating-btn { cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
   .qa-floating-btn:active { cursor: grabbing; }
 
   /* idle 아이콘 */

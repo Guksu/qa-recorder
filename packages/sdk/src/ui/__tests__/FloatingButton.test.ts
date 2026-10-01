@@ -67,33 +67,98 @@ describe('FloatingButton', () => {
     expect(style.textContent).toContain('z-index: 2147483647');
   });
 
-  it('8px 미만의 마우스 이동은 드래그로 인식되지 않아 클릭 콜백이 호출된다', () => {
-    const onClick = vi.fn();
-    const floatingBtn = new FloatingButton(onClick);
-    floatingBtn.mount();
-    const host = document.getElementById('qa-recorder-root')!;
-    const button = host.shadowRoot!.querySelector('button')!;
+  describe('드래그 (pointer 이벤트: 마우스·터치·펜)', () => {
+    function mountButton(onClick = vi.fn()) {
+      const floatingBtn = new FloatingButton(onClick);
+      floatingBtn.mount();
+      const button = document.getElementById('qa-recorder-root')!.shadowRoot!.querySelector('button')!;
+      return { floatingBtn, button, onClick };
+    }
+    const down = (target: EventTarget, x: number, y: number, init: PointerEventInit = {}) =>
+      target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: x, clientY: y, button: 0, pointerId: 1, ...init }));
+    const move = (x: number, y: number, init: PointerEventInit = {}) =>
+      document.dispatchEvent(new PointerEvent('pointermove', { clientX: x, clientY: y, pointerId: 1, ...init }));
+    const up = (type: 'pointerup' | 'pointercancel' = 'pointerup', init: PointerEventInit = {}) =>
+      document.dispatchEvent(new PointerEvent(type, { pointerId: 1, ...init }));
 
-    button.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 100, clientY: 100, button: 0 }));
-    document.dispatchEvent(new MouseEvent('mousemove', { clientX: 105, clientY: 103 })); // 5px — 8px 미만
-    document.dispatchEvent(new MouseEvent('mouseup', {}));
-    button.click();
+    it('8px 미만의 이동은 드래그로 인식되지 않아 클릭 콜백이 호출된다', () => {
+      const { button, onClick, floatingBtn } = mountButton();
+      down(button, 100, 100);
+      move(105, 103); // 5px — 8px 미만
+      up();
+      button.click();
+      expect(onClick).toHaveBeenCalledOnce();
+      floatingBtn.unmount();
+    });
 
-    expect(onClick).toHaveBeenCalledOnce();
-  });
+    it('8px 이상의 이동은 드래그로 인식되어 클릭 콜백이 호출되지 않는다', () => {
+      const { button, onClick, floatingBtn } = mountButton();
+      down(button, 100, 100);
+      move(110, 100); // 10px — 8px 이상
+      up();
+      button.click();
+      expect(onClick).not.toHaveBeenCalled();
+      floatingBtn.unmount();
+    });
 
-  it('8px 이상의 마우스 이동은 드래그로 인식되어 클릭 콜백이 호출되지 않는다', () => {
-    const onClick = vi.fn();
-    const floatingBtn = new FloatingButton(onClick);
-    floatingBtn.mount();
-    const host = document.getElementById('qa-recorder-root')!;
-    const button = host.shadowRoot!.querySelector('button')!;
+    it('터치로도 버튼을 끌어 옮길 수 있다', () => {
+      const { button, floatingBtn } = mountButton();
+      down(button, 100, 100, { pointerType: 'touch' });
+      move(130, 140, { pointerType: 'touch' });
+      expect(button.style.left).not.toBe('');
+      expect(button.style.top).not.toBe('');
+      expect(button.style.bottom).toBe('auto');
+      up('pointerup', { pointerType: 'touch' });
+      floatingBtn.unmount();
+    });
 
-    button.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 100, clientY: 100, button: 0 }));
-    document.dispatchEvent(new MouseEvent('mousemove', { clientX: 110, clientY: 100 })); // 10px — 8px 이상
-    document.dispatchEvent(new MouseEvent('mouseup', {}));
-    button.click();
+    it('드래그를 버튼 밖에서 끝내 click이 오지 않아도, 다음 진짜 클릭은 무시되지 않는다', () => {
+      const { button, onClick, floatingBtn } = mountButton();
+      down(button, 100, 100);
+      move(200, 200);
+      up(); // 버튼 밖에서 놓아 click 이벤트가 오지 않은 상황
+      down(button, 50, 50);
+      up();
+      button.click();
+      expect(onClick).toHaveBeenCalledOnce();
+      floatingBtn.unmount();
+    });
 
-    expect(onClick).not.toHaveBeenCalled();
+    it('pointercancel이 오면 드래그를 끝내고 더 이상 따라 움직이지 않는다', () => {
+      const { button, floatingBtn } = mountButton();
+      down(button, 100, 100);
+      move(120, 120);
+      up('pointercancel');
+      const left = button.style.left;
+      move(300, 300);
+      expect(button.style.left).toBe(left);
+      floatingBtn.unmount();
+    });
+
+    it('다른 포인터(두 번째 손가락)의 움직임은 무시한다', () => {
+      const { button, floatingBtn } = mountButton();
+      down(button, 100, 100);
+      const before = button.style.left;
+      move(300, 300, { pointerId: 2 });
+      expect(button.style.left).toBe(before);
+      up();
+      floatingBtn.unmount();
+    });
+
+    it('마우스 오른쪽 버튼으로는 드래그를 시작하지 않는다', () => {
+      const { button, floatingBtn } = mountButton();
+      down(button, 100, 100, { button: 2 });
+      move(200, 200);
+      expect(button.style.left).toBe('');
+      up();
+      floatingBtn.unmount();
+    });
+
+    it('터치 드래그 중 화면이 스크롤되지 않도록 touch-action: none을 쓴다', () => {
+      const { floatingBtn } = mountButton();
+      const style = document.getElementById('qa-recorder-root')!.shadowRoot!.querySelector('style')!;
+      expect(style.textContent).toContain('touch-action: none');
+      floatingBtn.unmount();
+    });
   });
 });

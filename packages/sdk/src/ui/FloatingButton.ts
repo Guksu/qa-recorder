@@ -57,8 +57,12 @@ export class FloatingButton {
       this.onClick();
     });
 
-    btn.addEventListener('mousedown', (e: MouseEvent) => {
+    // pointer 이벤트라 마우스·터치·펜 모두로 끌어 옮길 수 있다 (터치에서 화면이 스크롤되지 않게 CSS touch-action: none)
+    btn.addEventListener('pointerdown', (e: PointerEvent) => {
+      // 마우스는 왼쪽 버튼만 (터치·펜의 button도 0)
       if (e.button !== 0) return;
+      // 지난 드래그를 버튼 밖에서 끝내 click이 오지 않았으면 표시가 남아 다음 클릭을 삼킨다 — 새로 누를 때 지운다
+      wasDragged = false;
 
       // Snapshot current position before switching to top/left.
       // Must use 'auto' (not '') to override bottom/right from the CSS class.
@@ -68,6 +72,7 @@ export class FloatingButton {
       btn.style.left   = rect.left + 'px';
       btn.style.top    = rect.top  + 'px';
 
+      const pointerId = e.pointerId;
       const startX = e.clientX;
       const startY = e.clientY;
       const origX  = rect.left;
@@ -76,7 +81,8 @@ export class FloatingButton {
 
       e.preventDefault(); // prevent text selection while dragging
 
-      const onMove = (ev: MouseEvent) => {
+      const onMove = (ev: PointerEvent) => {
+        if (ev.pointerId !== pointerId) return; // 다른 손가락·포인터는 무시
         const dx = ev.clientX - startX;
         const dy = ev.clientY - startY;
         if (!dragged && Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
@@ -89,15 +95,19 @@ export class FloatingButton {
         btn.style.top  = newY + 'px';
       };
 
-      const onUp = () => {
+      const onUp = (ev: PointerEvent) => {
+        if (ev.pointerId !== pointerId) return;
         if (dragged) wasDragged = true;
         btn.style.cursor = '';
-        document.removeEventListener('mousemove', onMove);
-        document.removeEventListener('mouseup', onUp);
+        document.removeEventListener('pointermove', onMove);
+        document.removeEventListener('pointerup', onUp);
+        document.removeEventListener('pointercancel', onUp);
       };
 
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
+      document.addEventListener('pointermove', onMove);
+      document.addEventListener('pointerup', onUp);
+      // 브라우저가 제스처를 가져가면(pointercancel) 드래그를 끝낸다
+      document.addEventListener('pointercancel', onUp);
     });
   }
 
