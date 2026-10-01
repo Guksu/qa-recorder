@@ -193,3 +193,36 @@ describe('ScreenRecorder 페이지 URL 마스킹 (실제 rrweb)', () => {
       .toContain(`"href":"${location.origin}/reset-password?token=RESET-TOKEN-SECRET"`);
   });
 });
+
+describe('ScreenRecorder 크기 제한 (실제 rrweb)', () => {
+  let recorder: ScreenRecorder | null = null;
+
+  afterEach(() => {
+    recorder?.stop();
+    recorder = null;
+    document.body.innerHTML = '';
+  });
+
+  it('DOM이 계속 바뀌어도 보관하는 이벤트는 제한 근처로 유지되고, 남은 녹화는 최신 스냅샷부터 시작한다', async () => {
+    document.body.innerHTML = '<div id="live"></div>';
+    const live = document.getElementById('live')!;
+    recorder = new ScreenRecorder('normal', {}, 50_000);
+    recorder.start();
+
+    // 변경 하나가 약 2,000자 — 40번이면 약 80,000자로 제한(50,000자)을 넘는다
+    for (let i = 0; i < 40; i++) {
+      live.innerHTML = `<p>${'row '.repeat(500)}#${i}</p>`;
+      await flush();
+    }
+
+    const events = recorder.getEvents() as { type: number; data: unknown }[];
+    const types = events.map((e) => e.type);
+    expect(types.slice(0, 2)).toEqual([4, 2]);
+    expect(types.filter((t) => t === 2).length).toBe(2); // 이전 구간 + 지금 구간
+    expect(JSON.stringify(events).length).toBeLessThan(50_000 + 5_000);
+    // 처음 변경(#0)은 버려지고, 마지막 변경(#39)은 남는다
+    const json = JSON.stringify(events);
+    expect(json).not.toContain('#0"');
+    expect(json).toContain('#39');
+  });
+});

@@ -67,19 +67,31 @@ export class ScreenRecorder {
    * 직전 체크아웃 구간. 체크아웃 시 현재 구간을 즉시 버리면 저장 시점에 따라
    * 히스토리가 0에 수렴할 수 있으므로, 마지막 두 구간을 유지해
    * 항상 최소 한 주기(checkoutEveryNms)만큼의 리플레이를 보장한다 (최대 두 주기).
-   * 단, resume()으로 보존된 녹화 전체가 prevEvents가 되고 새 record()가 체크아웃 주기를
+   * 구간이 maxReplaySize의 절반을 넘어 일찍 넘어가면 한 주기보다 짧을 수 있다 (trackSize 참고).
+   * 또, resume()으로 보존된 녹화 전체가 prevEvents가 되고 새 record()가 체크아웃 주기를
    * 처음부터 다시 세므로, 저장 실패 후 다음 체크아웃 전까지는 두 주기를 넘을 수 있다.
    */
   private prevEvents: unknown[] = [];
+  /** 지금 구간(events)의 JSON 문자 수 — maxReplaySize가 있을 때만 센다 */
+  private eventsSize = 0;
+  /** 지금 구간의 FullSnapshot까지(앞의 Meta 포함)의 JSON 문자 수 */
+  private snapshotSize = 0;
   private stopFn: (() => void) | null = null;
   private state: RecorderState = 'idle';
   private preset: ModePreset;
   /** 페이지 URL 마스킹용 민감 키 판별 함수 — 이벤트마다 만들지 않도록 생성자에서 한 번만 만든다 */
   private readonly isSensitiveKey: KeyMatcher | null;
+  /** 보관할 이벤트의 대략적인 최대 JSON 문자 수 (Infinity면 크기와 상관없이 시간 기준으로만 구간을 나눈다) */
+  private readonly maxReplaySize: number;
 
-  constructor(mode: RecorderMode = 'normal', private readonly privacy: RecordPrivacyOptions = {}) {
+  constructor(
+    mode: RecorderMode = 'normal',
+    private readonly privacy: RecordPrivacyOptions = {},
+    maxReplaySize = Infinity,
+  ) {
     this.preset = MODE_PRESETS[mode];
     this.isSensitiveKey = MaskingFilter.createKeyMatcher(privacy.maskKeys ?? []);
+    this.maxReplaySize = typeof maxReplaySize === 'number' && maxReplaySize > 0 ? maxReplaySize : Infinity;
   }
 
   start(): void {
@@ -87,15 +99,19 @@ export class ScreenRecorder {
 
     this.events = [];
     this.prevEvents = [];
+    this.eventsSize = 0;
+    this.snapshotSize = 0;
     const opts: Parameters<typeof record>[0] = {
       emit: (event, isCheckout) => {
         const stored = maskMetaHref(event, this.isSensitiveKey);
         if (isCheckout) {
           this.prevEvents = this.events;
           this.events = [stored];
+          this.eventsSize = 0;
         } else {
           this.events.push(stored);
         }
+        this.trackSize(stored);
       },
       checkoutEveryNms: this.preset.checkoutEveryNms,
     };
@@ -114,9 +130,35 @@ export class ScreenRecorder {
     this.state = 'recording';
   }
 
+  /**
+   * 지금 구간의 크기를 세고, maxReplaySize의 절반을 넘으면 새 구간을 일찍 시작한다.
+   * rrweb의 시간 기준 체크아웃과 같은 takeFullSnapshot(true)를 쓰므로 emit에 isCheckout으로 돌아와
+   * 가장 오래된 구간이 버려지고, 남은 두 구간은 각각 FullSnapshot으로 시작해 그대로 재생된다.
+   * 새 구간도 스냅샷 크기만큼은 차지하므로, 스냅샷 뒤에 쌓인 변경분이 스냅샷보다 작으면 넘기지 않는다
+   * — 스냅샷 하나가 제한의 절반보다 큰 페이지에서 이벤트마다 스냅샷을 다시 찍지 않도록.
+   * stop() 뒤에 늦게 emit된 이벤트(throttle된 mousemove 등)로는 스냅샷을 찍지 않는다.
+   */
+  private trackSize(event: unknown): void {
+    if (this.maxReplaySize === Infinity) return;
+    this.eventsSize += JSON.stringify(event).length;
+    if ((event as { type?: unknown }).type === FULL_SNAPSHOT) {
+      this.snapshotSize = this.eventsSize;
+      return;
+    }
+    if (
+      this.state === 'recording' &&
+      this.eventsSize > this.maxReplaySize / 2 &&
+      this.eventsSize - this.snapshotSize > this.snapshotSize
+    ) {
+      record.takeFullSnapshot(true);
+    }
+  }
+
   clearBuffer(): void {
     this.events = [];
     this.prevEvents = [];
+    this.eventsSize = 0;
+    this.snapshotSize = 0;
     // takeFullSnapshot은 record()가 실행 중일 때만 유효 — idle/stopped에서 호출하면 rrweb이 throw
     if (this.state === 'recording') record.takeFullSnapshot();
   }
@@ -147,6 +189,15 @@ export class ScreenRecorder {
     return [...this.prevEvents, ...this.events];
   }
 
+  /**
+   * 지금 구간의 이벤트만 반환 (백업 용량이 모자랄 때 사용).
+   * 구간은 녹화 시작이나 체크아웃의 Meta + FullSnapshot으로 시작하므로 따로 재생할 수 있다.
+   */
+  getRecentEvents(): unknown[] {
+    if (this.state === 'idle') throw new Error('No recording available');
+    return [...this.events];
+  }
+
   getBlob(): Blob {
     return new Blob([JSON.stringify(this.getEvents())], { type: 'application/json' });
   }
@@ -170,6 +221,8 @@ export class ScreenRecorder {
     if (this.state === 'recording') return;
     this.events = [];
     this.prevEvents = [];
+    this.eventsSize = 0;
+    this.snapshotSize = 0;
     this.stopFn = null;
     this.state = 'idle';
   }

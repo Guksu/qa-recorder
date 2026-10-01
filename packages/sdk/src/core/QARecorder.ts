@@ -71,7 +71,7 @@ export class QARecorder {
       maskTextSelector: this.config.maskTextSelector,
       blockSelector: this.config.blockSelector,
       maskKeys: this.config.maskKeys,
-    });
+    }, this.config.maxReplaySize);
     this.consoleCapture = new ConsoleCapture(this.config.maxConsoleEntries, this.config.consoleLevels);
     this.floatingButton = new FloatingButton(this.onButtonClick.bind(this), this.config.zIndex);
   }
@@ -98,16 +98,31 @@ export class QARecorder {
     }
   }
 
+  /**
+   * sessionStorage 용량(Chromium 기준 키 포함 5,242,880자)을 넘으면 더 작은 백업으로 다시 시도한다:
+   * 전체 녹화 → 지금 구간만 (FullSnapshot으로 시작해 따로 재생 가능) → 녹화 없이 네트워크·콘솔 기록만.
+   */
   private saveToSessionStorage(): void {
     try {
-      sessionStorage.setItem(SESSION_KEY, JSON.stringify({
-        events:      this.screenRecorder.getEvents(),
+      const all = this.screenRecorder.getEvents();
+      const recent = this.screenRecorder.getRecentEvents();
+      const rest = {
         harEntries:  this.networkCapture.snapshot(),
         consoleLogs: this.consoleCapture.snapshot(),
         savedAt:     new Date().toISOString(),
-      }));
+      };
+      // 남은 이전 백업은 용량을 차지하고, 아래 시도가 모두 실패하면 다음 init()에 오래된 백업이 복원되므로 먼저 지운다
+      sessionStorage.removeItem(SESSION_KEY);
+      for (const events of recent.length < all.length ? [all, recent, []] : [all, []]) {
+        try {
+          sessionStorage.setItem(SESSION_KEY, JSON.stringify({ events, ...rest }));
+          return;
+        } catch {
+          /* 용량 초과 — 더 작은 백업으로 다시 시도 */
+        }
+      }
     } catch {
-      /* sessionStorage 용량 초과 시 무시 */
+      /* 녹화 전이거나 sessionStorage를 쓸 수 없는 환경 */
     }
   }
 
