@@ -264,7 +264,7 @@ The `qa-report-{timestamp}.html` file is a fully self-contained QA report — no
 - **Play / Pause** button with timeline scrubber
 - **1× / 2× / 4×** playback speed
 - Mouse cursor and interaction replay
-- Timeline markers for network requests and console errors
+- Timeline markers for network requests and console errors/warnings (failed requests in red) — click a marker to jump to that moment
 
 ### Network Inspector (right panel — Network tab)
 
@@ -278,14 +278,16 @@ The `qa-report-{timestamp}.html` file is a fully self-contained QA report — no
 - URL filter bar to narrow down requests
 - Click any row to **jump to that exact moment** in the session replay
 - Active requests highlighted during playback
+- Failed requests (status 0: network error, CORS, aborted) shown as `failed` in red
 
 ### Console Log (right panel — Console tab)
 
 - Filter by Error / Warning / Log level
 - Click any entry to **jump to that moment** in the session replay
 - Future entries fade out during playback, revealing the timeline progressively
+- Expand `▶ stack` to see the stack trace of an error
 
-> The viewer loads rrweb from CDN (`cdn.jsdelivr.net`) on open — an internet connection is required to play back sessions.
+> The viewer loads rrweb from CDN (`cdn.jsdelivr.net`) on open, with a Subresource Integrity check — an internet connection is required to play back sessions. If the player cannot be loaded, the network and console panels still work.
 
 ---
 
