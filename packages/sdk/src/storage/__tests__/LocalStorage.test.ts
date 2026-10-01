@@ -76,6 +76,25 @@ describe('LocalStorage.save', () => {
     return new TextDecoder().decode(data);
   }
 
+  it('환경 정보를 넘기면 ZIP에 qa-env-*.json을 넣고 리포트에도 담는다', async () => {
+    const env = {
+      url: 'https://app.example.com/page', userAgent: 'UA-TEST', language: 'ko-KR', timeZone: 'Asia/Seoul',
+      viewport: { width: 1280, height: 720 }, screen: { width: 1920, height: 1080 },
+      devicePixelRatio: 2, savedAt: '2026-10-01T00:00:00.000Z', sdkVersion: '1.12.0',
+    };
+    await saveAndFlush(makeEvents(), makeHARLog(), [], '', env);
+    const entries = getZippedEntries();
+    const envKey = Object.keys(entries).find((f) => /^qa-env-.*\.json$/.test(f))!;
+    expect(JSON.parse(decode(entries[envKey]))).toEqual(env);
+    const htmlKey = Object.keys(entries).find((f) => f.endsWith('.html'))!;
+    expect(decode(entries[htmlKey])).toContain('UA-TEST');
+  });
+
+  it('환경 정보가 없으면 qa-env-*.json을 넣지 않는다', async () => {
+    await saveAndFlush(makeEvents(), makeHARLog());
+    expect(Object.keys(getZippedEntries()).some((f) => f.startsWith('qa-env-'))).toBe(false);
+  });
+
   it('정확히 1개의 ZIP 파일이 다운로드된다', async () => {
     await saveAndFlush(makeEvents(), makeHARLog());
     expect(clickedLinks).toHaveLength(1);

@@ -9,6 +9,9 @@ import { SharePanel } from '../ui/SharePanel.js';
 import { LocalStorage } from '../storage/LocalStorage.js';
 import { RemoteDelivery } from '../storage/RemoteDelivery.js';
 import { HARBuilder } from '../network/HARBuilder.js';
+import { MaskingFilter, type KeyMatcher } from '../network/MaskingFilter.js';
+import { UnifiedViewer } from '../viewer/UnifiedViewer.js';
+import { collectEnvironment, type EnvironmentInfo } from './environment.js';
 import type { HAREntry, HARLog } from '@qa-recorder/shared';
 import type { ConsoleEntry } from '../console/ConsoleCapture.js';
 
@@ -43,6 +46,8 @@ export class QARecorder {
   }
 
   private config: Required<QARecorderConfig>;
+  /** 환경 정보의 페이지 URL을 가릴 때 쓰는 민감 키 판별 함수 (maskKeys) */
+  private readonly urlKeyMatcher: KeyMatcher | null;
   private networkCapture: NetworkCapture;
   private screenRecorder: ScreenRecorder;
   private consoleCapture: ConsoleCapture;
@@ -54,6 +59,7 @@ export class QARecorder {
 
   constructor(overrides?: QARecorderConfig) {
     this.config = resolveConfig(overrides);
+    this.urlKeyMatcher = MaskingFilter.createKeyMatcher(this.config.maskKeys);
     // 업로드 요청은 앱 트래픽이 아니므로 캡처하지 않는다 (저장 실패로 버퍼를 보존할 때 리포트에 섞이지 않도록)
     this.networkCapture = new NetworkCapture(this.config.maxRequests, this.config.maskHeaders, {
       maskKeys: this.config.maskKeys,
@@ -144,12 +150,13 @@ export class QARecorder {
 
     const harLog = HARBuilder.build(this.networkCapture.snapshot());
     const consoleLogs = this.consoleCapture.snapshot();
+    const environment = collectEnvironment((url) => MaskingFilter.maskUrl(url, this.urlKeyMatcher));
 
     ProgressBar.show('Saving...', this.config.zIndex);
 
     const saved = this.config.endpoint
-      ? await this.uploadOrSaveLocally(this.config.endpoint, harLog, consoleLogs, memo)
-      : await this.saveLocally(harLog, consoleLogs, memo);
+      ? await this.uploadOrSaveLocally(this.config.endpoint, harLog, consoleLogs, memo, environment)
+      : await this.saveLocally(harLog, consoleLogs, memo, environment);
 
     if (saved) {
       if (this.config.enableBackup) {
@@ -176,6 +183,7 @@ export class QARecorder {
     harLog: HARLog,
     consoleLogs: ConsoleEntry[],
     memo: string,
+    environment: EnvironmentInfo,
   ): Promise<boolean> {
     let events: unknown[] | undefined;
     let url: string | undefined;
@@ -184,10 +192,15 @@ export class QARecorder {
       // throttle된 콜백(mousemove 등)의 trailing 타이머로 이벤트를 늦게 emit할 수 있다
       events = this.screenRecorder.getEvents();
       const sessionBlob = new Blob([JSON.stringify(events)], { type: 'application/json' });
-      url = await new RemoteDelivery(endpoint).send(sessionBlob, harLog, memo);
+      // 서버가 따로 뷰어를 만들지 않아도 되도록 콘솔 로그와 통합 리포트, 환경 정보도 함께 보낸다
+      url = await new RemoteDelivery(endpoint).send(sessionBlob, harLog, memo, {
+        consoleLogs,
+        reportHtml: UnifiedViewer.generate(events, harLog, consoleLogs, memo, environment),
+        environment,
+      });
     } catch (uploadErr) {
       try {
-        await LocalStorage.save(events ?? this.screenRecorder.getEvents(), harLog, consoleLogs, memo);
+        await LocalStorage.save(events ?? this.screenRecorder.getEvents(), harLog, consoleLogs, memo, environment);
       } catch (saveErr) {
         ProgressBar.hide();
         alert(
@@ -209,9 +222,14 @@ export class QARecorder {
   }
 
   /** 로컬 ZIP 저장. 성공하면 true */
-  private async saveLocally(harLog: HARLog, consoleLogs: ConsoleEntry[], memo: string): Promise<boolean> {
+  private async saveLocally(
+    harLog: HARLog,
+    consoleLogs: ConsoleEntry[],
+    memo: string,
+    environment: EnvironmentInfo,
+  ): Promise<boolean> {
     try {
-      await LocalStorage.save(this.screenRecorder.getEvents(), harLog, consoleLogs, memo);
+      await LocalStorage.save(this.screenRecorder.getEvents(), harLog, consoleLogs, memo, environment);
     } catch (err) {
       ProgressBar.hide();
       alert(`Save failed: ${errorMessage(err)}\nThe recording was kept. Please try again.`);

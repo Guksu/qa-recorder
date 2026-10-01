@@ -689,3 +689,44 @@ describe('QARecorder.setup / getInstance', () => {
     expect(QARecorder.getInstance()).toBeInstanceOf(QARecorder);
   });
 });
+
+describe('QARecorder — 환경 정보와 업로드 파일', () => {
+  afterEach(() => {
+    window.history.replaceState({}, '', '/');
+  });
+
+  it('로컬 저장 시 maskKeys로 페이지 URL을 가린 환경 정보를 넘긴다', async () => {
+    window.history.replaceState({}, '', '/reset?token=PAGE-SECRET&lang=ko');
+    const recorder = new QARecorder();
+    await recorder.init();
+    document.getElementById('qa-recorder-root')!.shadowRoot!.querySelector('button')!.click();
+    await vi.waitFor(() => expect(mocks.localStorageSave).toHaveBeenCalledOnce());
+
+    const environment = mocks.localStorageSave.mock.calls[0]![4];
+    expect(environment.url).toContain('token=[MASKED]&lang=ko');
+    expect(JSON.stringify(environment)).not.toContain('PAGE-SECRET');
+    expect(environment.userAgent).toBe(navigator.userAgent);
+    recorder.destroy();
+  });
+
+  it('원격 업로드 시 콘솔 로그, 통합 리포트, 환경 정보를 함께 보낸다', async () => {
+    mocks.remoteDeliverySend.mockResolvedValue(undefined);
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    const recorder = new QARecorder({ endpoint: 'https://example.com/upload' });
+    await recorder.init();
+    // 콘솔 캡처 방식과 무관하게 버퍼에 직접 넣는다
+    internalsOf(recorder).consoleCapture.restoreEntries([
+      { timestamp: new Date().toISOString(), level: 'error', message: 'seeded for upload', _offsetMs: 0 },
+    ]);
+    document.getElementById('qa-recorder-root')!.shadowRoot!.querySelector('button')!.click();
+    await vi.waitFor(() => expect(mocks.remoteDeliverySend).toHaveBeenCalledOnce());
+
+    const extras = mocks.remoteDeliverySend.mock.calls[0]![3];
+    expect(extras.consoleLogs.map((e: { message: string }) => e.message)).toContain('seeded for upload');
+    expect(extras.reportHtml).toContain('<title>QA Report</title>');
+    expect(extras.reportHtml).toContain(JSON.stringify(extras.environment.userAgent));
+    expect(extras.environment.sdkVersion).toBeTruthy();
+    recorder.destroy();
+    alertSpy.mockRestore();
+  });
+});

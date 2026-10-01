@@ -599,7 +599,7 @@ describe('uploadMockPlugin — 실패한 업로드 정리', () => {
 });
 
 describe('uploadMockPlugin — 업로드된 내용의 격리', () => {
-  it('업로드된 HTML 파일은 기존 MIME으로 주되 sandbox CSP와 nosniff로 격리한다', async () => {
+  it('업로드된 HTML 파일은 기존 MIME으로 주되 sandbox CSP(고유 origin, 스크립트만 허용)와 nosniff로 격리한다', async () => {
     const { base } = await upload([
       { filename: 'evil.html', content: '<script>alert(document.domain)</script>' },
       { filename: 'qa-network.har', content: '{}' },
@@ -608,11 +608,11 @@ describe('uploadMockPlugin — 업로드된 내용의 격리', () => {
     const evil = await request(`${base}evil.html`);
     expect(evil.status).toBe(200);
     expect(evil.headers['content-type']).toBe('text/html; charset=utf-8');
-    expect(evil.headers['content-security-policy']).toBe('sandbox');
+    expect(evil.headers['content-security-policy']).toBe('sandbox allow-scripts');
     expect(evil.headers['x-content-type-options']).toBe('nosniff');
 
     const har = await request(`${base}qa-network.har`);
-    expect(har.headers['content-security-policy']).toBe('sandbox');
+    expect(har.headers['content-security-policy']).toBe('sandbox allow-scripts');
     expect(har.headers['x-content-type-options']).toBe('nosniff');
   });
 
@@ -755,7 +755,7 @@ describe('uploadMockPlugin — Vite dev 서버 위에서의 격리', () => {
       const res = await get(`${base}${file}`);
       expect(res.status).toBe(200);
       expect(res.body).toContain(PAYLOAD);
-      expect(res.headers['content-security-policy']).toBe('sandbox');
+      expect(res.headers['content-security-policy']).toBe('sandbox allow-scripts');
       expect(res.headers['x-content-type-options']).toBe('nosniff');
 
       // 업로드 디렉터리는 server.fs.allow 밖이므로 /@fs/로 직접 요청하면 Vite가 403으로 거부한다

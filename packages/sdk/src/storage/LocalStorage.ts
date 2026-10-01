@@ -1,10 +1,17 @@
+import type { EnvironmentInfo } from '../core/environment.js';
 import type { HARLog } from '@qa-recorder/shared';
 import type { ConsoleEntry } from '../console/ConsoleCapture.js';
 import { UnifiedViewer } from '../viewer/UnifiedViewer.js';
 import { zip, zipSync, strToU8, type Zippable } from 'fflate';
 
 export class LocalStorage {
-  static async save(sessionEvents: unknown[] | null, harLog: HARLog, consoleLogs: ConsoleEntry[] = [], memo = ''): Promise<void> {
+  static async save(
+    sessionEvents: unknown[] | null,
+    harLog: HARLog,
+    consoleLogs: ConsoleEntry[] = [],
+    memo = '',
+    environment?: EnvironmentInfo,
+  ): Promise<void> {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
 
     // 직렬화와 압축은 메인 스레드를 오래 잡으므로, 그 전에 "Saving..." 진행 막대가 먼저 그려지게 한 번 양보한다
@@ -16,8 +23,11 @@ export class LocalStorage {
       entries[`qa-session-${timestamp}.rr.json`] = strToU8(JSON.stringify(sessionEvents));
     }
     entries[`qa-network-${timestamp}.har`] = strToU8(JSON.stringify(harLog, null, 2));
+    if (environment) {
+      entries[`qa-env-${timestamp}.json`] = strToU8(JSON.stringify(environment, null, 2));
+    }
     entries[`qa-report-${timestamp}.html`] = strToU8(
-      UnifiedViewer.generate(sessionEvents ?? [], harLog, consoleLogs, memo),
+      UnifiedViewer.generate(sessionEvents ?? [], harLog, consoleLogs, memo, environment),
     );
 
     // TS 5.9+: Uint8Array<ArrayBufferLike>는 BlobPart로 좁혀지지 않으므로 명시 캐스트

@@ -41,11 +41,12 @@
 | 📋 | **통합 QA 리포트** | 하나의 HTML 파일: 세션 리플레이(좌) + 네트워크 인스펙터 + 콘솔 로그(우). 시간 동기화 — 네트워크 행이나 콘솔 항목 클릭 시 해당 시점으로 즉시 이동. |
 | 🔍 | **네트워크 상세 패널** | 요청 행 클릭 시 Headers, Payload, Response, Timing 탭 — Chrome 개발자도구 스타일. |
 | 🔒 | **민감 정보 마스킹** | 비밀번호·토큰·API 키 등 민감 키(`maskKeys`)의 값을 요청 URL(쿼리와 fragment), JSON·form 요청/응답 body, 리플레이에 기록되는 페이지 URL에서 저장 전에 자동 마스킹하고, `Authorization`, `Cookie` 등 인증 헤더도 가림. 키 이름으로만 판별하므로 URL 경로나 다른 키의 값 안에 담긴 토큰(`?next=` 리다이렉트, 분석 도구로 보내는 페이지 URL 등)은 감지하지 못함 (`maskKeys` 참고). 페이지 DOM 안의 텍스트와 링크는 `maskKeys` 대상이 아니며, `maskAllInputs`·`maskTextSelector`로 리플레이의 입력값·텍스트를 가리고 `rr-block` 클래스를 붙인 요소는 리플레이에서 제외 (`blockSelector`는 아래 제약 참고). SDK 자체 UI(버튼, 버그 메모 입력 창 등)는 리플레이에 녹화되지 않음. |
-| 📦 | **로컬 저장** | 파일 3종을 로컬에 다운로드 — 백엔드 불필요. |
+| 📦 | **로컬 저장** | 리포트 파일을 ZIP 하나로 로컬에 다운로드 — 백엔드 불필요. |
 | ☁️ | **원격 업로드** | 서버 endpoint 설정 시 POST 업로드. 응답 URL이 있으면 링크 복사 버튼 노출. |
 | 📝 | **버그 메모** | 저장 시 입력하는 선택적 텍스트 메모 — 통합 HTML 리포트에 포함되고 원격 업로드 시 함께 전송. |
+| 🧭 | **환경 정보** | 브라우저(user agent), 언어, 시간대, 창·화면 크기, 기기 픽셀 비율, 페이지 URL(`maskKeys`로 마스킹), SDK 버전을 리포트마다 저장 — 리포트의 **Environment** 탭에 표시되고 `qa-env-*.json`으로 저장되며 원격 업로드 시 함께 전송. 문서 제목과 referrer는 수집하지 않음. |
 | 💾 | **세션 연속성** | `enableBackup: true` 설정 시 탭 숨김 시 세션을 sessionStorage에 자동 저장하고 새로고침 후 조용히 복원 — 팝업 없음, 데이터 손실 없음. (탭을 닫으면 데이터가 삭제됩니다.) |
-| 🧩 | **Shadow DOM UI** | 플로팅 버튼과 팝업이 호스트 페이지 스타일과 완전히 격리. |
+| 🧩 | **Shadow DOM UI** | 플로팅 버튼과 팝업이 호스트 페이지 스타일과 완전히 격리. 버튼은 마우스·손가락·펜으로 끌어 옮길 수 있음. |
 
 ---
 
@@ -76,7 +77,7 @@ const recorder = new QARecorder();
 await recorder.init();
 // 권한 요청 없이 즉시 녹화 시작 — 최근 20분을 항상 메모리에 유지.
 // 화면 우측 하단에 빨간 플로팅 버튼이 나타납니다.
-// 1번 클릭 → 확인 → 파일 3종이 자동 다운로드됩니다.
+// 1번 클릭 → 확인 → 리포트 ZIP 파일이 자동 다운로드됩니다.
 // 저장 후 녹화가 자동으로 재시작됩니다.
 ```
 
@@ -101,9 +102,10 @@ await recorder.init();
 
 | 파일 | 내용 |
 |---|---|
-| `qa-report-{timestamp}.zip` | 아래 3개 파일을 포함한 ZIP |
+| `qa-report-{timestamp}.zip` | 아래 파일들을 포함한 ZIP |
 | `qa-session-{timestamp}.rr.json` | DOM 세션 리플레이 (rrweb 이벤트 원본) |
 | `qa-network-{timestamp}.har` | 네트워크 로그 (HAR 1.2) |
+| `qa-env-{timestamp}.json` | 환경 정보 (브라우저, 언어, 시간대, 창 크기, 마스킹된 페이지 URL, SDK 버전) |
 | `qa-report-{timestamp}.html` | 통합 QA 리포트 — 세션 리플레이 + 네트워크 + 콘솔을 하나의 파일로 |
 
 저장에 실패하면 녹화 내용이 유지된 채 녹화가 이어지므로 다시 저장할 수 있습니다.
@@ -131,6 +133,9 @@ await recorder.init();
 POST /upload
   session  →  qa-session-{timestamp}.rr.json
   har      →  qa-network-{timestamp}.har
+  console  →  qa-console-{timestamp}.json   (콘솔 로그)
+  report   →  qa-report-{timestamp}.html    (통합 QA 리포트)
+  env      →  qa-env-{timestamp}.json       (환경 정보)
   memo     →  (선택) 사용자가 입력한 버그 메모 텍스트
 ```
 
@@ -217,6 +222,7 @@ window.__QA_RECORDER_CONFIG__ = {
                                    qa-report-*.zip
                                      ├─ qa-session-*.rr.json
                                      ├─ qa-network-*.har
+                                     ├─ qa-env-*.json
                                      └─ qa-report-*.html  ← 통합 QA 리포트
 
   └─ ScreenRecorder.reset() + start()   → 녹화 자동 재시작

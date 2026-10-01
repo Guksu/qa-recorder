@@ -129,4 +129,42 @@ describe('RemoteDelivery.send', () => {
     const body: FormData = (fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body;
     expect(body.get('memo')).toBeNull();
   });
+
+  describe('함께 보내는 파일', () => {
+    const env = {
+      url: 'https://app.example.com/page', userAgent: 'UA', language: 'ko-KR', timeZone: 'Asia/Seoul',
+      viewport: { width: 1280, height: 720 }, screen: { width: 1920, height: 1080 },
+      devicePixelRatio: 2, savedAt: '2026-10-01T00:00:00.000Z', sdkVersion: '1.12.0',
+    };
+    const consoleLogs = [{ timestamp: '2026-10-01T00:00:00.000Z', level: 'error' as const, message: 'boom', _offsetMs: 0 }];
+
+    it('콘솔 로그, 통합 리포트, 환경 정보를 각각 console·report·env 필드로 보낸다', async () => {
+      const delivery = new RemoteDelivery('https://example.com/upload');
+      await delivery.send(null, makeHARLog(), 'memo', { consoleLogs, reportHtml: '<!DOCTYPE html><title>QA Report</title>', environment: env });
+
+      const body: FormData = (fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body;
+      const consoleFile = body.get('console') as File;
+      expect(consoleFile.name).toMatch(/^qa-console-.*\.json$/);
+      expect(JSON.parse(await consoleFile.text())).toEqual(consoleLogs);
+
+      const report = body.get('report') as File;
+      expect(report.name).toMatch(/^qa-report-.*\.html$/);
+      expect(report.type).toBe('text/html');
+      expect(await report.text()).toContain('<title>QA Report</title>');
+
+      const envFile = body.get('env') as File;
+      expect(envFile.name).toMatch(/^qa-env-.*\.json$/);
+      expect(JSON.parse(await envFile.text())).toEqual(env);
+      expect(body.get('memo')).toBe('memo');
+    });
+
+    it('넘기지 않은 파일은 보내지 않는다', async () => {
+      const delivery = new RemoteDelivery('https://example.com/upload');
+      await delivery.send(null, makeHARLog());
+      const body: FormData = (fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body;
+      expect(body.get('console')).toBeNull();
+      expect(body.get('report')).toBeNull();
+      expect(body.get('env')).toBeNull();
+    });
+  });
 });
