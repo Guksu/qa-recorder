@@ -192,9 +192,12 @@ const DEFAULT_CONFIG: Required<QARecorderConfig> = {
 
 /** 명시적으로 undefined가 담긴 키가 기본값을 덮어쓰지 않도록 제거 */
 function stripUndefined(config: QARecorderConfig): QARecorderConfig {
-  return Object.fromEntries(
-    Object.entries(config).filter(([, value]) => value !== undefined),
-  ) as QARecorderConfig;
+  // Object.fromEntries는 Chrome 73부터라 README의 지원 범위(Chrome 72+)에 맞춰 직접 만든다
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(config)) {
+    if (value !== undefined) result[key] = value;
+  }
+  return result as QARecorderConfig;
 }
 
 export function resolveConfig(overrides?: QARecorderConfig): Required<QARecorderConfig> {
