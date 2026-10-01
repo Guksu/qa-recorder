@@ -4,6 +4,7 @@ import type { HARLog } from '@qa-recorder/shared';
 
 const mocks = vi.hoisted(() => ({
   zipSync: vi.fn(),
+  zip: vi.fn(),
 }));
 
 vi.mock('fflate', () => ({
@@ -11,8 +12,14 @@ vi.mock('fflate', () => ({
     mocks.zipSync(entries);
     return new Uint8Array(4); // dummy bytes — only the call arg matters in tests
   },
+  zip: (entries: Record<string, Uint8Array>, cb: (err: Error | null, data: Uint8Array) => void) =>
+    mocks.zip(entries, cb),
   strToU8: (s: string) => new TextEncoder().encode(s),
 }));
+
+/** 비동기 zip 기본 동작: 성공해서 dummy bytes를 돌려준다 */
+const zipSucceeds = (_entries: unknown, cb: (err: Error | null, data: Uint8Array) => void) =>
+  cb(null, new Uint8Array(4));
 
 function makeHARLog(): HARLog {
   return {
@@ -32,6 +39,8 @@ describe('LocalStorage.save', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     mocks.zipSync.mockClear();
+    mocks.zip.mockReset();
+    mocks.zip.mockImplementation(zipSucceeds);
     clickedLinks = [];
     vi.stubGlobal('URL', {
       createObjectURL: vi.fn().mockReturnValue('blob:mock-url'),
@@ -60,7 +69,7 @@ describe('LocalStorage.save', () => {
   }
 
   function getZippedEntries(): Record<string, Uint8Array> {
-    return mocks.zipSync.mock.calls[0][0] as Record<string, Uint8Array>;
+    return mocks.zip.mock.calls[0][0] as Record<string, Uint8Array>;
   }
 
   function decode(data: Uint8Array): string {
@@ -148,5 +157,38 @@ describe('LocalStorage.save', () => {
     const entries = getZippedEntries();
     const htmlKey = Object.keys(entries).find(f => f.endsWith('.html'))!;
     expect(decode(entries[htmlKey])).toContain('결제 버튼 오류');
+  });
+
+  describe('압축', () => {
+    it('비동기 zip이 실패하면(예: CSP가 Worker를 막음) 같은 파일로 zipSync 압축해 다운로드한다', async () => {
+      mocks.zip.mockImplementation((_entries: unknown, cb: (err: Error | null, data: Uint8Array | null) => void) =>
+        cb(new Error('worker blocked'), null));
+      await saveAndFlush(makeEvents(), makeHARLog());
+      expect(mocks.zipSync).toHaveBeenCalledOnce();
+      expect(mocks.zipSync.mock.calls[0][0]).toBe(mocks.zip.mock.calls[0][0]);
+      expect(clickedLinks).toHaveLength(1);
+    });
+
+    it('비동기 zip 호출 자체가 throw해도 zipSync로 대신 압축한다', async () => {
+      mocks.zip.mockImplementation(() => { throw new Error('no Worker'); });
+      await saveAndFlush(makeEvents(), makeHARLog());
+      expect(mocks.zipSync).toHaveBeenCalledOnce();
+      expect(clickedLinks).toHaveLength(1);
+    });
+
+    it('비동기 zip이 성공하면 zipSync를 쓰지 않는다', async () => {
+      await saveAndFlush(makeEvents(), makeHARLog());
+      expect(mocks.zip).toHaveBeenCalledOnce();
+      expect(mocks.zipSync).not.toHaveBeenCalled();
+    });
+
+    it('직렬화·압축 전에 한 번 양보해 진행 막대가 먼저 그려지게 한다', async () => {
+      const p = LocalStorage.save(makeEvents(), makeHARLog());
+      await Promise.resolve();
+      expect(mocks.zip).not.toHaveBeenCalled(); // 아직 타이머(다음 그리기)를 기다리는 중
+      await vi.runAllTimersAsync();
+      await p;
+      expect(mocks.zip).toHaveBeenCalledOnce();
+    });
   });
 });
