@@ -6,7 +6,9 @@ export interface QARecorderConfig {
   /**
    * Remote upload URL. When set, recorded files are POSTed as `multipart/form-data`
    * instead of being downloaded locally. If the server returns `{ url: "..." }`,
-   * a share-link copy button is shown automatically.
+   * a share-link copy button is shown automatically. If the upload fails, the same data
+   * is downloaded as a local ZIP instead; if that also fails, the recording is kept so
+   * the user can try again.
    *
    * @default '' (local download)
    */
@@ -118,7 +120,9 @@ export interface QARecorderConfig {
    * Recording intensity preset. Controls rrweb's checkout interval and event sampling
    * to keep the in-memory buffer bounded on long or heavy pages. The last two checkout
    * segments are retained, so a save always includes at least one full interval of
-   * history (and at most two).
+   * history (and at most two). After a failed save, the kept recording is retained until
+   * the next checkout (counted from when recording resumed), so a later save may include
+   * more than two intervals.
    *
    * - `'light'`: 30-minute checkout, no sampling — retains the last 30–60 minutes
    * - `'normal'`: 20-minute checkout, no sampling — retains the last 20–40 minutes (default)

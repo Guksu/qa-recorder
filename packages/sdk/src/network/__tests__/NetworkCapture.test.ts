@@ -240,6 +240,35 @@ describe('NetworkCapture', () => {
       expect(capture.snapshot()[0].time).toBeGreaterThanOrEqual(0);
       capture.stop();
     });
+
+    it('ignoreUrls에 해당하는 요청은 기록하지 않고 나머지는 기록한다', async () => {
+      const mockFetch = makeMockFetch(500);
+      vi.stubGlobal('fetch', mockFetch);
+      const endpoint = 'https://qa.example.com/upload?token=SECRET';
+      const capture = new NetworkCapture(1, [], [], [endpoint]);
+      capture.start();
+
+      await window.fetch('https://example.com/api');
+      await window.fetch(endpoint, { method: 'POST', body: 'x' });
+      await window.fetch(new Request(`${endpoint}#frag`, { method: 'POST' }));
+
+      // 무시된 요청도 실제로는 전송되며, 순환 버퍼(최대 1건)에서 앱 요청을 밀어내지 않는다
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+      expect(capture.snapshot().map((e) => e.request.url)).toEqual(['https://example.com/api']);
+      capture.stop();
+    });
+
+    it('상대 경로 ignoreUrls는 페이지 URL 기준으로 해석해 비교한다', async () => {
+      vi.stubGlobal('fetch', makeMockFetch());
+      const capture = new NetworkCapture(100, [], [], ['/qa/upload']);
+      capture.start();
+
+      await window.fetch(new URL('/qa/upload', window.location.href).href, { method: 'POST' });
+      await window.fetch(new URL('/qa/upload/other', window.location.href).href);
+
+      expect(capture.snapshot().map((e) => new URL(e.request.url).pathname)).toEqual(['/qa/upload/other']);
+      capture.stop();
+    });
   });
 
   describe('XHR 인터셉터', () => {
@@ -298,6 +327,21 @@ describe('NetworkCapture', () => {
       expect(entries[0].request.postData?.text).toBe('{"key":"value"}');
       expect(entries[0].response.status).toBe(200);
       expect(entries[0].response.content.text).toBe('{"ok":true}');
+      capture.stop();
+    });
+
+    it('ignoreUrls에 해당하는 XHR 요청은 기록하지 않는다', () => {
+      const capture = new NetworkCapture(100, [], [], ['https://qa.example.com/upload']);
+      capture.start();
+
+      const ignored = new window.XMLHttpRequest();
+      ignored.open('POST', 'https://qa.example.com/upload');
+      ignored.send('x');
+      const kept = new window.XMLHttpRequest();
+      kept.open('GET', 'https://example.com/api');
+      kept.send();
+
+      expect(capture.snapshot().map((e) => e.request.url)).toEqual(['https://example.com/api']);
       capture.stop();
     });
 
@@ -397,6 +441,74 @@ describe('NetworkCapture', () => {
       xhr.send();
 
       expect(capture.snapshot()).toHaveLength(0);
+    });
+
+    it('원본 생성자의 커스텀 정적 멤버도 패치 후 조회된다', () => {
+      const capture = new NetworkCapture(100, []);
+      capture.start();
+
+      new window.XMLHttpRequest();
+      const Patched = window.XMLHttpRequest as unknown as typeof MockXHR;
+      expect(Patched).not.toBe(MockXHR);
+      expect(Patched.lastInstance).not.toBeNull();
+      expect(Patched.lastInstance).toBe(MockXHR.lastInstance);
+      capture.stop();
+    });
+  });
+
+  describe('XHR 정적 멤버 (jsdom 원본 XMLHttpRequest)', () => {
+    const STATE_CONSTANTS = ['UNSENT', 'OPENED', 'HEADERS_RECEIVED', 'LOADING', 'DONE'] as const;
+    let originalXHR: typeof XMLHttpRequest;
+
+    beforeEach(() => {
+      originalXHR = window.XMLHttpRequest;
+    });
+
+    afterEach(() => {
+      window.XMLHttpRequest = originalXHR;
+    });
+
+    it('start() 후에도 readyState 정적 상수 5개가 원본과 동일하다', () => {
+      expect(STATE_CONSTANTS.map((k) => originalXHR[k])).toEqual([0, 1, 2, 3, 4]);
+
+      const capture = new NetworkCapture(100, []);
+      capture.start();
+
+      expect(window.XMLHttpRequest).not.toBe(originalXHR);
+      for (const key of STATE_CONSTANTS) {
+        expect(window.XMLHttpRequest[key]).toBe(originalXHR[key]);
+      }
+      capture.stop();
+    });
+
+    it('start() 후에도 new XMLHttpRequest()는 instanceof XMLHttpRequest이다', () => {
+      const capture = new NetworkCapture(100, []);
+      capture.start();
+
+      const xhr = new window.XMLHttpRequest();
+      expect(xhr instanceof window.XMLHttpRequest).toBe(true);
+      expect(xhr instanceof originalXHR).toBe(true);
+      capture.stop();
+    });
+
+    it('호스트 앱의 readyState === XMLHttpRequest.OPENED 비교가 패치 후에도 동작한다', () => {
+      const capture = new NetworkCapture(100, []);
+      capture.start();
+
+      const xhr = new window.XMLHttpRequest();
+      expect(xhr.readyState).toBe(window.XMLHttpRequest.UNSENT);
+      xhr.open('GET', 'https://example.com/data');
+      expect(xhr.readyState).toBe(window.XMLHttpRequest.OPENED);
+      capture.stop();
+    });
+
+    it('stop() 후 원본 생성자가 복원되고 정적 상수도 유지된다', () => {
+      const capture = new NetworkCapture(100, []);
+      capture.start();
+      capture.stop();
+
+      expect(window.XMLHttpRequest).toBe(originalXHR);
+      expect(window.XMLHttpRequest.DONE).toBe(4);
     });
   });
 

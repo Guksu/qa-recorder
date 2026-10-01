@@ -201,6 +201,112 @@ describe('ScreenRecorder', () => {
     expect(mocks.record).toHaveBeenCalledOnce();
   });
 
+  describe('resume()', () => {
+    type Emit = (event: unknown, isCheckout?: boolean) => void;
+
+    /** record() 호출마다 emit 함수를 보관하고 Meta + FullSnapshot을 emit하는 mock */
+    function mockRecordSessions(): Emit[] {
+      const emits: Emit[] = [];
+      mocks.record.mockImplementation(({ emit }: { emit: Emit }) => {
+        emits.push(emit);
+        const t = emits.length * 1000;
+        emit({ type: 4, data: {}, timestamp: t });
+        emit({ type: 2, data: {}, timestamp: t + 1 });
+        return mocks.stopFn;
+      });
+      return emits;
+    }
+
+    const timestamps = (events: unknown[]) => events.map((e) => (e as { timestamp: number }).timestamp);
+    const types = (events: unknown[]) => events.map((e) => (e as { type: number }).type);
+
+    it('stopped 상태에서 기존 이벤트를 유지한 채 record()를 다시 시작한다', () => {
+      const emits = mockRecordSessions();
+      const recorder = new ScreenRecorder();
+      recorder.start();
+      emits[0]!({ type: 3, data: {}, timestamp: 1500 });
+      recorder.stop();
+
+      recorder.resume();
+
+      expect(mocks.record).toHaveBeenCalledTimes(2);
+      expect(timestamps(recorder.getEvents())).toEqual([1000, 1001, 1500, 2000, 2001]);
+    });
+
+    it('재개 후 이벤트는 [기존, 신규 Meta, FullSnapshot, ...] 순서라 그대로 재생 가능하다', () => {
+      const emits = mockRecordSessions();
+      const recorder = new ScreenRecorder();
+      recorder.start();
+      emits[0]!({ type: 3, data: {}, timestamp: 1500 });
+      recorder.stop();
+
+      recorder.resume();
+      emits[1]!({ type: 3, data: {}, timestamp: 2500 });
+
+      // 기존 구간 뒤에 새 FullSnapshot 기준 구간이 이어짐
+      expect(types(recorder.getEvents())).toEqual([4, 2, 3, 4, 2, 3]);
+    });
+
+    it('체크아웃 이전 구간까지 포함해 보존하고, 다음 체크아웃 때 보존된 이벤트는 폐기된다', () => {
+      const emits = mockRecordSessions();
+      const recorder = new ScreenRecorder();
+      recorder.start();
+      emits[0]!({ type: 4, data: {}, timestamp: 1100 }, true); // 체크아웃 → prevEvents로 이동
+      emits[0]!({ type: 2, data: {}, timestamp: 1101 });
+      recorder.stop();
+
+      recorder.resume();
+      expect(timestamps(recorder.getEvents())).toEqual([1000, 1001, 1100, 1101, 2000, 2001]);
+
+      emits[1]!({ type: 4, data: {}, timestamp: 3000 }, true);
+      expect(timestamps(recorder.getEvents())).toEqual([2000, 2001, 3000]);
+    });
+
+    it('재개 후 stop()은 새로 시작된 record()의 stop 함수를 호출한다', () => {
+      mockRecordSessions();
+      const recorder = new ScreenRecorder();
+      recorder.start();
+      recorder.stop();
+      recorder.resume();
+      recorder.stop();
+      expect(mocks.stopFn).toHaveBeenCalledTimes(2);
+    });
+
+    it('recording 중에 호출하면 아무 동작도 하지 않는다', () => {
+      const emits = mockRecordSessions();
+      const recorder = new ScreenRecorder();
+      recorder.start();
+      emits[0]!({ type: 3, data: {}, timestamp: 1500 });
+
+      recorder.resume();
+
+      expect(mocks.record).toHaveBeenCalledOnce();
+      expect(timestamps(recorder.getEvents())).toEqual([1000, 1001, 1500]);
+    });
+
+    it('idle 상태에서 호출하면 보존할 녹화가 없으므로 start()처럼 새로 녹화를 시작한다', () => {
+      mockRecordSessions();
+      const recorder = new ScreenRecorder();
+
+      recorder.resume();
+
+      expect(mocks.record).toHaveBeenCalledOnce();
+      expect(timestamps(recorder.getEvents())).toEqual([1000, 1001]);
+    });
+
+    it('reset() 후 호출하면 이전 녹화 없이 새로 시작한다', () => {
+      mockRecordSessions();
+      const recorder = new ScreenRecorder();
+      recorder.start();
+      recorder.stop();
+      recorder.reset();
+
+      recorder.resume();
+
+      expect(timestamps(recorder.getEvents())).toEqual([2000, 2001]);
+    });
+  });
+
   it('prependEvents()는 20분 이내 이벤트를 버퍼 앞에 추가한다', () => {
     const recorder = new ScreenRecorder();
     recorder.start();

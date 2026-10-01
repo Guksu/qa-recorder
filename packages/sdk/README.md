@@ -137,9 +137,11 @@ When no `endpoint` is configured, a single ZIP file is downloaded to the user's 
 | `qa-network-{timestamp}.har` | Network log (HAR 1.2) |
 | `qa-report-{timestamp}.html` | Unified QA report — session replay + network + console in one file |
 
+If saving fails, the recording is kept and continues, so you can save again.
+
 ### Remote upload
 
-Set an `endpoint` to POST files to your server instead. On success, if the server returns a `url` field, a share-link copy button is shown automatically.
+Set an `endpoint` to POST files to your server instead. On success, if the server returns a `url` field, a share-link copy button is shown automatically. If the upload fails, the same data is downloaded as a local ZIP instead; if that also fails, the recording is kept so you can try again.
 
 ```ts
 const recorder = new QARecorder({
