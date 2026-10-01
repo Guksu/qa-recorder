@@ -2,6 +2,16 @@ import type { HARLog } from '@qa-recorder/shared';
 import type { ConsoleEntry } from '../console/ConsoleCapture.js';
 import { toScriptJson } from './scriptJson.js';
 
+/**
+ * 리포트가 불러오는 rrweb 재생기. integrity는 npm rrweb@1.1.3의 dist/rrweb.min.js의 SHA-384이며
+ * jsdelivr가 서빙하는 같은 파일과 해시가 일치한다. 파일이 바뀌면 브라우저가 실행을 막는다 (리포트에는 캡처 데이터가 담겨 있다).
+ * rrweb 버전을 올리면 이 값도 다시 계산해야 한다.
+ */
+const RRWEB_SCRIPT = {
+  src: 'https://cdn.jsdelivr.net/npm/rrweb@1.1.3/dist/rrweb.min.js',
+  integrity: 'sha384-lIPruYh4QgKHQNsZLWK/05lMi/1akHFm+3AWXsHS7s1RuNc+xq16cGby8i1FiV4h',
+};
+
 export class UnifiedViewer {
   static generate(events: unknown[], harLog: HARLog, consoleLogs: ConsoleEntry[], memo = ''): string {
     /* _offsetMs는 녹화 시작 시점 기준이지만 리플레이 타임라인의 원점은
@@ -162,10 +172,10 @@ export class UnifiedViewer {
     .tl-marker {
       position: absolute;
       top: 50%;
-      transform: translateY(-50%);
+      transform: translate(-50%, -50%);
       width: 6px; height: 6px;
       border-radius: 50%;
-      pointer-events: none;
+      cursor: pointer;
       z-index: 2;
     }
     .tl-marker-net { background: #4285f4; }
@@ -308,6 +318,7 @@ export class UnifiedViewer {
     .s-3xx { color: #1967d2; }
     .s-4xx { color: #b06000; }
     .s-5xx { color: #c5221f; }
+    .s-fail { color: #c5221f; font-weight: 600; }
     tr.net-row:hover td { background: #f8f9fa; }
     tr.net-row.net-active td { background: #e8f0fe !important; }
     tr.net-row.net-past td { opacity: 0.45; }
@@ -418,6 +429,11 @@ export class UnifiedViewer {
     .lvl-info  { color: #1967d2; }
     .con-msg { flex: 1; word-break: break-all; white-space: pre-wrap; color: #202124; font-family: monospace; font-size: 11px; }
     #con-empty { padding: 20px; color: #80868b; font-size: 12px; text-align: center; }
+    .con-stack-toggle { flex-shrink: 0; color: #80868b; font-size: 10px; cursor: pointer; user-select: none; }
+    .con-stack-toggle:hover { color: #202124; }
+    .con-stack { display: none; margin: 4px 0 0; color: #5f6368; font-size: 10px; white-space: pre-wrap; word-break: break-all; }
+    .con-row.expanded .con-stack { display: block; }
+    .player-unavailable { max-width: 420px; padding: 24px; color: #5f6368; font-size: 13px; line-height: 1.6; text-align: center; }
   </style>
 </head>
 <body>
@@ -530,7 +546,7 @@ export class UnifiedViewer {
     </div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/rrweb@1.1.3/dist/rrweb.min.js"></script>
+  <script src="${RRWEB_SCRIPT.src}" integrity="${RRWEB_SCRIPT.integrity}" crossorigin="anonymous"></script>
   <script>
     const EVENTS       = ${eventsJson};
     const NET_ENTRIES  = ${entriesJson};
@@ -565,6 +581,7 @@ export class UnifiedViewer {
       return ({GET:'m-get',POST:'m-post',PUT:'m-put',PATCH:'m-patch',DELETE:'m-delete'})[m.toUpperCase()] || 'm-other';
     }
     function statusClass(s) {
+      if (!s) return 's-fail'; /* status 0 = 네트워크 오류·CORS·중단 */
       if (s>=500) return 's-5xx'; if (s>=400) return 's-4xx';
       if (s>=300) return 's-3xx'; return 's-2xx';
     }
@@ -574,10 +591,20 @@ export class UnifiedViewer {
     const playerWrap = document.getElementById('player-wrap');
     const player     = document.getElementById('player');
 
-    const replayer = EVENTS.length ? new rrweb.Replayer(EVENTS, {
-      root: player, skipInactive: true, speed: 1,
-      showWarning: false, showDebug: false,
-    }) : null;
+    /* rrweb을 불러오지 못하면(오프라인, 차단, integrity 불일치) 재생만 빼고 네트워크·콘솔 패널은 그대로 쓸 수 있게 한다 */
+    let replayer = null;
+    if (EVENTS.length) {
+      try {
+        replayer = new rrweb.Replayer(EVENTS, {
+          root: player, skipInactive: true, speed: 1,
+          showWarning: false, showDebug: false,
+        });
+      } catch (err) {
+        player.className = 'player-unavailable';
+        player.textContent = 'Session replay is unavailable: the rrweb player could not be loaded from cdn.jsdelivr.net ' +
+          '(offline, blocked, or failed the integrity check). Network and console logs below still work.';
+      }
+    }
 
     function fit() {
       if (!replayer) return;
@@ -599,7 +626,7 @@ export class UnifiedViewer {
     window.addEventListener('resize', fit);
 
     /* ── Playback state ── */
-    let playing = false, speed = 1, elapsed = 0, lastWall = 0, ticker = null;
+    let playing = false, elapsed = 0, ticker = null;
 
     function updateUI() {
       const pct = totalMs > 0 ? Math.min(100, elapsed / totalMs * 100) : 0;
@@ -608,21 +635,24 @@ export class UnifiedViewer {
       syncPanels(elapsed);
     }
 
+    /* skipInactive로 재생기가 아무 일 없는 구간을 빠르게 넘기므로, 벽시계가 아니라 재생기의 현재 위치를 따른다 */
     function startTicker() {
-      lastWall = Date.now();
       ticker = setInterval(() => {
-        elapsed += (Date.now() - lastWall) * speed;
-        lastWall = Date.now();
-        if (elapsed >= totalMs) {
-          elapsed = totalMs;
-          stopTicker();
-          setPlayIcon(false);
-          playing = false;
-        }
+        elapsed = Math.max(0, Math.min(totalMs, replayer.getCurrentTime()));
         updateUI();
       }, 80);
     }
     function stopTicker() { clearInterval(ticker); ticker = null; }
+
+    if (replayer) {
+      replayer.on('finish', () => {
+        elapsed = totalMs;
+        stopTicker();
+        playing = false;
+        setPlayIcon(false);
+        updateUI();
+      });
+    }
 
     function setPlayIcon(p) {
       document.getElementById('icon-play').style.display  = p ? 'none' : '';
@@ -640,9 +670,7 @@ export class UnifiedViewer {
     };
 
     window.setSpeed = (s, e) => {
-      speed = s;
       if (replayer) replayer.setConfig({ speed: s });
-      if (playing) { stopTicker(); startTicker(); }
       document.querySelectorAll('.speed-btn').forEach(b => b.classList.remove('active'));
       e.target.classList.add('active');
     };
@@ -680,7 +708,7 @@ export class UnifiedViewer {
       tr.innerHTML =
         '<td class="col-name" title="' + esc(e.request.url) + '">' + esc(getPath(e.request.url)) + '</td>' +
         '<td class="col-method"><span class="method-badge ' + methodClass(e.request.method) + '">' + esc(e.request.method) + '</span></td>' +
-        '<td class="col-status ' + statusClass(e.response.status) + '">' + e.response.status + '</td>' +
+        '<td class="col-status ' + statusClass(e.response.status) + '">' + (e.response.status || 'failed') + '</td>' +
         '<td class="col-time">' + Math.round(e.time) + ' ms</td>';
 
       tr.addEventListener('click', () => { showNetDetail(i, tr); seekToOffset(parseFloat(tr.dataset.start)); });
@@ -722,8 +750,19 @@ export class UnifiedViewer {
         div.innerHTML =
           '<span class="con-time">' + fmt(e._offsetMs) + '</span>' +
           '<span class="con-level lvl-' + e.level + '">' + e.level.toUpperCase() + '</span>' +
-          '<span class="con-msg">' + esc(e.message) + '</span>';
+          '<span class="con-msg">' + esc(e.message) +
+            (e.stack ? '<pre class="con-stack">' + esc(e.stack) + '</pre>' : '') +
+          '</span>' +
+          (e.stack ? '<span class="con-stack-toggle">▶ stack</span>' : '');
         div.addEventListener('click', () => seekToOffset(e._offsetMs));
+        const toggle = div.querySelector('.con-stack-toggle');
+        if (toggle) {
+          toggle.addEventListener('click', (ev) => {
+            ev.stopPropagation(); /* 펼치기만 하고 재생 위치는 옮기지 않는다 */
+            const expanded = div.classList.toggle('expanded');
+            toggle.textContent = expanded ? '▼ stack' : '▶ stack';
+          });
+        }
         conList.appendChild(div);
       });
     }
@@ -841,6 +880,28 @@ export class UnifiedViewer {
       }
       updateUI();
     }
+
+    /* ── Timeline markers: 네트워크 요청과 콘솔 에러·경고 위치. 누르면 그 시점으로 이동 ── */
+    function addMarker(offsetMs, cls, label) {
+      if (!(totalMs > 0)) return;
+      const marker = document.createElement('div');
+      marker.className = 'tl-marker ' + cls;
+      marker.style.left = Math.max(0, Math.min(100, offsetMs / totalMs * 100)) + '%';
+      marker.title = label;
+      /* 타임라인의 mousedown(클릭 위치로 이동)보다 마커의 정확한 시점을 우선한다 */
+      marker.addEventListener('mousedown', (ev) => { ev.stopPropagation(); seekToOffset(offsetMs); });
+      timelineTrack.appendChild(marker);
+    }
+    NET_ENTRIES.forEach((e) => {
+      const failed = !e.response.status || e.response.status >= 400;
+      addMarker(e._offsetMs || 0, failed ? 'tl-marker-err' : 'tl-marker-net',
+        e.request.method + ' ' + e.request.url + ' → ' + (e.response.status || 'failed'));
+    });
+    CON_LOGS.forEach((e) => {
+      if (e.level !== 'error' && e.level !== 'warn') return;
+      addMarker(e._offsetMs || 0, e.level === 'error' ? 'tl-marker-err' : 'tl-marker-warn',
+        e.level.toUpperCase() + ': ' + e.message);
+    });
 
     /* ── Right panel tab switching ── */
     document.querySelectorAll('.right-tab').forEach(tab => {
