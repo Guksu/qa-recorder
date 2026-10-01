@@ -12,9 +12,14 @@ export class NetworkCapture {
   private recordingStartedAt: Date | null = null;
   private readonly maskSet: Set<string>;
 
+  /**
+   * @param ignoreUrls 캡처하지 않을 URL 목록 (녹화기 자체의 업로드 endpoint 등).
+   *   상대 경로는 요청 시점의 페이지 URL 기준으로 해석하고 fragment는 무시하고 비교한다.
+   */
   constructor(
     private readonly maxRequests: number,
     maskHeaders: string[],
+    private readonly ignoreUrls: string[] = [],
   ) {
     this.maskSet = new Set(maskHeaders.map((h) => h.toLowerCase()));
     this.originalFetch = window.fetch;
@@ -46,6 +51,12 @@ export class NetworkCapture {
   /** 백업에서 복원된 엔트리를 버퍼 앞에 추가 (maxRequests 초과분 앞에서 제거) */
   restoreEntries(entries: HAREntry[]): void {
     this.buffer = [...entries, ...this.buffer].slice(-this.maxRequests);
+  }
+
+  private isIgnored(url: string): boolean {
+    if (this.ignoreUrls.length === 0) return false;
+    const target = normalizeUrl(url);
+    return target !== null && this.ignoreUrls.some((ignored) => normalizeUrl(ignored) === target);
   }
 
   private push(entry: HAREntry): HAREntry {
@@ -93,6 +104,7 @@ export class NetworkCapture {
   ): void {
     try {
       const { method, url, headers } = describeFetchRequest(input, init);
+      if (this.isIgnored(url)) return;
 
       let postData: { mimeType: string; text: string } | undefined;
       if (init?.body) {
@@ -191,6 +203,7 @@ export class NetworkCapture {
         if (typeof body === 'string') requestBody = body;
 
         xhr.addEventListener('loadend', () => {
+          if (self.isIgnored(url)) return;
           const elapsed = performance.now() - startTime;
           const responseHeaders = xhr.getAllResponseHeaders()
             .trim().split('\r\n')
@@ -264,6 +277,17 @@ export class NetworkCapture {
     PatchedXHR.prototype = OriginalXHR.prototype;
     (window as Window & { XMLHttpRequest: typeof XMLHttpRequest }).XMLHttpRequest =
       PatchedXHR as unknown as typeof XMLHttpRequest;
+  }
+}
+
+/** 비교용 URL 정규화 (상대 경로 해석, fragment 제거). 파싱 실패 시 null */
+function normalizeUrl(url: string): string | null {
+  try {
+    const parsed = new URL(url, window.location.href);
+    parsed.hash = '';
+    return parsed.href;
+  } catch {
+    return null;
   }
 }
 
