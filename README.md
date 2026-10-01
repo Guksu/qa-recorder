@@ -40,8 +40,9 @@ No backend required. No browser extension. No screen share permission. Just add 
 | 📦 | **Local save** | Downloads a single ZIP file directly — no backend needed. |
 | ☁️ | **Remote upload** | Optionally POST files to your own server. Shows a share-link copy button on success. |
 | 📝 | **Bug memo** | Optional text note added at save time — embedded in the unified HTML report and sent with remote uploads. |
+| 🧭 | **Environment info** | Browser (user agent), language, time zone, viewport and screen size, device pixel ratio, the page URL (masked with `maskKeys`) and the SDK version are saved with every report — shown in the report's **Environment** tab, stored as `qa-env-*.json` and sent with remote uploads. Document title and referrer are not collected. |
 | 💾 | **Session continuity** | `enableBackup: true` auto-saves the session to sessionStorage on tab hide and silently restores it after a page refresh or navigation — no prompts, no data loss. (Note: data is cleared when the tab is closed.) |
-| 🧩 | **Shadow DOM UI** | Floating button and modals are fully isolated from the host page's styles. |
+| 🧩 | **Shadow DOM UI** | Floating button and modals are fully isolated from the host page's styles. Drag the button out of the way with a mouse, finger or pen. |
 
 ---
 
@@ -132,9 +133,10 @@ When no `endpoint` is configured, a single ZIP file is downloaded to the user's 
 
 | File | Contents |
 |---|---|
-| `qa-report-{timestamp}.zip` | Contains all three files below |
+| `qa-report-{timestamp}.zip` | Contains the files below |
 | `qa-session-{timestamp}.rr.json` | DOM session replay (rrweb events) |
 | `qa-network-{timestamp}.har` | Network log (HAR 1.2) |
+| `qa-env-{timestamp}.json` | Environment info (browser, language, time zone, viewport, masked page URL, SDK version) |
 | `qa-report-{timestamp}.html` | Unified QA report — session replay + network + console in one file |
 
 If saving fails, the recording is kept and continues, so you can save again.
@@ -162,6 +164,9 @@ The files are sent as `multipart/form-data`:
 POST /upload
   session  →  qa-session-{timestamp}.rr.json
   har      →  qa-network-{timestamp}.har
+  console  →  qa-console-{timestamp}.json   (console log entries)
+  report   →  qa-report-{timestamp}.html    (unified QA report)
+  env      →  qa-env-{timestamp}.json       (environment info)
   memo     →  (optional) bug memo text entered by the user
 ```
 
@@ -246,6 +251,7 @@ User clicks the button
                                    qa-report-*.zip
                                      ├─ qa-session-*.rr.json
                                      ├─ qa-network-*.har
+                                     ├─ qa-env-*.json
                                      └─ qa-report-*.html  ← unified viewer
 
   └─ ScreenRecorder.reset() + start()   → recording resumes immediately

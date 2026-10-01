@@ -6,6 +6,8 @@ import path from 'path';
 
 const UPLOADS_PREFIX = '/uploads/';
 const INDEX_FILE = 'index.html';
+/** 업로드 파일에 붙이는 CSP — 고유 origin에서 열되 스크립트는 허용 */
+const UPLOAD_CSP = 'sandbox allow-scripts';
 
 // busboy는 urlencoded 본문도 받아들이므로 multipart/form-data인지 직접 확인한다
 const MULTIPART_FORM_DATA = /^\s*multipart\/form-data\s*(?:;|$)/i;
@@ -307,8 +309,10 @@ function createServeHandler(root: string): Connect.NextHandleFunction {
 
     res.setHeader('Content-Type', MIME[path.extname(file)] ?? 'application/octet-stream');
     res.setHeader('X-Content-Type-Options', 'nosniff');
-    // 업로드된 파일은 LAN의 누구나 올릴 수 있는 내용이다 — HTML이어도 dev origin에서 스크립트가 돌지 않게 격리
-    if (!isGeneratedIndex(root, file)) res.setHeader('Content-Security-Policy', 'sandbox');
+    // 업로드된 파일은 LAN의 누구나 올릴 수 있는 내용이다 — sandbox로 dev origin과 분리된 고유(opaque) origin에서 연다.
+    // 업로드된 QA 리포트(qa-report-*.html)의 재생기가 동작하도록 스크립트만 허용한다 (allow-same-origin은 주지 않으므로
+    // 스크립트가 돌아도 dev origin의 쿠키·저장소에는 접근하지 못한다)
+    if (!isGeneratedIndex(root, file)) res.setHeader('Content-Security-Policy', UPLOAD_CSP);
     res.end(fs.readFileSync(file));
   };
 }
@@ -332,7 +336,7 @@ export interface UploadMockPluginApi {
 /**
  * `pnpm demo` 전용 업로드 목 서버.
  * RemoteDelivery가 보내는 multipart를 uploadsDir/<timestamp>/ 에 저장하고 GET /uploads/* 로 다시 서빙한다.
- * 업로드 파일은 sandbox 헤더(Content-Security-Policy: sandbox, X-Content-Type-Options: nosniff)를 붙이는
+ * 업로드 파일은 sandbox 헤더(Content-Security-Policy: sandbox allow-scripts, X-Content-Type-Options: nosniff)를 붙이는
  * GET /uploads/* 로만 서빙하려는 것이고, '/uploads/'로 시작하는 요청은 없는 파일이어도(404) 모두 이 플러그인이 응답한다.
  *
  * uploadsDir는 Vite root와 server.fs.allow 밖이어야 한다 (vite.config.ts는 시작할 때마다 새로 만든 임시 디렉터리를 넘긴다).

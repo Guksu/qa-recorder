@@ -1,9 +1,16 @@
 import type { HARLog } from '@qa-recorder/shared';
 import type { ConsoleEntry } from '../console/ConsoleCapture.js';
 import { toScriptJson } from './scriptJson.js';
+import type { EnvironmentInfo } from '../core/environment.js';
 
 export class UnifiedViewer {
-  static generate(events: unknown[], harLog: HARLog, consoleLogs: ConsoleEntry[], memo = ''): string {
+  static generate(
+    events: unknown[],
+    harLog: HARLog,
+    consoleLogs: ConsoleEntry[],
+    memo = '',
+    environment?: EnvironmentInfo,
+  ): string {
     /* _offsetMs는 녹화 시작 시점 기준이지만 리플레이 타임라인의 원점은
      * EVENTS[0].timestamp(마지막 체크아웃 시점)다. 체크아웃이나 백업 복원 이후에는
      * 두 원점이 어긋나므로, 절대 시각을 기준으로 리플레이 원점 대비 오프셋을 재계산한다. */
@@ -17,6 +24,7 @@ export class UnifiedViewer {
     const eventsJson  = toScriptJson(events);
     const entriesJson = toScriptJson(harLog.entries.map((e) => syncOffset(e, e.startedDateTime)));
     const consoleJson = toScriptJson(consoleLogs.map((c) => syncOffset(c, c.timestamp)));
+    const envJson     = toScriptJson(environment ?? null);
     const memoHtml    = memo
       ? `<div id="qa-memo-section" class="qa-memo"><span class="qa-memo-icon">📝</span><span class="qa-memo-text">${memo.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span></div>`
       : '';
@@ -473,6 +481,7 @@ export class UnifiedViewer {
         <div class="right-tab" data-panel="console">
           Console <span id="con-badge" style="font-size:10px;color:#80868b;margin-left:4px"></span>
         </div>
+        <div class="right-tab" data-panel="environment">Environment</div>
       </div>
 
       <div id="network" class="right-panel active">
@@ -527,6 +536,10 @@ export class UnifiedViewer {
         </div>
         <div id="con-list"></div>
       </div>
+
+      <div id="environment" class="right-panel">
+        <div id="env-body"></div>
+      </div>
     </div>
   </div>
 
@@ -535,6 +548,7 @@ export class UnifiedViewer {
     const EVENTS       = ${eventsJson};
     const NET_ENTRIES  = ${entriesJson};
     const CON_LOGS     = ${consoleJson};
+    const ENV          = ${envJson};
 
     const totalMs = EVENTS.length > 1
       ? EVENTS[EVENTS.length - 1].timestamp - EVENTS[0].timestamp
@@ -851,6 +865,28 @@ export class UnifiedViewer {
         document.getElementById(tab.dataset.panel).classList.add('active');
       });
     });
+
+    /* ── Environment: 저장 시점의 브라우저·화면 정보 ── */
+    (function renderEnvironment() {
+      const envBody = document.getElementById('env-body');
+      if (!ENV) {
+        envBody.innerHTML = '<p style="padding:20px;color:#80868b;font-size:12px;text-align:center">No environment information recorded</p>';
+        return;
+      }
+      const rows = [
+        ['Page URL', ENV.url],
+        ['Saved at', new Date(ENV.savedAt).toLocaleString() + ' (' + ENV.savedAt + ')'],
+        ['Browser', ENV.userAgent],
+        ['Language', ENV.language],
+        ['Time zone', ENV.timeZone || '-'],
+        ['Viewport', ENV.viewport.width + ' × ' + ENV.viewport.height],
+        ['Screen', ENV.screen.width + ' × ' + ENV.screen.height + ' @' + ENV.devicePixelRatio + 'x'],
+        ['SDK version', ENV.sdkVersion],
+      ];
+      envBody.innerHTML = '<table class="kv-table">' +
+        rows.map(([name, value]) => '<tr><td>' + esc(name) + '</td><td>' + esc(String(value)) + '</td></tr>').join('') +
+        '</table>';
+    })();
 
     updateUI();
   </script>

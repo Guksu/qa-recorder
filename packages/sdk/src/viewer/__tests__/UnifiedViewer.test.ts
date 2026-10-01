@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { JSDOM } from 'jsdom';
 import { UnifiedViewer } from '../UnifiedViewer.js';
 import type { HARLog, HAREntry } from '@qa-recorder/shared';
 import type { ConsoleEntry } from '../../console/ConsoleCapture.js';
@@ -175,5 +176,43 @@ describe('UnifiedViewer.generate', () => {
     const html = UnifiedViewer.generate(EVENTS, makeHARLog(), [], '<img src=x onerror=alert(1)>');
     expect(html).not.toContain('<img src=x');
     expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;');
+  });
+
+  describe('Environment 탭', () => {
+    const ENV = {
+      url: 'https://app.example.com/checkout?step=2', userAgent: 'Mozilla/5.0 <TestUA>', language: 'ko-KR',
+      timeZone: 'Asia/Seoul', viewport: { width: 390, height: 844 }, screen: { width: 390, height: 844 },
+      devicePixelRatio: 3, savedAt: '2026-10-01T00:00:00.000Z', sdkVersion: '1.12.0',
+    };
+
+    /** 리포트를 jsdom에서 실행한다 (CDN의 rrweb 대신 가짜 재생기) */
+    function run(html: string) {
+      const fake = '<script>window.rrweb = { Replayer: class { on() {} play() {} pause() {} setConfig() {} getCurrentTime() { return 0; } } };</script>';
+      const dom = new JSDOM(html.replace(/<script src="https:\/\/cdn\.jsdelivr\.net[^>]*><\/script>/, fake), {
+        runScripts: 'dangerously', pretendToBeVisual: true,
+      });
+      return dom;
+    }
+
+    it('환경 정보를 표로 보여주고, 값은 HTML로 해석하지 않는다', () => {
+      const dom = run(UnifiedViewer.generate(EVENTS, makeHARLog(), [], '', ENV));
+      const doc = dom.window.document;
+      expect(doc.querySelector('.right-tab[data-panel="environment"]')!.textContent).toBe('Environment');
+      const rows = Array.from(doc.querySelectorAll('#env-body tr')).map((tr) =>
+        Array.from(tr.querySelectorAll('td')).map((td) => td.textContent));
+      expect(rows).toContainEqual(['Page URL', 'https://app.example.com/checkout?step=2']);
+      expect(rows).toContainEqual(['Browser', 'Mozilla/5.0 <TestUA>']);
+      expect(rows).toContainEqual(['Viewport', '390 × 844']);
+      expect(rows).toContainEqual(['Screen', '390 × 844 @3x']);
+      expect(rows).toContainEqual(['SDK version', '1.12.0']);
+      expect(doc.querySelector('#env-body testua')).toBeNull();
+      dom.window.close();
+    });
+
+    it('환경 정보 없이 만든 리포트는 안내 문구를 보여준다', () => {
+      const dom = run(UnifiedViewer.generate(EVENTS, makeHARLog(), []));
+      expect(dom.window.document.getElementById('env-body')!.textContent).toContain('No environment information recorded');
+      dom.window.close();
+    });
   });
 });
