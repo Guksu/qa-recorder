@@ -11,7 +11,7 @@ export interface ConsoleEntry {
 export class ConsoleCapture {
   private buffer: ConsoleEntry[] = [];
   private originalMethods: Partial<Record<ConsoleLevel, (...args: unknown[]) => void>> = {};
-  private originalOnError: typeof window.onerror = null;
+  private errorHandler: ((e: ErrorEvent) => void) | null = null;
   private unhandledRejectionHandler: ((e: PromiseRejectionEvent) => void) | null = null;
   private recordingStartedAt: Date | null = null;
 
@@ -21,6 +21,8 @@ export class ConsoleCapture {
   ) {}
 
   start(): void {
+    // 두 번 시작하면 이미 패치된 console 메서드를 "원본"으로 저장해 stop()이 원래대로 되돌리지 못한다
+    if (this.errorHandler) return;
     this.recordingStartedAt = new Date();
 
     for (const level of this.levels) {
@@ -33,17 +35,23 @@ export class ConsoleCapture {
       };
     }
 
-    this.originalOnError = window.onerror;
-    window.onerror = (message, source, lineno, colno, error) => {
+    // window.onerror를 덮어쓰면 앱이 나중에 onerror를 설정할 때 캡처가 조용히 멈추고, stop()이 앱의 핸들러를 지운다.
+    // 리스너는 앱의 onerror와 독립적으로 동작한다 (리소스 로드 에러는 window까지 버블링되지 않으므로 onerror와 같은 범위)
+    this.errorHandler = (e: ErrorEvent) => {
       const parts = [
-        `[Uncaught] ${message}`,
-        source ? `at ${source}:${lineno}:${colno}` : '',
+        `[Uncaught] ${e.message}`,
+        e.filename ? `at ${e.filename}:${e.lineno}:${e.colno}` : '',
       ].filter(Boolean);
-      this.push('error', parts, error?.stack);
-      return typeof this.originalOnError === 'function'
-        ? (this.originalOnError(message, source, lineno, colno, error) as boolean)
-        : false;
+      let stack: string | undefined;
+      try {
+        const value = (e.error as { stack?: unknown } | null | undefined)?.stack;
+        stack = typeof value === 'string' ? value : undefined;
+      } catch {
+        /* stack getter가 throw하면 stack 없이 기록 */
+      }
+      this.push('error', parts, stack);
     };
+    window.addEventListener('error', this.errorHandler);
 
     this.unhandledRejectionHandler = (e: PromiseRejectionEvent) => {
       const msg = e.reason instanceof Error
@@ -62,8 +70,10 @@ export class ConsoleCapture {
       }
     }
 
-    window.onerror = this.originalOnError;
-    this.originalOnError = null;
+    if (this.errorHandler) {
+      window.removeEventListener('error', this.errorHandler);
+      this.errorHandler = null;
+    }
 
     if (this.unhandledRejectionHandler) {
       window.removeEventListener('unhandledrejection', this.unhandledRejectionHandler);
