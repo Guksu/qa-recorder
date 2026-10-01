@@ -309,7 +309,7 @@ The `qa-report-{timestamp}.html` file is a fully self-contained QA report — no
 ```bash
 pnpm install
 
-pnpm -F qa-recorder test      # run 164 tests (Vitest + jsdom)
+pnpm -F qa-recorder test      # run tests (Vitest + jsdom)
 pnpm -F qa-recorder build     # build ESM + UMD to dist/
 pnpm -F qa-recorder dev       # watch mode
 pnpm -F qa-recorder demo      # local demo server (http://localhost:5173)
