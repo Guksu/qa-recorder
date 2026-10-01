@@ -3,6 +3,11 @@ import { ConsoleCapture } from '../ConsoleCapture.js';
 
 let capture: ConsoleCapture;
 
+/** 브라우저가 잡히지 않은 에러를 보고할 때처럼 window에 ErrorEvent를 보낸다 */
+function dispatchUncaught(message: string, filename = '', lineno = 0, colno = 0, error?: unknown): void {
+  window.dispatchEvent(new ErrorEvent('error', { message, filename, lineno, colno, error }));
+}
+
 beforeEach(() => {
   capture = new ConsoleCapture();
 });
@@ -80,12 +85,70 @@ describe('ConsoleCapture', () => {
     expect(entries[1].message).toContain('third');
   });
 
-  it('window.onerror 발생 시 error로 기록된다', () => {
+  it('잡히지 않은 에러(window error 이벤트)는 error로 기록된다', () => {
     capture.start();
-    window.onerror?.('Uncaught TypeError', 'app.js', 10, 5, new Error('Uncaught TypeError'));
+    dispatchUncaught('Uncaught TypeError', 'app.js', 10, 5, new Error('Uncaught TypeError'));
     expect(capture.snapshot()).toHaveLength(1);
     expect(capture.snapshot()[0].level).toBe('error');
     expect(capture.snapshot()[0].message).toContain('Uncaught TypeError');
+  });
+
+  describe('호스트 앱과의 공존', () => {
+    afterEach(() => {
+      window.onerror = null;
+    });
+
+    it('start() 후 앱이 window.onerror를 설정해도 잡히지 않은 에러를 계속 기록한다', () => {
+      capture.start();
+      const appHandler = vi.fn();
+      window.onerror = appHandler;
+      dispatchUncaught('after app handler', 'app.js', 1, 1);
+      expect(capture.snapshot().map((e) => e.message)).toEqual(['[Uncaught] after app handler at app.js:1:1']);
+      // 캡처는 앱의 핸들러를 감싸거나 바꾸지 않는다
+      expect(window.onerror).toBe(appHandler);
+    });
+
+    it('start()와 stop()은 앱이 설정한 window.onerror를 바꾸지 않는다', () => {
+      const appHandler = vi.fn();
+      window.onerror = appHandler;
+      capture.start();
+      expect(window.onerror).toBe(appHandler);
+      capture.stop();
+      expect(window.onerror).toBe(appHandler);
+    });
+
+    it('stop() 후에는 잡히지 않은 에러를 기록하지 않는다', () => {
+      capture.start();
+      capture.stop();
+      dispatchUncaught('after stop');
+      expect(capture.snapshot()).toHaveLength(0);
+    });
+
+    it('start()를 두 번 호출해도 한 번만 기록하고, stop() 후 console 메서드가 원래대로 돌아온다', () => {
+      const original = console.warn;
+      const spy = vi.fn();
+      console.warn = spy;
+      try {
+        const twice = new ConsoleCapture(10, ['warn']);
+        twice.start();
+        twice.start();
+        console.warn('once');
+        expect(twice.snapshot()).toHaveLength(1);
+        expect(spy).toHaveBeenCalledOnce();
+        twice.stop();
+        expect(console.warn).toBe(spy);
+      } finally {
+        console.warn = original;
+      }
+    });
+
+    it('error 객체의 stack getter가 throw해도 stack 없이 기록한다', () => {
+      const hostile = { get stack(): string { throw new Error('no stack'); } };
+      capture.start();
+      expect(() => dispatchUncaught('hostile', 'app.js', 2, 3, hostile)).not.toThrow();
+      expect(capture.snapshot()[0]).toMatchObject({ message: '[Uncaught] hostile at app.js:2:3' });
+      expect(capture.snapshot()[0].stack).toBeUndefined();
+    });
   });
 
   it('각 엔트리에 timestamp가 포함된다', () => {
@@ -265,19 +328,19 @@ describe('ConsoleCapture', () => {
       expect(capture.snapshot()[0].stack).toBeUndefined();
     });
 
-    it('window.onerror 경로는 전달받은 error의 stack을 그대로 사용한다', () => {
+    it('window error 이벤트 경로는 전달받은 error의 stack을 그대로 사용한다', () => {
       const err = new Error('Uncaught TypeError');
       err.stack = 'TypeError: explicit\n    at app.js:10:5';
       capture.start();
-      window.onerror?.('Uncaught TypeError', 'app.js', 10, 5, err);
+      dispatchUncaught('Uncaught TypeError', 'app.js', 10, 5, err);
       const entry = capture.snapshot()[0];
       expect(entry.message).toBe('[Uncaught] Uncaught TypeError at app.js:10:5');
       expect(entry.stack).toBe('TypeError: explicit\n    at app.js:10:5');
     });
 
-    it('window.onerror에 error 객체가 없으면 stack이 기록되지 않는다', () => {
+    it('window error 이벤트에 error 객체가 없으면 stack이 기록되지 않는다', () => {
       capture.start();
-      window.onerror?.('Script error.', '', 0, 0, undefined);
+      dispatchUncaught('Script error.');
       const entry = capture.snapshot()[0];
       expect(entry.message).toBe('[Uncaught] Script error.');
       expect(entry.stack).toBeUndefined();

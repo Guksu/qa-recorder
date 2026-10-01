@@ -31,7 +31,7 @@ export class QARecorder {
   static setup(config?: QARecorderConfig): void {
     if (!QARecorder._instance) {
       QARecorder._instance = new QARecorder(config);
-      QARecorder._instance.init();
+      QARecorder._instance.init().catch(console.error);
     }
   }
 
@@ -48,6 +48,9 @@ export class QARecorder {
   private consoleCapture: ConsoleCapture;
   private floatingButton: FloatingButton;
   private pageHideHandler: (() => void) | null = null;
+  private initialized = false;
+  /** 확인창이 떠 있거나 저장 중인지 — 그동안 버튼이 다시 눌려도(키보드 Enter 등) 저장을 한 번만 진행한다 */
+  private saving = false;
 
   constructor(overrides?: QARecorderConfig) {
     this.config = resolveConfig(overrides);
@@ -69,6 +72,10 @@ export class QARecorder {
   }
 
   async init(): Promise<void> {
+    // 두 번 호출하면 버튼과 pagehide 리스너가 중복되고 가로채기가 겹치므로 한 번만 시작한다 (destroy() 후에는 다시 가능)
+    if (this.initialized) return;
+    this.initialized = true;
+
     this.networkCapture.start();
     this.screenRecorder.start();
     this.consoleCapture.start();
@@ -121,6 +128,16 @@ export class QARecorder {
   }
 
   private async onButtonClick(): Promise<void> {
+    if (this.saving) return;
+    this.saving = true;
+    try {
+      await this.confirmAndSave();
+    } finally {
+      this.saving = false;
+    }
+  }
+
+  private async confirmAndSave(): Promise<void> {
     const { confirmed, memo } = await ConfirmModal.show('Save this QA session?');
     if (!confirmed) return;
 
@@ -206,6 +223,7 @@ export class QARecorder {
   }
 
   destroy(): void {
+    this.initialized = false;
     this.networkCapture.stop();
     this.screenRecorder.stop();
     this.consoleCapture.stop();
