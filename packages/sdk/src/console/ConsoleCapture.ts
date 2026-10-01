@@ -1,4 +1,12 @@
+import { limitText } from '../network/bodyLimit.js';
+
 export type ConsoleLevel = 'error' | 'warn' | 'log' | 'info';
+
+/**
+ * 콘솔 엔트리 하나의 message·stack 최대 글자 수. 큰 상태 객체를 자주 찍는 앱에서
+ * 엔트리마다 수 MB 문자열이 maxEntries개까지 쌓이지 않도록 자른다.
+ */
+export const MAX_CONSOLE_TEXT_LENGTH = 10_000;
 
 export interface ConsoleEntry {
   timestamp: string;
@@ -98,7 +106,7 @@ export class ConsoleCapture {
   }
 
   private push(level: ConsoleLevel, args: unknown[], stack?: string): void {
-    const message = args
+    const fullMessage = args
       .map((a) => {
         if (a === null) return 'null';
         if (a === undefined) return 'undefined';
@@ -111,9 +119,11 @@ export class ConsoleCapture {
         }
       })
       .join(' ');
+    const message = limitText(fullMessage, MAX_CONSOLE_TEXT_LENGTH);
 
     // 명시적 stack(window.onerror 등)이 우선, 없으면 첫 번째 Error 인자의 stack 사용
-    const entryStack = stack ?? findErrorStack(args);
+    const fullStack = stack ?? findErrorStack(args);
+    const entryStack = fullStack === undefined ? undefined : limitText(fullStack, MAX_CONSOLE_TEXT_LENGTH);
 
     const entry: ConsoleEntry = {
       timestamp: new Date().toISOString(),

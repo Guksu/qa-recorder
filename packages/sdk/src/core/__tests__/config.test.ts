@@ -10,6 +10,7 @@ describe('resolveConfig', () => {
     const config = resolveConfig();
     expect(config.endpoint).toBe('');
     expect(config.maxRequests).toBe(100);
+    expect(config.maxBodySize).toBe(100 * 1024);
     expect(config.maskHeaders).toEqual([
       'Authorization', 'Cookie', 'Set-Cookie',
       'Proxy-Authorization', 'X-API-Key', 'X-Auth-Token', 'X-CSRF-Token', 'X-XSRF-Token',

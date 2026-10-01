@@ -23,6 +23,19 @@ export interface QARecorderConfig {
   maxRequests?: number;
 
   /**
+   * Maximum number of characters kept for each request and response body (about the same in bytes
+   * for ASCII text). Longer bodies are cut and end with a "…[truncated by qa-recorder …]" note.
+   * fetch responses are read only up to this limit, so large downloads and never-ending streams
+   * (e.g. SSE) do not pile up in memory. Binary responses (images, audio, video, fonts, PDF, ZIP,
+   * octet-stream …) are recorded as `"[binary]"` without being read. Masking (`maskKeys`) is applied
+   * before cutting, and a response that was cut is masked key by key as far as it was read.
+   * `0` records no bodies; `Infinity` keeps whole bodies.
+   *
+   * @default 102400
+   */
+  maxBodySize?: number;
+
+  /**
    * HTTP header names to redact before saving. Values are replaced with `"[MASKED]"`.
    * Matching is case-insensitive. Setting this replaces the default list.
    *
@@ -171,6 +184,7 @@ export interface QARecorderConfig {
 const DEFAULT_CONFIG: Required<QARecorderConfig> = {
   endpoint: '',
   maxRequests: 100,
+  maxBodySize: 100 * 1024,
   maskHeaders: [
     'Authorization', 'Cookie', 'Set-Cookie',
     'Proxy-Authorization', 'X-API-Key', 'X-Auth-Token', 'X-CSRF-Token', 'X-XSRF-Token',

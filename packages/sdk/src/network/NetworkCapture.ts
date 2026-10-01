@@ -1,5 +1,18 @@
 import { MaskingFilter, type KeyMatcher } from './MaskingFilter.js';
+import { BINARY_PLACEHOLDER, isBinaryMime, limitText, readLimitedText, truncationNote } from './bodyLimit.js';
 import type { HAREntry } from '@qa-recorder/shared';
+
+export interface NetworkCaptureOptions {
+  /** body·URL에서 값을 가릴 키 목록 (MaskingFilter.createKeyMatcher 참고) */
+  maskKeys?: string[];
+  /**
+   * 캡처하지 않을 URL 목록 (녹화기 자체의 업로드 endpoint 등).
+   * 상대 경로는 요청 시점의 페이지 URL 기준으로 해석하고 fragment는 무시하고 비교한다.
+   */
+  ignoreUrls?: string[];
+  /** 요청/응답 body를 저장할 최대 글자 수 (bodyLimit.ts 참고). 지정하지 않으면 제한 없음, 0이면 body를 저장하지 않음 */
+  maxBodySize?: number;
+}
 
 /**
  * XHR / fetch 인터셉터로 네트워크 요청을 캡처.
@@ -12,20 +25,19 @@ export class NetworkCapture {
   private recordingStartedAt: Date | null = null;
   private readonly maskSet: Set<string>;
   private readonly isSensitiveKey: KeyMatcher | null;
+  private readonly ignoreUrls: string[];
+  private readonly maxBodySize: number;
 
-  /**
-   * @param maskKeys body·URL에서 값을 가릴 키 목록 (MaskingFilter.createKeyMatcher 참고)
-   * @param ignoreUrls 캡처하지 않을 URL 목록 (녹화기 자체의 업로드 endpoint 등).
-   *   상대 경로는 요청 시점의 페이지 URL 기준으로 해석하고 fragment는 무시하고 비교한다.
-   */
   constructor(
     private readonly maxRequests: number,
     maskHeaders: string[],
-    maskKeys: string[] = [],
-    private readonly ignoreUrls: string[] = [],
+    options: NetworkCaptureOptions = {},
   ) {
     this.maskSet = new Set(maskHeaders.map((h) => h.toLowerCase()));
-    this.isSensitiveKey = MaskingFilter.createKeyMatcher(maskKeys);
+    this.isSensitiveKey = MaskingFilter.createKeyMatcher(options.maskKeys ?? []);
+    this.ignoreUrls = options.ignoreUrls ?? [];
+    const { maxBodySize } = options;
+    this.maxBodySize = typeof maxBodySize === 'number' && maxBodySize >= 0 ? maxBodySize : Infinity;
     this.originalFetch = window.fetch;
     this.originalXHR = window.XMLHttpRequest;
   }
@@ -61,6 +73,47 @@ export class NetworkCapture {
     if (this.ignoreUrls.length === 0) return false;
     const target = normalizeUrl(url);
     return target !== null && this.ignoreUrls.some((ignored) => normalizeUrl(ignored) === target);
+  }
+
+  /** 마스킹을 마친 엔트리의 요청/응답 body를 maxBodySize로 자른다 (마스킹은 반드시 자르기 전에) */
+  private limitBodies(entry: HAREntry): HAREntry {
+    if (entry.request.postData) entry.request.postData.text = this.limitBody(entry.request.postData.text);
+    if (entry.response.content.text) entry.response.content.text = this.limitBody(entry.response.content.text);
+    return entry;
+  }
+
+  private limitBody(text: string): string {
+    if (text === BINARY_PLACEHOLDER) return text;
+    return this.maxBodySize > 0 ? limitText(text, this.maxBodySize) : '';
+  }
+
+  /**
+   * fetch 응답 body를 비동기로 채운다. 바이너리 MIME은 읽지 않고, 나머지는 maxBodySize까지만 읽는다.
+   * 끝까지 읽은 body는 maskBody로, 잘린 body는 maskTruncatedBody로 가린다.
+   */
+  private fillResponseBody(stored: HAREntry, response: Response): void {
+    const { content } = stored.response;
+    if (isBinaryMime(content.mimeType)) {
+      content.text = BINARY_PLACEHOLDER;
+      return;
+    }
+    if (this.maxBodySize <= 0) return;
+
+    readLimitedText(response, this.maxBodySize).then(({ text, truncated }) => {
+      if (truncated) {
+        content.text = MaskingFilter.maskTruncatedBody(text, content.mimeType, this.isSensitiveKey)
+          + truncationNote(this.maxBodySize);
+        // 끝까지 읽지 않아 실제 크기를 모른다 — Content-Length가 있으면 그 값을 쓴다
+        const declared = Number(response.headers.get('content-length'));
+        const size = Number.isFinite(declared) && declared > 0 ? declared : -1;
+        content.size = size;
+        stored.response.bodySize = size;
+      } else {
+        content.text = MaskingFilter.maskBody(text, content.mimeType, this.isSensitiveKey);
+        content.size = text.length;
+        stored.response.bodySize = text.length;
+      }
+    }).catch(() => { /* body 읽기 실패 무시 */ });
   }
 
   private push(entry: HAREntry): HAREntry {
@@ -123,7 +176,7 @@ export class NetworkCapture {
         text: '',
       };
 
-      const stored = this.push(
+      const stored = this.push(this.limitBodies(
         MaskingFilter.apply(
           {
             startedDateTime: startedAt.toISOString(),
@@ -154,17 +207,10 @@ export class NetworkCapture {
           this.maskSet,
           this.isSensitiveKey,
         ),
-      );
+      ));
 
-      if (response) {
-        response.clone().text().then((text) => {
-          // body는 엔트리 기록 이후에 도착하므로 여기서 따로 마스킹 (size/bodySize는 원본 기준)
-          stored.response.content.text =
-            MaskingFilter.maskBody(text, stored.response.content.mimeType, this.isSensitiveKey);
-          stored.response.content.size = text.length;
-          stored.response.bodySize = text.length;
-        }).catch(() => { /* body 읽기 실패 무시 */ });
-      }
+      // body는 엔트리 기록 이후에 도착하므로 여기서 따로 읽고 마스킹한다
+      if (response) this.fillResponseBody(stored, response);
     } catch {
       /* 캡처 실패가 앱 요청에 영향을 주지 않도록 무시 */
     }
@@ -221,8 +267,8 @@ export class NetworkCapture {
             });
 
           const mimeType = xhr.getResponseHeader('content-type') ?? '';
-          const responseText = xhr.responseType === '' || xhr.responseType === 'text'
-            ? xhr.responseText : '[binary]';
+          const responseText = isBinaryMime(mimeType) || (xhr.responseType !== '' && xhr.responseType !== 'text')
+            ? BINARY_PLACEHOLDER : xhr.responseText;
 
           let postData: { mimeType: string; text: string } | undefined;
           if (requestBody) {
@@ -230,7 +276,7 @@ export class NetworkCapture {
             postData = { mimeType: ct, text: requestBody };
           }
 
-          self.push(
+          self.push(self.limitBodies(
             MaskingFilter.apply(
               {
                 startedDateTime: startedAt.toISOString(),
@@ -259,7 +305,7 @@ export class NetworkCapture {
               self.maskSet,
               self.isSensitiveKey,
             ),
-          );
+          ));
         }, { once: true });
 
         return originalSend(body);
