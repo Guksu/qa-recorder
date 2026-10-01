@@ -66,6 +66,58 @@ describe('SharePanel', () => {
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('https://example.com/share/abc');
   });
 
+  describe('복사 결과와 닫기', () => {
+    const copyButton = () =>
+      (document.querySelector('[data-qa="share-panel"]') as HTMLElement).shadowRoot!.querySelector<HTMLButtonElement>('.qa-copy-btn')!;
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('복사에 성공하면 Copied!를 잠시 보여주고 원래 문구로 돌아온다', async () => {
+      vi.useFakeTimers();
+      SharePanel.show('https://example.com/s/1');
+      copyButton().click();
+      await vi.waitFor(() => expect(copyButton().textContent).toBe('Copied!'));
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(copyButton().textContent).toBe('Copy link');
+    });
+
+    it('navigator.clipboard가 없으면(https가 아닌 페이지) execCommand로 복사한다', async () => {
+      vi.stubGlobal('navigator', {});
+      const execCommand = vi.fn().mockReturnValue(true);
+      Object.defineProperty(document, 'execCommand', { value: execCommand, configurable: true });
+      try {
+        SharePanel.show('https://example.com/s/2');
+        expect(() => copyButton().click()).not.toThrow();
+        await vi.waitFor(() => expect(copyButton().textContent).toBe('Copied!'));
+        expect(execCommand).toHaveBeenCalledWith('copy');
+        expect(document.querySelector('textarea')).toBeNull(); // 임시 textarea는 정리한다
+      } finally {
+        delete (document as unknown as { execCommand?: unknown }).execCommand;
+      }
+    });
+
+    it('클립보드 권한이 거부되고 execCommand도 실패하면 실패 안내를 보여준다', async () => {
+      vi.stubGlobal('navigator', { clipboard: { writeText: vi.fn().mockRejectedValue(new Error('denied')) } });
+      Object.defineProperty(document, 'execCommand', { value: vi.fn().mockReturnValue(false), configurable: true });
+      try {
+        SharePanel.show('https://example.com/s/3');
+        copyButton().click();
+        await vi.waitFor(() => expect(copyButton().textContent).toBe('Copy failed — select the link above'));
+      } finally {
+        delete (document as unknown as { execCommand?: unknown }).execCommand;
+      }
+    });
+
+    it('닫기 버튼을 누르면 패널이 사라진다', () => {
+      SharePanel.show('https://example.com/s/4');
+      const host = document.querySelector('[data-qa="share-panel"]') as HTMLElement;
+      host.shadowRoot!.querySelector<HTMLButtonElement>('.qa-share-close')!.click();
+      expect(document.querySelector('[data-qa="share-panel"]')).toBeNull();
+    });
+  });
+
   it('hide()는 패널을 DOM에서 제거한다', () => {
     SharePanel.show('https://example.com');
     SharePanel.hide();

@@ -282,7 +282,7 @@ window.__QA_RECORDER_CONFIG__ = {
 ```bash
 pnpm install
 
-pnpm -F qa-recorder test      # 테스트 실행 (Vitest + jsdom, 164개)
+pnpm -F qa-recorder test      # 테스트 실행 (Vitest + jsdom)
 pnpm -F qa-recorder build     # ESM + UMD 빌드
 pnpm -F qa-recorder dev       # watch 모드
 pnpm -F qa-recorder demo      # 로컬 데모 서버 (http://localhost:5173)

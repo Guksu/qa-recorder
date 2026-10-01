@@ -28,12 +28,19 @@ describe('ProgressBar', () => {
     expect(hosts).toHaveLength(1);
   });
 
-  it('update(50)은 fill width를 50%로 설정한다', () => {
+  it('진행률을 알 수 없으므로 막대 폭을 0%로 고정하지 않고, 움직이는 막대 스타일을 쓴다', () => {
     ProgressBar.show();
-    ProgressBar.update(50);
     const host = document.querySelector('[data-qa="progress-bar"]') as HTMLElement;
-    const fill = host.shadowRoot!.querySelector<HTMLElement>('#fill');
-    expect(fill?.style.width).toBe('50%');
+    const fill = host.shadowRoot!.querySelector<HTMLElement>('#fill')!;
+    expect(fill.style.width).toBe('');
+    expect(host.shadowRoot!.querySelector('style')!.textContent).toContain('qa-progress-slide');
+  });
+
+  it('label은 HTML로 해석하지 않는다', () => {
+    ProgressBar.show('<img src=x onerror=alert(1)>');
+    const host = document.querySelector('[data-qa="progress-bar"]') as HTMLElement;
+    expect(host.shadowRoot!.querySelector('img')).toBeNull();
+    expect(host.shadowRoot!.querySelector('#label')!.textContent).toBe('<img src=x onerror=alert(1)>');
   });
 
   it('show(label)은 label 텍스트를 표시한다', () => {

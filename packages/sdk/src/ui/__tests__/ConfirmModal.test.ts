@@ -26,6 +26,15 @@ describe('ConfirmModal.show', () => {
     await promise;
   });
 
+  it('메시지는 HTML로 해석하지 않는다', async () => {
+    const promise = ConfirmModal.show('<img src=x onerror=alert(1)>');
+    const host = document.querySelector<HTMLElement>('[data-qa="confirm-modal"]')!;
+    expect(host.shadowRoot!.querySelector('img')).toBeNull();
+    expect(host.shadowRoot!.querySelector('h3')!.textContent).toBe('<img src=x onerror=alert(1)>');
+    host.shadowRoot!.querySelector<HTMLButtonElement>('#cancel')!.click();
+    await promise;
+  });
+
   it('확인 클릭 시 { confirmed: true, memo }를 반환한다', async () => {
     const promise = ConfirmModal.show('Save?');
     const host = document.body.lastElementChild as HTMLElement;
