@@ -6,10 +6,25 @@ export type ButtonState = 'idle' | 'recording';
 export class FloatingButton {
   private host: HTMLElement | null = null;
   private shadow: ShadowRoot | null = null;
+  private state: ButtonState = 'idle';
+  /** body가 생기기 전에 mount()된 경우 DOMContentLoaded에서 실행할 마운트 */
+  private pendingMount: (() => void) | null = null;
 
   constructor(private readonly onClick: () => void, private readonly zIndex = 2147483647) {}
 
   mount(): void {
+    // 이미 마운트됐거나 마운트를 기다리는 중이면 버튼을 하나 더 만들지 않는다
+    if (this.host || this.pendingMount) return;
+    // <head>의 script에서 init()하면 body가 아직 없다 — HTML 파싱이 끝나면 붙인다
+    if (!document.body) {
+      this.pendingMount = () => {
+        this.pendingMount = null;
+        this.mount();
+      };
+      document.addEventListener('DOMContentLoaded', this.pendingMount, { once: true });
+      return;
+    }
+
     this.host = document.createElement('div');
     this.host.setAttribute('id', 'qa-recorder-root');
     this.shadow = this.host.attachShadow({ mode: 'open' });
@@ -19,20 +34,34 @@ export class FloatingButton {
 
     const btn = document.createElement('button');
     btn.className = 'qa-floating-btn';
-    btn.title = 'Start QA recording';
-    btn.innerHTML = this._idleHTML();
 
     this._attachDrag(btn);
 
     excludeFromRecording(this.host, style, btn);
     this.shadow.append(style, btn);
     document.body.appendChild(this.host);
+    // 마운트 전에 setState()로 정한 상태를 반영
+    this._render(btn);
   }
 
   setState(state: ButtonState): void {
+    this.state = state;
     const btn = this.shadow?.querySelector('button');
-    if (!btn) return;
-    if (state === 'recording') {
+    if (btn) this._render(btn);
+  }
+
+  unmount(): void {
+    if (this.pendingMount) {
+      document.removeEventListener('DOMContentLoaded', this.pendingMount);
+      this.pendingMount = null;
+    }
+    this.host?.remove();
+    this.host = null;
+    this.shadow = null;
+  }
+
+  private _render(btn: HTMLButtonElement): void {
+    if (this.state === 'recording') {
       btn.title = 'Stop and save recording';
       btn.classList.add('qa-floating-btn--recording');
       btn.innerHTML = this._recordingHTML();
@@ -41,12 +70,6 @@ export class FloatingButton {
       btn.classList.remove('qa-floating-btn--recording');
       btn.innerHTML = this._idleHTML();
     }
-  }
-
-  unmount(): void {
-    this.host?.remove();
-    this.host = null;
-    this.shadow = null;
   }
 
   private _attachDrag(btn: HTMLButtonElement): void {

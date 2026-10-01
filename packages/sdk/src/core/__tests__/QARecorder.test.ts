@@ -75,8 +75,8 @@ function seedBuffers(recorder: QARecorder) {
   internalsOf(recorder).networkCapture.restoreEntries([
     { request: { url: 'https://example.com/api' } } as unknown as HAREntry,
   ]);
-  // console.error 대신 window.onerror 경유로 캡처 (테스트 출력 오염 방지)
-  window.onerror?.('seeded error');
+  // console.error 대신 잡히지 않은 에러 이벤트 경유로 캡처 (테스트 출력 오염 방지)
+  window.dispatchEvent(new ErrorEvent('error', { message: 'seeded error' }));
 
   const seeded = buffersOf(recorder);
   expect(seeded.events).toContainEqual(seededEvent);
@@ -539,6 +539,97 @@ describe('QARecorder', () => {
 
     await vi.waitFor(() => expect(mocks.localStorageSave).toHaveBeenCalled());
     expect(sessionStorageMock.removeItem).toHaveBeenCalledWith('qa-recorder-backup');
+    recorder.destroy();
+  });
+});
+
+describe('QARecorder — 호스트 앱 보호', () => {
+  const buttons = () => document.querySelectorAll('#qa-recorder-root');
+
+  it('init()을 두 번 호출해도 버튼과 rrweb 녹화는 하나만 시작된다', async () => {
+    const recorder = new QARecorder();
+    await recorder.init();
+    await recorder.init();
+    expect(buttons()).toHaveLength(1);
+    expect(mocks.record).toHaveBeenCalledOnce();
+    recorder.destroy();
+    expect(buttons()).toHaveLength(0);
+  });
+
+  it('init()을 두 번 호출해도 destroy() 후 console 메서드가 원래대로 돌아온다', async () => {
+    const original = console.error;
+    const recorder = new QARecorder({ consoleLevels: ['error'] });
+    await recorder.init();
+    await recorder.init();
+    recorder.destroy();
+    expect(console.error).toBe(original);
+  });
+
+  it('destroy() 후에는 init()으로 다시 시작할 수 있다', async () => {
+    const recorder = new QARecorder();
+    await recorder.init();
+    recorder.destroy();
+    await recorder.init();
+    expect(buttons()).toHaveLength(1);
+    expect(mocks.record).toHaveBeenCalledTimes(2);
+    recorder.destroy();
+  });
+
+  it('확인창이 떠 있는 동안 버튼이 다시 눌려도 저장 흐름은 한 번만 진행된다', async () => {
+    let resolveModal!: (r: { confirmed: boolean; memo: string }) => void;
+    mocks.confirmModalShow.mockImplementationOnce(() => new Promise((r) => { resolveModal = r; }));
+    const recorder = new QARecorder();
+    await recorder.init();
+    const btn = document.getElementById('qa-recorder-root')!.shadowRoot!.querySelector('button')!;
+
+    btn.click();
+    btn.click();
+    expect(mocks.confirmModalShow).toHaveBeenCalledOnce();
+
+    resolveModal({ confirmed: true, memo: '' });
+    await vi.waitFor(() => expect(mocks.localStorageSave).toHaveBeenCalledOnce());
+    // 저장이 끝나면 다시 저장할 수 있다
+    await vi.waitFor(() => {
+      btn.click();
+      expect(mocks.confirmModalShow).toHaveBeenCalledTimes(2);
+    });
+    await vi.waitFor(() => expect(mocks.localStorageSave).toHaveBeenCalledTimes(2));
+    recorder.destroy();
+  });
+
+  it('저장하는 동안 버튼이 다시 눌려도 확인창을 다시 띄우지 않는다', async () => {
+    let resolveSave!: () => void;
+    mocks.localStorageSave.mockImplementationOnce(() => new Promise<void>((r) => { resolveSave = r; }));
+    const recorder = new QARecorder();
+    await recorder.init();
+    const btn = document.getElementById('qa-recorder-root')!.shadowRoot!.querySelector('button')!;
+
+    btn.click();
+    await vi.waitFor(() => expect(mocks.localStorageSave).toHaveBeenCalledOnce());
+    btn.click();
+    expect(mocks.confirmModalShow).toHaveBeenCalledOnce();
+
+    resolveSave();
+    await vi.waitFor(() => expect(isProgressVisible()).toBe(false));
+    recorder.destroy();
+  });
+
+  it('<head>에서 body가 생기기 전에 init()해도 throw하지 않고, 파싱이 끝나면 버튼을 붙인다', async () => {
+    const body = document.body;
+    document.documentElement.removeChild(body);
+    const recorder = new QARecorder();
+    try {
+      await expect(recorder.init()).resolves.toBeUndefined();
+      expect(mocks.record).toHaveBeenCalledOnce();
+    } finally {
+      document.documentElement.appendChild(body);
+    }
+    expect(buttons()).toHaveLength(0);
+
+    document.dispatchEvent(new Event('DOMContentLoaded'));
+    expect(buttons()).toHaveLength(1);
+    const btn = buttons()[0].shadowRoot!.querySelector('button')!;
+    expect(btn.title).toBe('Stop and save recording');
     recorder.destroy();
   });
 });

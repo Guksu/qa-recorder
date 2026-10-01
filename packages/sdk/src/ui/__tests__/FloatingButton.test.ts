@@ -1,9 +1,61 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { FloatingButton } from '../FloatingButton.js';
 
 describe('FloatingButton', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
+  });
+
+  it('mount()를 두 번 호출해도 버튼은 하나만 만든다', () => {
+    const btn = new FloatingButton(vi.fn());
+    btn.mount();
+    btn.mount();
+    expect(document.querySelectorAll('#qa-recorder-root')).toHaveLength(1);
+    btn.unmount();
+  });
+
+  describe('body가 없을 때 (<head>의 script)', () => {
+    let body: HTMLElement;
+    beforeEach(() => {
+      body = document.body;
+      document.documentElement.removeChild(body);
+    });
+    afterEach(() => {
+      if (!document.body) document.documentElement.appendChild(body);
+    });
+
+    it('throw하지 않고, DOMContentLoaded 때 마운트 전에 정한 상태로 버튼을 붙인다', () => {
+      const btn = new FloatingButton(vi.fn());
+      expect(() => btn.mount()).not.toThrow();
+      btn.setState('recording');
+      document.documentElement.appendChild(body);
+      expect(document.getElementById('qa-recorder-root')).toBeNull();
+
+      document.dispatchEvent(new Event('DOMContentLoaded'));
+      const host = document.getElementById('qa-recorder-root')!;
+      expect(host).not.toBeNull();
+      expect(host.shadowRoot!.querySelector('button')!.title).toBe('Stop and save recording');
+      btn.unmount();
+    });
+
+    it('DOMContentLoaded 전에 unmount()하면 나중에도 버튼을 붙이지 않는다', () => {
+      const btn = new FloatingButton(vi.fn());
+      btn.mount();
+      btn.unmount();
+      document.documentElement.appendChild(body);
+      document.dispatchEvent(new Event('DOMContentLoaded'));
+      expect(document.getElementById('qa-recorder-root')).toBeNull();
+    });
+
+    it('마운트를 기다리는 중에 mount()를 다시 불러도 버튼은 하나만 붙인다', () => {
+      const btn = new FloatingButton(vi.fn());
+      btn.mount();
+      btn.mount();
+      document.documentElement.appendChild(body);
+      document.dispatchEvent(new Event('DOMContentLoaded'));
+      expect(document.querySelectorAll('#qa-recorder-root')).toHaveLength(1);
+      btn.unmount();
+    });
   });
 
   it('mount()는 Shadow DOM 버튼을 body에 추가한다', () => {
