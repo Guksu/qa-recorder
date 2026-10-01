@@ -11,6 +11,7 @@ describe('resolveConfig', () => {
     expect(config.endpoint).toBe('');
     expect(config.maxRequests).toBe(100);
     expect(config.maxBodySize).toBe(100 * 1024);
+    expect(config.maxReplaySize).toBe(20 * 1024 * 1024);
     expect(config.maskHeaders).toEqual([
       'Authorization', 'Cookie', 'Set-Cookie',
       'Proxy-Authorization', 'X-API-Key', 'X-Auth-Token', 'X-CSRF-Token', 'X-XSRF-Token',
@@ -90,6 +91,11 @@ describe('resolveConfig', () => {
   it('overrides로 mode를 light로 설정한다', () => {
     const config = resolveConfig({ mode: 'light' });
     expect(config.mode).toBe('light');
+  });
+
+  it('overrides로 maxReplaySize를 덮어쓰고, Infinity로 크기 제한을 끌 수 있다', () => {
+    expect(resolveConfig({ maxReplaySize: 5 * 1024 * 1024 }).maxReplaySize).toBe(5 * 1024 * 1024);
+    expect(resolveConfig({ maxReplaySize: Infinity }).maxReplaySize).toBe(Infinity);
   });
 
   it('명시적 undefined 값은 기본값을 덮어쓰지 않는다', () => {

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ScreenRecorder } from '../ScreenRecorder.js';
 
 const mocks = vi.hoisted(() => ({
@@ -492,5 +492,151 @@ describe('ScreenRecorder', () => {
       expect(events.some(e => (e as { timestamp: number }).timestamp === beyondHeavy.timestamp)).toBe(false);
       expect(events.some(e => (e as { timestamp: number }).timestamp === withinHeavy.timestamp)).toBe(true);
     });
+  });
+});
+
+describe('ScreenRecorder 크기 제한 (maxReplaySize)', () => {
+  type Emit = (event: unknown, isCheckout?: boolean) => void;
+  let emit: Emit;
+  let now = 0;
+
+  /** JSON 문자 수가 대략 size인 incremental 이벤트 */
+  const incremental = (size: number) => ({ type: 3, data: { pad: 'x'.repeat(size) }, timestamp: ++now });
+  const types = (events: unknown[]) => events.map((e) => (e as { type: number }).type);
+  const jsonSize = (events: unknown[]) => JSON.stringify(events).length;
+
+  /**
+   * record()는 Meta + FullSnapshot(크기 snapshotSize)을 emit하고, takeFullSnapshot(isCheckout)도
+   * rrweb처럼 Meta(isCheckout 전달) + FullSnapshot을 emit하도록 설정
+   */
+  function mockRrweb(snapshotSize = 100) {
+    const snapshot = () => {
+      emit({ type: 4, data: {}, timestamp: ++now }, false);
+      emit({ type: 2, data: { pad: 'x'.repeat(snapshotSize) }, timestamp: ++now });
+    };
+    mocks.record.mockImplementation(({ emit: e }: { emit: Emit }) => {
+      emit = e;
+      snapshot();
+      return mocks.stopFn;
+    });
+    mocks.takeFullSnapshot.mockImplementation((isCheckout?: boolean) => {
+      emit({ type: 4, data: {}, timestamp: ++now }, isCheckout);
+      emit({ type: 2, data: { pad: 'x'.repeat(snapshotSize) }, timestamp: ++now });
+    });
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    now = 0;
+  });
+
+  afterEach(() => {
+    mocks.takeFullSnapshot.mockReset();
+  });
+
+  it('지금 구간이 제한의 절반을 넘지 않으면 새 구간을 시작하지 않는다', () => {
+    mockRrweb();
+    const recorder = new ScreenRecorder('normal', {}, 10_000);
+    recorder.start();
+    for (let i = 0; i < 4; i++) emit(incremental(1_000));
+    expect(mocks.takeFullSnapshot).not.toHaveBeenCalled();
+  });
+
+  it('지금 구간이 제한의 절반을 넘으면 takeFullSnapshot(true)로 새 구간을 시작하고, 이전 구간은 그대로 둔다', () => {
+    mockRrweb();
+    const recorder = new ScreenRecorder('normal', {}, 10_000);
+    recorder.start();
+    for (let i = 0; i < 3; i++) emit(incremental(2_000));
+
+    expect(mocks.takeFullSnapshot).toHaveBeenCalledOnce();
+    expect(mocks.takeFullSnapshot).toHaveBeenCalledWith(true);
+    // [Meta, FullSnapshot, 변경 3개] + 새 구간 [Meta, FullSnapshot]
+    expect(types(recorder.getEvents())).toEqual([4, 2, 3, 3, 3, 4, 2]);
+    expect(types(recorder.getRecentEvents())).toEqual([4, 2]);
+  });
+
+  it('구간이 계속 넘어가도 보관하는 이벤트는 제한 근처로 유지되고, 항상 스냅샷부터 시작한다', () => {
+    mockRrweb();
+    const recorder = new ScreenRecorder('normal', {}, 10_000);
+    recorder.start();
+    for (let i = 0; i < 200; i++) emit(incremental(1_000));
+
+    const events = recorder.getEvents();
+    expect(mocks.takeFullSnapshot.mock.calls.length).toBeGreaterThan(10);
+    // 두 구간이 각각 절반(5,000자)을 넘은 직후에 넘어가므로 이벤트 하나만큼 넘칠 수 있다
+    expect(jsonSize(events)).toBeLessThan(10_000 + 2 * 1_100);
+    expect(types(events).slice(0, 2)).toEqual([4, 2]);
+  });
+
+  it('스냅샷이 큰 페이지에서는 스냅샷 뒤의 변경분이 스냅샷보다 커질 때까지 새 구간을 시작하지 않는다', () => {
+    // 스냅샷(약 6,000자) 하나가 제한의 절반(5,000자)보다 크다 — 확인 없이 넘기면 이벤트마다 스냅샷을 다시 찍는다
+    mockRrweb(6_000);
+    const recorder = new ScreenRecorder('normal', {}, 10_000);
+    recorder.start();
+
+    // 이벤트 하나는 JSON 껍데기를 포함해 약 1,040자 — 5개(약 5,200자)는 스냅샷(약 6,070자)보다 작다
+    for (let i = 0; i < 5; i++) emit(incremental(1_000));
+    expect(mocks.takeFullSnapshot).not.toHaveBeenCalled();
+
+    emit(incremental(1_000)); // 6개(약 6,240자)로 스냅샷보다 커진다
+    expect(mocks.takeFullSnapshot).toHaveBeenCalledOnce();
+
+    // 새 구간도 같은 기준이 적용된다
+    for (let i = 0; i < 5; i++) emit(incremental(1_000));
+    expect(mocks.takeFullSnapshot).toHaveBeenCalledOnce();
+  });
+
+  it('stop() 뒤에 늦게 emit된 이벤트로는 스냅샷을 찍지 않는다', () => {
+    mockRrweb();
+    const recorder = new ScreenRecorder('normal', {}, 10_000);
+    recorder.start();
+    recorder.stop();
+
+    emit(incremental(20_000));
+
+    expect(mocks.takeFullSnapshot).not.toHaveBeenCalled();
+  });
+
+  it('clearBuffer() 뒤에는 크기를 처음부터 다시 센다', () => {
+    mockRrweb();
+    const recorder = new ScreenRecorder('normal', {}, 10_000);
+    recorder.start();
+    emit(incremental(4_000));
+
+    recorder.clearBuffer(); // takeFullSnapshot() — 체크아웃 아님
+    mocks.takeFullSnapshot.mockClear();
+    // 새 스냅샷(약 130자) 뒤 약 4,540자 — 지우기 전부터 셌다면 구간이 약 8,800자로 절반을 넘고,
+    // 스냅샷 크기도 약 4,300자로 잡혀 변경분이 더 커지므로 새 구간을 시작하게 된다
+    emit(incremental(4_500));
+
+    expect(mocks.takeFullSnapshot).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['미지정', undefined],
+    ['Infinity', Infinity],
+    ['0', 0],
+    ['NaN', NaN],
+  ])('maxReplaySize가 %s이면 크기와 상관없이 새 구간을 시작하지 않는다', (_, maxReplaySize) => {
+    mockRrweb();
+    const recorder = new ScreenRecorder('normal', {}, maxReplaySize);
+    recorder.start();
+    for (let i = 0; i < 10; i++) emit(incremental(100_000));
+    expect(mocks.takeFullSnapshot).not.toHaveBeenCalled();
+  });
+
+  it('getRecentEvents()는 지금 구간만 반환하고, 녹화 전에는 에러를 던진다', () => {
+    mockRrweb();
+    const recorder = new ScreenRecorder();
+    expect(() => recorder.getRecentEvents()).toThrow('No recording available');
+
+    recorder.start();
+    emit(incremental(10));
+    emit({ type: 4, data: {}, timestamp: ++now }, true); // 시간 기준 체크아웃
+    emit({ type: 2, data: {}, timestamp: ++now });
+    emit(incremental(10));
+
+    expect(types(recorder.getEvents())).toEqual([4, 2, 3, 4, 2, 3]);
+    expect(types(recorder.getRecentEvents())).toEqual([4, 2, 3]);
   });
 });

@@ -125,6 +125,11 @@ export interface QARecorderConfig {
    * continues. Note: sessionStorage is cleared when the tab is closed, so this only
    * survives page refreshes and navigations — not full tab/browser closes.
    *
+   * sessionStorage holds a limited amount (5,242,880 characters per origin in Chromium,
+   * keys included). When the whole session does not fit, only the current checkout segment of
+   * the replay is backed up; when that does not fit either, the backup keeps the network and
+   * console logs without the replay.
+   *
    * @default false
    */
   enableBackup?: boolean;
@@ -142,9 +147,30 @@ export interface QARecorderConfig {
    * - `'heavy'`: 5-minute checkout, throttled mousemove/scroll/input — retains the last
    *   5–10 minutes (heavy pages with frequent DOM mutations, animations, or long sessions)
    *
+   * A segment also ends early when it grows past half of `maxReplaySize`, so a busy page can
+   * keep less time than listed here.
+   *
    * @default 'normal'
    */
   mode?: RecorderMode;
+
+  /**
+   * Approximate upper limit, in characters of JSON (about the same in bytes for ASCII text), on
+   * the replay kept in memory. When the current checkout segment grows past half of this, a new
+   * segment starts right away with a fresh full snapshot and the oldest segment is dropped — the
+   * same thing `mode`'s timed checkout does — so the saved replay still plays from its start.
+   * Each new segment begins with a full snapshot of the page, which pauses the page briefly
+   * (measured in Chromium: about 40 ms for 3,000 elements and 500 ms for 60,000).
+   *
+   * A segment only ends early once the changes recorded after its snapshot outgrow the snapshot
+   * itself, so on a page whose single snapshot is larger than a quarter of this limit, the kept
+   * replay can exceed it (up to about four snapshots' worth).
+   *
+   * `Infinity` turns the size limit off, leaving only `mode`'s timed checkout.
+   *
+   * @default 20971520 (20 MB)
+   */
+  maxReplaySize?: number;
 
   /**
    * When `true`, the replay masks the values of every `<input>` (including hidden inputs and
@@ -199,6 +225,7 @@ const DEFAULT_CONFIG: Required<QARecorderConfig> = {
   maxConsoleEntries: 200,
   enableBackup: false,
   mode: 'normal',
+  maxReplaySize: 20 * 1024 * 1024,
   maskAllInputs: false,
   maskTextSelector: null,
   blockSelector: null,

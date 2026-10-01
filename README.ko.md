@@ -170,6 +170,7 @@ window.__QA_RECORDER_CONFIG__ = {
   maxConsoleEntries: 200,    // 순환 버퍼 최대 콘솔 기록 수 (기본값: 200).
   enableBackup: false,       // 탭 숨김 시 세션을 sessionStorage에 자동 저장하고 새로고침 후 복원 (기본값: false). 탭 닫기 시 삭제됨.
   mode: 'normal',            // 녹화 강도 프리셋: 'light' | 'normal' | 'heavy' (기본값: 'normal').
+  maxReplaySize: 20971520,   // 메모리에 보관할 리플레이의 대략적인 최대 글자 수 (기본값: 20MB). Infinity면 크기 제한 없음.
   maskAllInputs: false,      // 리플레이에서 모든 input/textarea/select 값 마스킹 (기본값: false = 비밀번호만).
   maskTextSelector: null,    // 리플레이에서 텍스트를 마스킹할 요소의 CSS 셀렉터 (기본값: null).
   blockSelector: null,       // 리플레이에서 제외할 요소의 CSS 셀렉터 — 제약은 아래 표 참고 (기본값: null).
@@ -186,8 +187,9 @@ window.__QA_RECORDER_CONFIG__ = {
 | `zIndex` | `number` | `2147483647` | UI 요소(버튼, 프로그레스 바, 공유 패널)의 z-index. |
 | `consoleLevels` | `string[]` | `['error', 'warn']` | 캡처할 콘솔 레벨. 유효값: `'error'`, `'warn'`, `'log'`, `'info'`. |
 | `maxConsoleEntries` | `number` | `200` | 순환 버퍼에 유지할 최대 콘솔 기록 수. 기록 하나의 메시지와 stack trace는 각각 10,000자에서 자름. |
-| `enableBackup` | `boolean` | `false` | `true`로 설정 시, 탭이 숨겨질 때(새로고침·이동) 현재 세션을 sessionStorage에 자동 저장. 다음 `init()` 호출 시 팝업 없이 현재 세션 버퍼에 조용히 복원. 롤링 윈도우는 `mode` 값에 따름 (light: 30분 / normal: 20분 / heavy: 5분). 탭 닫기 시 데이터 삭제. |
-| `mode` | `'light' \| 'normal' \| 'heavy'` | `'normal'` | rrweb의 checkout 주기와 이벤트 샘플링을 조정하는 녹화 강도 프리셋. 메모리 버퍼를 일정 수준으로 유지함. DOM 변화가 잦거나 애니메이션이 많은 페이지, 장시간 세션에는 `'heavy'` 사용 — 5분 checkout + `mousemove`/`scroll`/`input` 스로틀. 가벼운 페이지에서 더 긴 30분 이력을 원하면 `'light'`. |
+| `enableBackup` | `boolean` | `false` | `true`로 설정 시, 탭이 숨겨질 때(새로고침·이동) 현재 세션을 sessionStorage에 자동 저장. 다음 `init()` 호출 시 팝업 없이 현재 세션 버퍼에 조용히 복원. 롤링 윈도우는 `mode` 값에 따름 (light: 30분 / normal: 20분 / heavy: 5분). sessionStorage는 저장량이 정해져 있음 (Chromium은 origin마다 키 포함 5,242,880자). 세션 전체가 들어가지 않으면 리플레이는 지금 checkout 구간만 백업하고, 그것도 들어가지 않으면 네트워크·콘솔 기록만 백업. 탭 닫기 시 데이터 삭제. |
+| `mode` | `'light' \| 'normal' \| 'heavy'` | `'normal'` | rrweb의 checkout 주기와 이벤트 샘플링을 조정하는 녹화 강도 프리셋. 메모리 버퍼를 일정 수준으로 유지함. DOM 변화가 잦거나 애니메이션이 많은 페이지, 장시간 세션에는 `'heavy'` 사용 — 5분 checkout + `mousemove`/`scroll`/`input` 스로틀. 가벼운 페이지에서 더 긴 30분 이력을 원하면 `'light'`. 구간이 `maxReplaySize`의 절반을 넘으면 시간이 되기 전에 다음 구간으로 넘어가므로, 변화가 많은 페이지에서는 보관 시간이 더 짧을 수 있음. |
+| `maxReplaySize` | `number` | `20971520` (20MB) | 메모리에 보관할 리플레이의 대략적인 최대 크기 (JSON 글자 수, ASCII 텍스트면 바이트 수와 거의 같음). 지금 checkout 구간이 이 값의 절반을 넘으면 바로 새 전체 스냅샷으로 다음 구간을 시작하고 가장 오래된 구간을 버림 — `mode`의 시간 기준 checkout과 같은 방식이라 저장한 리플레이는 처음부터 재생됨. 새 구간은 전체 스냅샷으로 시작하므로 그때 페이지가 잠깐 멈춤 (Chromium 측정: 요소 3,000개에 약 40ms, 60,000개에 500ms). 스냅샷 뒤에 쌓인 변경분이 스냅샷보다 커져야 다음 구간으로 넘어가므로, 스냅샷 하나가 이 값의 4분의 1보다 큰 페이지에서는 보관량이 이 값을 넘을 수 있음 (최대 스냅샷 약 4개 분량). `Infinity`면 크기 제한 없음. |
 | `maskAllInputs` | `boolean` | `false` | `true`면 리플레이에서 모든 `<input>`(hidden input과 `type` 속성이 없는 input 포함), `<textarea>`, `<select>` 값을 마스킹. 체크박스·라디오 버튼의 선택 상태는 기록됨. `<textarea>`는 텍스트 콘텐츠(마크업에 담긴 초기값, React 제어 컴포넌트처럼 `defaultValue`로 쓰인 값)도 마스킹되며 공백 외 문자가 `*`로 표시됨. `false`면 비밀번호 입력만 마스킹 (rrweb 기본값). |
 | `maskTextSelector` | `string \| null` | `null` | 리플레이에서 텍스트를 마스킹할 요소의 CSS 셀렉터 (공백 외 문자가 `*`로 표시됨). `rr-mask` 클래스가 붙은 요소는 항상 마스킹. |
 | `blockSelector` | `string \| null` | `null` | 리플레이에서 제외할 요소의 CSS 셀렉터 — 전체 스냅샷에 포함된 요소는 같은 크기의 빈 placeholder로만 기록. rrweb 1.1.3은 이 셀렉터를 직렬화되는 요소 자신에만 검사하므로, 이후 해당 요소 안에 추가·변경된 콘텐츠(예: 녹화 시작 후 SPA가 렌더링한 영역)와 입력 필드에 입력한 값은 여전히 기록됨. 민감하거나 동적으로 바뀌는 영역과 입력 필드를 확실히 제외하려면 요소에 `rr-block` 클래스를 붙일 것. |

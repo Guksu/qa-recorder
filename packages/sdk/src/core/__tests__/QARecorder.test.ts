@@ -730,3 +730,130 @@ describe('QARecorder — 환경 정보와 업로드 파일', () => {
     alertSpy.mockRestore();
   });
 });
+
+describe('QARecorder — 백업 용량 초과', () => {
+  const KEY = 'qa-recorder-backup';
+  type Backup = { events: { type: number; data: unknown }[]; harEntries: unknown[]; consoleLogs: unknown[] };
+  /** 저장에 성공한 마지막 백업 값 */
+  let saved: string | null;
+  let restoreSetItem: (() => void) | undefined;
+
+  /** sessionStorage가 maxChars(키 포함)를 넘는 값을 거부하게 한다 */
+  function limitSessionStorage(maxChars: number) {
+    const original = sessionStorageMock.setItem.getMockImplementation()!;
+    sessionStorageMock.setItem.mockImplementation((key: string, value: string) => {
+      if (key.length + value.length > maxChars) throw new DOMException('quota exceeded', 'QuotaExceededError');
+      saved = value;
+      original(key, value);
+    });
+    restoreSetItem = () => sessionStorageMock.setItem.mockImplementation(original);
+  }
+
+  /** 이전 구간에 큰 변경(약 5,000자)을 넣고 체크아웃한 뒤, 새 구간에 recentPad 크기의 변경을 넣는다 */
+  function emitTwoSegments(recentPad: number) {
+    const { emit } = mocks.record.mock.lastCall![0] as { emit: (event: unknown, isCheckout?: boolean) => void };
+    const t = Date.now();
+    emit({ type: 3, data: { pad: 'o'.repeat(5_000) }, timestamp: t - 3 });
+    emit({ type: 4, data: {}, timestamp: t - 2 }, true);
+    emit({ type: 2, data: {}, timestamp: t - 1 });
+    emit({ type: 3, data: { recent: 'r'.repeat(recentPad) }, timestamp: t });
+  }
+
+  beforeEach(() => {
+    saved = null;
+  });
+
+  afterEach(() => {
+    restoreSetItem?.();
+    restoreSetItem = undefined;
+  });
+
+  it('용량 안에 들어가면 지금처럼 녹화 전체를 백업한다', async () => {
+    const recorder = new QARecorder({ enableBackup: true });
+    await recorder.init();
+    emitTwoSegments(10);
+    limitSessionStorage(1_000_000);
+
+    window.dispatchEvent(new Event('pagehide'));
+
+    const backup = JSON.parse(saved!) as Backup;
+    expect(backup.events).toEqual(JSON.parse(JSON.stringify(buffersOf(recorder).events)));
+    expect(backup.events.map((e) => e.type)).toEqual([2, 3, 4, 2, 3]);
+    recorder.destroy();
+  });
+
+  it('녹화 전체가 용량을 넘으면 지금 구간만 백업하고, 다음 init()에 그 구간이 복원된다', async () => {
+    const recorder = new QARecorder({ enableBackup: true });
+    await recorder.init();
+    const seeded = seedBuffers(recorder);
+    emitTwoSegments(10);
+    limitSessionStorage(3_000);
+
+    window.dispatchEvent(new Event('pagehide'));
+    recorder.destroy();
+
+    const backup = JSON.parse(saved!) as Backup;
+    expect(backup.events.map((e) => e.type)).toEqual([4, 2, 3]);
+    expect(backup.harEntries).toEqual(seeded.network);
+    expect(backup.consoleLogs).toEqual(seeded.console);
+
+    sessionStorageMock.getItem.mockReturnValueOnce(saved);
+    const next = new QARecorder({ enableBackup: true });
+    await next.init();
+    expect(buffersOf(next).events).toContainEqual(expect.objectContaining({ data: { recent: 'r'.repeat(10) } }));
+    next.destroy();
+  });
+
+  it('지금 구간도 용량을 넘으면 녹화 없이 네트워크·콘솔 기록만 백업한다', async () => {
+    const recorder = new QARecorder({ enableBackup: true });
+    await recorder.init();
+    const seeded = seedBuffers(recorder);
+    emitTwoSegments(5_000);
+    limitSessionStorage(3_000);
+
+    window.dispatchEvent(new Event('pagehide'));
+
+    const backup = JSON.parse(saved!) as Backup;
+    expect(backup.events).toEqual([]);
+    expect(backup.harEntries).toEqual(seeded.network);
+    expect(backup.consoleLogs).toEqual(seeded.console);
+    recorder.destroy();
+  });
+
+  it('어떤 백업도 들어가지 않으면 이전 백업을 지워 다음 init()에 오래된 백업이 복원되지 않게 한다', async () => {
+    const recorder = new QARecorder({ enableBackup: true });
+    await recorder.init();
+    sessionStorageMock.setItem(KEY, 'stale backup');
+    sessionStorageMock.removeItem.mockClear();
+    limitSessionStorage(10);
+
+    window.dispatchEvent(new Event('pagehide'));
+
+    expect(sessionStorageMock.removeItem).toHaveBeenCalledWith(KEY);
+    expect(saved).toBeNull();
+    recorder.destroy();
+  });
+});
+
+describe('QARecorder — 녹화 크기 제한', () => {
+  const emitLarge = (size: number) => {
+    const { emit } = mocks.record.mock.lastCall![0] as { emit: (event: unknown) => void };
+    emit({ type: 3, data: { pad: 'x'.repeat(size) }, timestamp: Date.now() });
+  };
+
+  it('maxReplaySize를 녹화기에 전달해, 지금 구간이 절반을 넘으면 새 구간을 시작한다', async () => {
+    const recorder = new QARecorder({ maxReplaySize: 10_000 });
+    await recorder.init();
+    emitLarge(6_000);
+    expect(mocks.takeFullSnapshot).toHaveBeenCalledWith(true);
+    recorder.destroy();
+  });
+
+  it('기본값(20MB)에서는 작은 녹화로 새 구간을 시작하지 않는다', async () => {
+    const recorder = new QARecorder();
+    await recorder.init();
+    emitLarge(6_000);
+    expect(mocks.takeFullSnapshot).not.toHaveBeenCalled();
+    recorder.destroy();
+  });
+});
