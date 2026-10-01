@@ -15,12 +15,13 @@
 
 Reproducing bugs in web applications is hard. When a QA engineer clicks a button and an error appears, the developer needs three things to debug it: **what was on screen**, **what network requests were made**, and **what errors were logged**. A screenshot and a text description are rarely enough.
 
-`qa-recorder` uses **rrweb DOM serialization** — not video capture — to record every DOM mutation, user interaction, network request, and console error from the moment the page loads. Because rrweb serializes the DOM tree rather than recording a video stream, there are no large files, no screen-share permissions, and the capture works on mobile, WebView, and any browser.
+`qa-recorder` uses **rrweb DOM serialization** — not video capture — to record every DOM mutation, user interaction, network request, and console error from the moment the SDK starts. Because rrweb serializes the DOM tree rather than recording a video stream, there are no large files, no screen-share permissions, and the capture works on mobile, WebView, and any browser.
 
-It keeps a rolling 20-minute window in memory. When your QA team wants to capture a session, they click the floating button once, optionally add a bug memo, then save:
+By default it keeps the last 20–40 minutes in memory (less on very busy pages — see `mode` and `maxReplaySize`). When your QA team wants to capture a session, they click the floating button once, optionally add a bug memo, then save:
 
 - A **DOM session replay** of the entire interaction (rrweb events — lightweight, no video)
 - A **HAR network log** of the last 100 requests
+- **Environment info** — browser, screen size, masked page URL and SDK version
 - A **unified QA report** — session replay + network inspector + console errors time-synchronized in one self-contained HTML file
 
 No backend required. No browser extension. No screen share permission. Just add one script tag.
@@ -29,20 +30,20 @@ No backend required. No browser extension. No screen share permission. Just add 
 
 ## Features
 
-| | Feature | Description |
-|---|---|---|
-| 🎥 | **DOM session replay** | Captures every DOM change via `MutationObserver` (rrweb). Works on mobile, WebView, and any browser — no `getDisplayMedia` needed. |
-| 🌐 | **Network capture** | Intercepts `fetch` and `XHR`. Circular buffer, up to 100 entries in HAR 1.2 format. |
-| 🖥️ | **Console capture** | Captures `console.error`, `console.warn`, `window.onerror`, and `unhandledrejection`. |
-| 📋 | **Unified QA report** | Single self-contained HTML: session replay (left) + network inspector + console log (right). Time-synchronized — clicking a network row or console entry seeks to that exact moment. |
-| 🔍 | **Network detail panel** | Click any request row to inspect Headers, Payload, Response, and Timing — Chrome DevTools style. |
-| 🔒 | **Sensitive data masking** | Before anything is stored, the values of passwords, tokens, API keys and other sensitive keys (`maskKeys`) are redacted in request URLs (query and fragment), JSON and form request/response bodies, and the page URL recorded in the replay — along with `Authorization`, `Cookie` and other auth headers. Keys are matched by name only, so a token in a URL path or inside another key's value (a `?next=` redirect, a page URL sent to analytics) is not detected — see `maskKeys`. Text and links inside the page's DOM are not covered by `maskKeys`: `maskAllInputs` and `maskTextSelector` mask input values and text in the replay, and elements with the `rr-block` class are left out (see `blockSelector` for its limits). The SDK's own UI (button, save dialog with the bug memo) is never recorded into the replay. |
-| 📦 | **Local save** | Downloads a single ZIP file directly — no backend needed. |
-| ☁️ | **Remote upload** | Optionally POST files to your own server. Shows a share-link copy button on success. |
-| 📝 | **Bug memo** | Optional text note added at save time — embedded in the unified HTML report and sent with remote uploads. |
-| 🧭 | **Environment info** | Browser (user agent), language, time zone, viewport and screen size, device pixel ratio, the page URL (masked with `maskKeys`) and the SDK version are saved with every report — shown in the report's **Environment** tab, stored as `qa-env-*.json` and sent with remote uploads. Document title and referrer are not collected. |
-| 💾 | **Session continuity** | `enableBackup: true` auto-saves the session to sessionStorage on tab hide and silently restores it after a page refresh or navigation — no prompts, no data loss. (Note: data is cleared when the tab is closed.) |
-| 🧩 | **Shadow DOM UI** | Floating button and modals are fully isolated from the host page's styles. Drag the button out of the way with a mouse, finger or pen. |
+| Feature | Description |
+|---|---|
+| **DOM session replay** | Captures every DOM change via `MutationObserver` (rrweb). Works on mobile, WebView, and any browser — no `getDisplayMedia` needed. |
+| **Network capture** | Intercepts `fetch` and `XHR`. Circular buffer, up to 100 entries in HAR 1.2 format. |
+| **Console capture** | Captures `console.error` and `console.warn` (add `log` and `info` with `consoleLevels`), uncaught errors and unhandled promise rejections. The app's own `window.onerror` is left untouched. |
+| **Unified QA report** | Single self-contained HTML: session replay (left) + network inspector, console log and environment info (right). Time-synchronized — clicking a network row or console entry seeks to that exact moment. |
+| **Network detail panel** | Click any request row to inspect Headers, Payload, Response, and Timing — Chrome DevTools style. |
+| **Sensitive data masking** | Before anything is stored, the values of passwords, tokens, API keys and other sensitive keys (`maskKeys`) are redacted in request URLs (query and fragment), JSON and form request/response bodies, and the page URL recorded in the replay — along with `Authorization`, `Cookie` and other auth headers. Keys are matched by name only, so a token in a URL path or inside another key's value (a `?next=` redirect, a page URL sent to analytics) is not detected — see `maskKeys`. Text and links inside the page's DOM are not covered by `maskKeys`: `maskAllInputs` and `maskTextSelector` mask input values and text in the replay, and elements with the `rr-block` class are left out (see `blockSelector` for its limits). The SDK's own UI (button, save dialog with the bug memo) is never recorded into the replay. |
+| **Local save** | Downloads a single ZIP file directly — no backend needed. |
+| **Remote upload** | Optionally POST files to your own server. Shows a share-link copy button on success. |
+| **Bug memo** | Optional text note added at save time — embedded in the unified HTML report and sent with remote uploads. |
+| **Environment info** | Browser (user agent), language, time zone, viewport and screen size, device pixel ratio, the page URL (masked with `maskKeys`) and the SDK version are saved with every report — shown in the report's **Environment** tab, stored as `qa-env-*.json` and sent with remote uploads. Document title and referrer are not collected. |
+| **Session continuity** | `enableBackup: true` auto-saves the session to sessionStorage on tab hide and silently restores it after a page refresh or navigation — no prompts. If the session is too large for sessionStorage, a smaller backup is kept (see `enableBackup`). (Note: data is cleared when the tab is closed.) |
+| **Shadow DOM UI** | Floating button and modals are fully isolated from the host page's styles. Drag the button out of the way with a mouse, finger or pen. |
 
 ---
 
@@ -57,8 +58,10 @@ pnpm add qa-recorder
 Or drop it in via `<script>` tag (UMD build, no bundler required):
 
 ```html
-<script src="https://unpkg.com/qa-recorder/dist/qa-recorder.umd.js"></script>
+<script src="https://unpkg.com/qa-recorder@1/dist/qa-recorder.umd.js"></script>
 ```
+
+`@1` loads the latest 1.x release, so a future major version with breaking changes is never picked up automatically. Pin an exact version (for example `@1.13.0`) if you need fully predictable builds.
 
 ---
 
@@ -73,8 +76,8 @@ QARecorder.setup({
   enableBackup: true,
 });
 // Recording starts immediately — no permission prompt, no click needed.
-// A red floating button appears in the bottom-right corner.
-// The last 20 minutes are always available in memory.
+// A dark floating button with a blinking red REC dot appears in the bottom-right corner.
+// The last 20–40 minutes are kept in memory (less on very busy pages — see maxReplaySize).
 // 1 click → confirm → one ZIP file downloads automatically → recording continues.
 ```
 
@@ -120,7 +123,7 @@ createApp(App).mount('#app');
     maxRequests: 100,
   };
 </script>
-<script src="https://unpkg.com/qa-recorder/dist/qa-recorder.umd.js"></script>
+<script src="https://unpkg.com/qa-recorder@1/dist/qa-recorder.umd.js"></script>
 ```
 
 ---
@@ -174,7 +177,7 @@ POST /upload
 
 ## Configuration
 
-All options can be set via `window.__QA_RECORDER_CONFIG__` or passed as constructor arguments. Constructor arguments take precedence.
+All options can be set via `window.__QA_RECORDER_CONFIG__` or passed to `QARecorder.setup()` (or the constructor). Options passed in code take precedence.
 
 ```ts
 window.__QA_RECORDER_CONFIG__ = {
@@ -230,37 +233,40 @@ window.__QA_RECORDER_CONFIG__ = {
 ## How It Works
 
 ```
-Page load
-  ├─ NetworkCapture.start()   → patches window.fetch + XHR (circular buffer)
-  ├─ ScreenRecorder.start()   → rrweb.record() begins immediately (20-min rolling window)
-  ├─ ConsoleCapture.start()   → patches console.error/warn + window.onerror (circular buffer)
-  └─ FloatingButton.mount()   → injects button via Shadow DOM (recording state)
+QARecorder.setup() / init()
+  ├─ NetworkCapture.start()   → patches window.fetch + XHR; masks each request as it is captured (circular buffer)
+  ├─ ScreenRecorder.start()   → rrweb.record() begins immediately (last two checkout segments — see mode, maxReplaySize)
+  ├─ ConsoleCapture.start()   → patches console.error/warn, listens for uncaught errors and unhandled rejections (circular buffer)
+  ├─ FloatingButton.mount()   → injects button via Shadow DOM (recording state)
+  └─ [enableBackup]           → restores the sessionStorage backup, backs up again on pagehide
 
 User clicks the button
-  ├─ ConfirmModal.show()            → { confirmed, memo }
+  ├─ ConfirmModal.show()        → { confirmed, memo }
   │   └─ [cancelled] → no-op
   ├─ ScreenRecorder.stop()
   ├─ NetworkCapture.snapshot()  → HAR 1.2 JSON
   ├─ ConsoleCapture.snapshot()  → console entries array
-  ├─ MaskingFilter.apply()      → redact sensitive headers, body keys and query params
+  ├─ collectEnvironment()       → browser, screen, masked page URL, SDK version
   ├─ ProgressBar.show()         → "Saving..."
   │
   ├─ [endpoint set]
   │   ├─ RemoteDelivery.send()  → POST multipart/form-data
+  │   │   └─ [upload fails] → LocalStorage.save() instead
   │   ├─ ProgressBar.hide()
   │   └─ SharePanel.show(url)   → copy-link button (if server returns url)
   │
-  └─ [no endpoint]
-      └─ LocalStorage.save()    → downloads 1 ZIP file:
-                                   qa-report-*.zip
-                                     ├─ qa-session-*.rr.json
-                                     ├─ qa-network-*.har
-                                     ├─ qa-env-*.json
-                                     └─ qa-report-*.html  ← unified viewer
-
-  └─ ScreenRecorder.reset() + start()   → recording resumes immediately
-     NetworkCapture.clearBuffer()       → network log reset
-     ConsoleCapture.clearBuffer()       → console log reset
+  ├─ [no endpoint]
+  │   └─ LocalStorage.save()    → downloads 1 ZIP file:
+  │                                qa-report-*.zip
+  │                                  ├─ qa-session-*.rr.json
+  │                                  ├─ qa-network-*.har
+  │                                  ├─ qa-env-*.json
+  │                                  └─ qa-report-*.html  ← unified viewer
+  │
+  ├─ [saved]  ScreenRecorder.reset() + start()   → recording resumes immediately
+  │           NetworkCapture.clearBuffer()       → network log reset
+  │           ConsoleCapture.clearBuffer()       → console log reset
+  └─ [failed] ScreenRecorder.resume()            → recording kept, so you can save again
 ```
 
 ---
@@ -292,10 +298,14 @@ The `qa-report-{timestamp}.html` file is a fully self-contained QA report — no
 
 ### Console Log (right panel — Console tab)
 
-- Filter by Error / Warning / Log level
+- Filter by Errors / Warnings / Logs (Logs also covers `info`)
 - Click any entry to **jump to that moment** in the session replay
 - Future entries fade out during playback, revealing the timeline progressively
 - Expand `▶ stack` to see the stack trace of an error
+
+### Environment (right panel — Environment tab)
+
+- Browser (user agent), language, time zone, viewport and screen size, device pixel ratio, the page URL (masked with `maskKeys`) and the SDK version at the moment of saving
 
 > The viewer loads rrweb from CDN (`cdn.jsdelivr.net`) on open, with a Subresource Integrity check — an internet connection is required to play back sessions. If the player cannot be loaded, the network and console panels still work.
 
@@ -305,12 +315,12 @@ The `qa-report-{timestamp}.html` file is a fully self-contained QA report — no
 
 | Browser | Support |
 |---|---|
-| Chrome 72+ | ✅ Full support |
-| Edge 79+ | ✅ Full support |
-| Firefox 66+ | ✅ Full support |
-| Safari 14+ | ✅ Full support |
-| Mobile browsers | ✅ Full support |
-| WebView (Android/iOS) | ✅ Full support |
+| Chrome 72+ | Full support |
+| Edge 79+ | Full support |
+| Firefox 66+ | Full support |
+| Safari 14+ | Full support |
+| Mobile browsers | Full support |
+| WebView (Android/iOS) | Full support |
 
 > rrweb uses only `MutationObserver` and standard DOM APIs — no screen capture permission required, no platform restrictions.
 
@@ -321,6 +331,8 @@ The `qa-report-{timestamp}.html` file is a fully self-contained QA report — no
 ```bash
 pnpm install
 
+pnpm build                    # build all packages (shared, then sdk)
+pnpm typecheck                # type-check all packages
 pnpm -F qa-recorder test      # run tests (Vitest + jsdom)
 pnpm -F qa-recorder build     # build ESM + UMD to dist/
 pnpm -F qa-recorder dev       # watch mode

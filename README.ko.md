@@ -19,12 +19,13 @@
 
 개발자가 버그를 찾으려면 세 가지가 필요합니다: **그 순간의 화면**, **그 순간의 네트워크 요청**, 그리고 **그 순간의 콘솔 에러**. 스크린샷 한 장과 텍스트 재현 절차로는 충분하지 않은 경우가 많습니다.
 
-`qa-recorder`는 **rrweb DOM 직렬화** 방식 — 영상 캡처가 아닌 — 으로 페이지 로드 시점부터 모든 DOM 변화, 사용자 인터랙션, 네트워크 요청, 콘솔 에러를 통합 수집합니다. rrweb이 영상 스트림 대신 DOM 트리를 직렬화하기 때문에 대용량 파일도, 화면 공유 권한도, 플랫폼 제약도 없습니다.
+`qa-recorder`는 **rrweb DOM 직렬화** 방식 — 영상 캡처가 아닌 — 으로 SDK가 시작된 시점부터 모든 DOM 변화, 사용자 인터랙션, 네트워크 요청, 콘솔 에러를 통합 수집합니다. rrweb이 영상 스트림 대신 DOM 트리를 직렬화하기 때문에 대용량 파일도, 화면 공유 권한도, 플랫폼 제약도 없습니다.
 
-최근 20분 분량을 메모리에 유지합니다. QA 담당자가 플로팅 버튼을 클릭하고 버그 메모를 입력(선택)하면 저장됩니다:
+기본으로 최근 20~40분을 메모리에 유지합니다 (변화가 아주 많은 페이지는 더 짧음 — `mode`, `maxReplaySize` 참고). QA 담당자가 플로팅 버튼을 클릭하고 버그 메모를 입력(선택)하면 저장됩니다:
 
 - **DOM 세션 리플레이** 원본 (rrweb 이벤트 — 경량, 영상 없음)
 - **네트워크 요청 로그** (HAR 1.2)
+- **환경 정보** — 브라우저, 화면 크기, 마스킹된 페이지 URL, SDK 버전
 - **통합 QA 리포트** — 세션 리플레이 + 네트워크 인스펙터 + 콘솔 에러가 시간 동기화된 하나의 HTML 파일로
 
 백엔드 불필요. 브라우저 확장 프로그램 불필요. 화면 공유 권한 불필요. script 태그 하나만 추가하면 됩니다.
@@ -33,20 +34,20 @@
 
 ## 주요 기능
 
-| | 기능 | 설명 |
-|---|---|---|
-| 🎥 | **DOM 세션 리플레이** | `MutationObserver` 기반 DOM 변화 캡처 (rrweb). 모바일, WebView, 모든 브라우저 지원 — `getDisplayMedia` 불필요. |
-| 🌐 | **네트워크 캡처** | `fetch`와 `XHR` 인터셉트. 최대 100건 순환 버퍼, HAR 1.2 포맷. |
-| 🖥️ | **콘솔 캡처** | `console.error`, `console.warn`, `window.onerror`, `unhandledrejection` 자동 수집. |
-| 📋 | **통합 QA 리포트** | 하나의 HTML 파일: 세션 리플레이(좌) + 네트워크 인스펙터 + 콘솔 로그(우). 시간 동기화 — 네트워크 행이나 콘솔 항목 클릭 시 해당 시점으로 즉시 이동. |
-| 🔍 | **네트워크 상세 패널** | 요청 행 클릭 시 Headers, Payload, Response, Timing 탭 — Chrome 개발자도구 스타일. |
-| 🔒 | **민감 정보 마스킹** | 비밀번호·토큰·API 키 등 민감 키(`maskKeys`)의 값을 요청 URL(쿼리와 fragment), JSON·form 요청/응답 body, 리플레이에 기록되는 페이지 URL에서 저장 전에 자동 마스킹하고, `Authorization`, `Cookie` 등 인증 헤더도 가림. 키 이름으로만 판별하므로 URL 경로나 다른 키의 값 안에 담긴 토큰(`?next=` 리다이렉트, 분석 도구로 보내는 페이지 URL 등)은 감지하지 못함 (`maskKeys` 참고). 페이지 DOM 안의 텍스트와 링크는 `maskKeys` 대상이 아니며, `maskAllInputs`·`maskTextSelector`로 리플레이의 입력값·텍스트를 가리고 `rr-block` 클래스를 붙인 요소는 리플레이에서 제외 (`blockSelector`는 아래 제약 참고). SDK 자체 UI(버튼, 버그 메모 입력 창 등)는 리플레이에 녹화되지 않음. |
-| 📦 | **로컬 저장** | 리포트 파일을 ZIP 하나로 로컬에 다운로드 — 백엔드 불필요. |
-| ☁️ | **원격 업로드** | 서버 endpoint 설정 시 POST 업로드. 응답 URL이 있으면 링크 복사 버튼 노출. |
-| 📝 | **버그 메모** | 저장 시 입력하는 선택적 텍스트 메모 — 통합 HTML 리포트에 포함되고 원격 업로드 시 함께 전송. |
-| 🧭 | **환경 정보** | 브라우저(user agent), 언어, 시간대, 창·화면 크기, 기기 픽셀 비율, 페이지 URL(`maskKeys`로 마스킹), SDK 버전을 리포트마다 저장 — 리포트의 **Environment** 탭에 표시되고 `qa-env-*.json`으로 저장되며 원격 업로드 시 함께 전송. 문서 제목과 referrer는 수집하지 않음. |
-| 💾 | **세션 연속성** | `enableBackup: true` 설정 시 탭 숨김 시 세션을 sessionStorage에 자동 저장하고 새로고침 후 조용히 복원 — 팝업 없음, 데이터 손실 없음. (탭을 닫으면 데이터가 삭제됩니다.) |
-| 🧩 | **Shadow DOM UI** | 플로팅 버튼과 팝업이 호스트 페이지 스타일과 완전히 격리. 버튼은 마우스·손가락·펜으로 끌어 옮길 수 있음. |
+| 기능 | 설명 |
+|---|---|
+| **DOM 세션 리플레이** | `MutationObserver` 기반 DOM 변화 캡처 (rrweb). 모바일, WebView, 모든 브라우저 지원 — `getDisplayMedia` 불필요. |
+| **네트워크 캡처** | `fetch`와 `XHR` 인터셉트. 최대 100건 순환 버퍼, HAR 1.2 포맷. |
+| **콘솔 캡처** | `console.error`, `console.warn`(`consoleLevels`로 `log`, `info` 추가 가능), 잡히지 않은 에러, 처리되지 않은 Promise 거부를 자동 수집. 앱의 `window.onerror`는 건드리지 않음. |
+| **통합 QA 리포트** | 하나의 HTML 파일: 세션 리플레이(좌) + 네트워크 인스펙터, 콘솔 로그, 환경 정보(우). 시간 동기화 — 네트워크 행이나 콘솔 항목 클릭 시 해당 시점으로 즉시 이동. |
+| **네트워크 상세 패널** | 요청 행 클릭 시 Headers, Payload, Response, Timing 탭 — Chrome 개발자도구 스타일. |
+| **민감 정보 마스킹** | 비밀번호·토큰·API 키 등 민감 키(`maskKeys`)의 값을 요청 URL(쿼리와 fragment), JSON·form 요청/응답 body, 리플레이에 기록되는 페이지 URL에서 저장 전에 자동 마스킹하고, `Authorization`, `Cookie` 등 인증 헤더도 가림. 키 이름으로만 판별하므로 URL 경로나 다른 키의 값 안에 담긴 토큰(`?next=` 리다이렉트, 분석 도구로 보내는 페이지 URL 등)은 감지하지 못함 (`maskKeys` 참고). 페이지 DOM 안의 텍스트와 링크는 `maskKeys` 대상이 아니며, `maskAllInputs`·`maskTextSelector`로 리플레이의 입력값·텍스트를 가리고 `rr-block` 클래스를 붙인 요소는 리플레이에서 제외 (`blockSelector`는 아래 제약 참고). SDK 자체 UI(버튼, 버그 메모 입력 창 등)는 리플레이에 녹화되지 않음. |
+| **로컬 저장** | 리포트 파일을 ZIP 하나로 로컬에 다운로드 — 백엔드 불필요. |
+| **원격 업로드** | 서버 endpoint 설정 시 POST 업로드. 응답 URL이 있으면 링크 복사 버튼 노출. |
+| **버그 메모** | 저장 시 입력하는 선택적 텍스트 메모 — 통합 HTML 리포트에 포함되고 원격 업로드 시 함께 전송. |
+| **환경 정보** | 브라우저(user agent), 언어, 시간대, 창·화면 크기, 기기 픽셀 비율, 페이지 URL(`maskKeys`로 마스킹), SDK 버전을 리포트마다 저장 — 리포트의 **Environment** 탭에 표시되고 `qa-env-*.json`으로 저장되며 원격 업로드 시 함께 전송. 문서 제목과 referrer는 수집하지 않음. |
+| **세션 연속성** | `enableBackup: true` 설정 시 탭 숨김 시 세션을 sessionStorage에 자동 저장하고 새로고침 후 조용히 복원 — 팝업 없음. 세션이 sessionStorage에 다 들어가지 않으면 더 작게 줄여서 백업 (`enableBackup` 참고). (탭을 닫으면 데이터가 삭제됩니다.) |
+| **Shadow DOM UI** | 플로팅 버튼과 팝업이 호스트 페이지 스타일과 완전히 격리. 버튼은 마우스·손가락·펜으로 끌어 옮길 수 있음. |
 
 ---
 
@@ -61,24 +62,60 @@ pnpm add qa-recorder
 또는 script 태그로 직접 삽입 (UMD 빌드, 번들러 불필요):
 
 ```html
-<script src="https://unpkg.com/qa-recorder/dist/qa-recorder.umd.js"></script>
+<script src="https://unpkg.com/qa-recorder@1/dist/qa-recorder.umd.js"></script>
 ```
+
+`@1`은 1.x 중 최신 버전을 불러옵니다. 그래서 호환성이 깨질 수 있는 다음 큰 버전(2.0 등)은 자동으로 받지 않습니다. 빌드를 완전히 고정하려면 `@1.13.0`처럼 정확한 버전을 적으세요.
 
 ---
 
 ## 빠른 시작
 
-### ESM / npm
+### Vanilla JS
 
 ```ts
 import { QARecorder } from 'qa-recorder';
 
-const recorder = new QARecorder();
-await recorder.init();
-// 권한 요청 없이 즉시 녹화 시작 — 최근 20분을 항상 메모리에 유지.
-// 화면 우측 하단에 빨간 플로팅 버튼이 나타납니다.
-// 1번 클릭 → 확인 → 리포트 ZIP 파일이 자동 다운로드됩니다.
-// 저장 후 녹화가 자동으로 재시작됩니다.
+QARecorder.setup({
+  enableBackup: true,
+});
+// 권한 요청이나 클릭 없이 바로 녹화가 시작됩니다.
+// 화면 오른쪽 아래에 깜빡이는 빨간 REC 점이 있는 어두운 플로팅 버튼이 나타납니다.
+// 최근 20~40분을 메모리에 유지합니다 (변화가 아주 많은 페이지는 더 짧음 — maxReplaySize 참고).
+// 1번 클릭 → 확인 → ZIP 파일 1개 자동 다운로드 → 녹화는 계속됩니다.
+```
+
+### React
+
+`QARecorder.setup()`은 컴포넌트나 훅 밖, 모듈 최상단에서 호출하세요. `setup()`은 두 번째 호출부터 아무 일도 하지 않으므로 React StrictMode에서도 안전합니다.
+
+```ts
+// main.tsx
+import { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
+import { QARecorder } from 'qa-recorder';
+import App from './App';
+
+QARecorder.setup({ enableBackup: true });
+
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <App />
+  </StrictMode>
+);
+```
+
+### Vue
+
+```ts
+// main.ts
+import { createApp } from 'vue';
+import { QARecorder } from 'qa-recorder';
+import App from './App.vue';
+
+QARecorder.setup({ enableBackup: true });
+
+createApp(App).mount('#app');
 ```
 
 ### Script 태그
@@ -86,10 +123,11 @@ await recorder.init();
 ```html
 <script>
   window.__QA_RECORDER_CONFIG__ = {
+    enableBackup: true,
     maxRequests: 100,
   };
 </script>
-<script src="https://unpkg.com/qa-recorder/dist/qa-recorder.umd.js"></script>
+<script src="https://unpkg.com/qa-recorder@1/dist/qa-recorder.umd.js"></script>
 ```
 
 ---
@@ -143,7 +181,7 @@ POST /upload
 
 ## 설정 옵션
 
-모든 옵션은 `window.__QA_RECORDER_CONFIG__`으로 설정하거나 생성자 인수로 전달할 수 있습니다. 생성자 인수가 우선합니다.
+모든 옵션은 `window.__QA_RECORDER_CONFIG__`으로 설정하거나 `QARecorder.setup()`(또는 생성자)에 전달할 수 있습니다. 코드에서 전달한 값이 우선합니다.
 
 ```ts
 window.__QA_RECORDER_CONFIG__ = {
@@ -199,44 +237,47 @@ window.__QA_RECORDER_CONFIG__ = {
 ## 동작 원리
 
 ```
-페이지 로드
-  ├─ NetworkCapture.start()   → window.fetch + XHR 패치 (순환 버퍼)
-  ├─ ScreenRecorder.start()   → rrweb.record() 즉시 시작 (최근 20분 유지)
-  ├─ ConsoleCapture.start()   → console.error/warn + window.onerror 패치 (순환 버퍼)
-  └─ FloatingButton.mount()   → Shadow DOM으로 버튼 삽입 (recording 상태)
+QARecorder.setup() / init()
+  ├─ NetworkCapture.start()   → window.fetch + XHR 패치, 요청을 잡을 때마다 바로 마스킹 (순환 버퍼)
+  ├─ ScreenRecorder.start()   → rrweb.record() 즉시 시작 (마지막 두 구간 보관 — mode, maxReplaySize 참고)
+  ├─ ConsoleCapture.start()   → console.error/warn 패치, 잡히지 않은 에러·Promise 거부 수신 (순환 버퍼)
+  ├─ FloatingButton.mount()   → Shadow DOM으로 버튼 삽입 (recording 상태)
+  └─ [enableBackup]           → sessionStorage 백업 복원, pagehide 때 다시 백업
 
 플로팅 버튼 클릭
-  ├─ ConfirmModal.show()            → { confirmed, memo }
+  ├─ ConfirmModal.show()        → { confirmed, memo }
   │   └─ [취소] → no-op
   ├─ ScreenRecorder.stop()
   ├─ NetworkCapture.snapshot()  → HAR 1.2 JSON 생성
   ├─ ConsoleCapture.snapshot()  → 콘솔 엔트리 배열 생성
-  ├─ MaskingFilter.apply()      → 민감 헤더·body 키·쿼리 파라미터 마스킹
+  ├─ collectEnvironment()       → 브라우저, 화면, 마스킹된 페이지 URL, SDK 버전
   ├─ ProgressBar.show()         → "Saving..."
   │
   ├─ [endpoint 설정된 경우]
   │   ├─ RemoteDelivery.send()  → POST multipart/form-data
+  │   │   └─ [업로드 실패] → 대신 LocalStorage.save()
   │   ├─ ProgressBar.hide()
   │   └─ SharePanel.show(url)   → 링크 복사 버튼 (서버가 url 반환 시)
   │
-  └─ [endpoint 없는 경우]
-      └─ LocalStorage.save()    → ZIP 파일 1개 다운로드:
-                                   qa-report-*.zip
-                                     ├─ qa-session-*.rr.json
-                                     ├─ qa-network-*.har
-                                     ├─ qa-env-*.json
-                                     └─ qa-report-*.html  ← 통합 QA 리포트
-
-  └─ ScreenRecorder.reset() + start()   → 녹화 자동 재시작
-     NetworkCapture.clearBuffer()       → 네트워크 로그 초기화
-     ConsoleCapture.clearBuffer()       → 콘솔 로그 초기화
+  ├─ [endpoint 없는 경우]
+  │   └─ LocalStorage.save()    → ZIP 파일 1개 다운로드:
+  │                                qa-report-*.zip
+  │                                  ├─ qa-session-*.rr.json
+  │                                  ├─ qa-network-*.har
+  │                                  ├─ qa-env-*.json
+  │                                  └─ qa-report-*.html  ← 통합 QA 리포트
+  │
+  ├─ [저장 성공] ScreenRecorder.reset() + start()   → 녹화 자동 재시작
+  │             NetworkCapture.clearBuffer()       → 네트워크 로그 초기화
+  │             ConsoleCapture.clearBuffer()       → 콘솔 로그 초기화
+  └─ [저장 실패] ScreenRecorder.resume()            → 녹화 내용을 유지해 다시 저장할 수 있음
 ```
 
 ---
 
 ## 통합 QA 리포트 뷰어
 
-로컬 저장 시 함께 다운로드되는 `qa-report-{timestamp}.html`을 브라우저에서 열면 됩니다. 서버, 확장 프로그램, 별도 소프트웨어 불필요.
+로컬 저장 ZIP에 들어 있거나 원격 업로드로 전송된 `qa-report-{timestamp}.html`을 브라우저에서 열면 됩니다. 서버, 확장 프로그램, 별도 소프트웨어 불필요.
 
 ### 세션 리플레이 (왼쪽 패널)
 
@@ -261,10 +302,14 @@ window.__QA_RECORDER_CONFIG__ = {
 
 ### 콘솔 로그 (오른쪽 패널 — Console 탭)
 
-- Error / Warning / Log 레벨별 필터
+- Errors / Warnings / Logs 필터 (Logs에는 `info`도 포함)
 - 항목 클릭 시 **해당 시점으로 즉시 이동**
 - 재생 중 미래 항목 흐리게 표시 (타임라인 점진적 노출)
 - 에러의 stack trace는 `▶ stack`을 눌러 펼쳐 보기
+
+### 환경 정보 (오른쪽 패널 — Environment 탭)
+
+- 저장 시점의 브라우저(user agent), 언어, 시간대, 창·화면 크기, 기기 픽셀 비율, 페이지 URL(`maskKeys`로 마스킹), SDK 버전
 
 > 뷰어는 재생 시 CDN(`cdn.jsdelivr.net`)에서 rrweb을 로드하며, 무결성 검사(SRI)를 거칩니다. 재생에는 인터넷 연결이 필요합니다. 재생기를 불러오지 못해도 네트워크·콘솔 패널은 동작합니다.
 
@@ -274,12 +319,12 @@ window.__QA_RECORDER_CONFIG__ = {
 
 | 브라우저 | 지원 여부 |
 |---|---|
-| Chrome 72+ | ✅ 완전 지원 |
-| Edge 79+ | ✅ 완전 지원 |
-| Firefox 66+ | ✅ 완전 지원 |
-| Safari 14+ | ✅ 완전 지원 |
-| 모바일 브라우저 | ✅ 완전 지원 |
-| WebView (Android/iOS) | ✅ 완전 지원 |
+| Chrome 72+ | 완전 지원 |
+| Edge 79+ | 완전 지원 |
+| Firefox 66+ | 완전 지원 |
+| Safari 14+ | 완전 지원 |
+| 모바일 브라우저 | 완전 지원 |
+| WebView (Android/iOS) | 완전 지원 |
 
 > rrweb은 `MutationObserver`와 표준 DOM API만 사용합니다. 화면 캡처 권한 불필요, 플랫폼 제약 없음.
 
@@ -290,6 +335,8 @@ window.__QA_RECORDER_CONFIG__ = {
 ```bash
 pnpm install
 
+pnpm build                    # 전체 패키지 빌드 (shared → sdk 순서)
+pnpm typecheck                # 전체 패키지 타입 검사
 pnpm -F qa-recorder test      # 테스트 실행 (Vitest + jsdom)
 pnpm -F qa-recorder build     # ESM + UMD 빌드
 pnpm -F qa-recorder dev       # watch 모드
