@@ -129,16 +129,15 @@ export const BASE_STYLES = `
   }
   .qa-progress-track { height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden; }
   .qa-progress-fill {
+    width: 40%;
     height: 100%;
     background: linear-gradient(90deg, #ef4444, #f97316);
     border-radius: 2px;
-    transition: width 0.3s ease;
-    animation: qa-progress-shimmer 1.5s linear infinite;
-    background-size: 200% 100%;
+    animation: qa-progress-slide 1.2s ease-in-out infinite;
   }
-  @keyframes qa-progress-shimmer {
-    0%   { background-position: 200% 0; }
-    100% { background-position: -200% 0; }
+  @keyframes qa-progress-slide {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(250%); }
   }
   .qa-progress-label { font-size: 11px; color: #94a3b8; margin-top: 8px; text-align: right; }
 
@@ -156,8 +155,14 @@ export const BASE_STYLES = `
     z-index: 2147483647;
     animation: qa-slide-up 0.18s ease;
   }
-  .qa-share-title { font-size: 11px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px; }
-  .qa-share-url { font-size: 12px; color: #cbd5e1; word-break: break-all; margin-bottom: 12px; line-height: 1.5; }
+  .qa-share-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .qa-share-title { font-size: 11px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.06em; }
+  .qa-share-close {
+    background: none; border: none; padding: 0 2px; cursor: pointer;
+    color: #64748b; font-size: 16px; line-height: 1;
+  }
+  .qa-share-close:hover { color: #cbd5e1; }
+  .qa-share-url { font-size: 12px; color: #cbd5e1; word-break: break-all; margin-bottom: 12px; line-height: 1.5; user-select: all; }
   .qa-copy-btn {
     width: 100%;
     padding: 9px;

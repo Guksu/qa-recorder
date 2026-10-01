@@ -41,7 +41,7 @@ export class ConfirmModal {
       overlay.className = 'qa-modal-overlay';
       overlay.innerHTML = `
         <div class="qa-modal">
-          <h3>${message}</h3>
+          <h3></h3>
           <label class="qa-memo-label">Bug memo (optional)</label>
           <textarea class="qa-memo-textarea" id="qa-memo" placeholder="Describe what happened..."></textarea>
           <div class="qa-modal-actions">
@@ -50,6 +50,9 @@ export class ConfirmModal {
           </div>
         </div>
       `;
+
+      // 문구를 HTML로 해석하지 않도록 textContent로 넣는다
+      overlay.querySelector('h3')!.textContent = message;
 
       const cleanup = (confirmed: boolean) => {
         const textarea = shadow.querySelector<HTMLTextAreaElement>('#qa-memo');

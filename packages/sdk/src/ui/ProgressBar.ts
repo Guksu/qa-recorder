@@ -17,22 +17,19 @@ export class ProgressBar {
 
     const wrap = document.createElement('div');
     wrap.className = 'qa-progress-bar-wrap';
+    // 실제 진행률을 알 수 없으므로 계속 움직이는 막대로 "작업 중"만 보여준다
     wrap.innerHTML = `
       <div class="qa-progress-track">
-        <div class="qa-progress-fill" id="fill" style="width:0%"></div>
+        <div class="qa-progress-fill" id="fill"></div>
       </div>
-      <div class="qa-progress-label" id="label">${label}</div>
+      <div class="qa-progress-label" id="label"></div>
     `;
+    // 문구를 HTML로 해석하지 않도록 textContent로 넣는다
+    wrap.querySelector('#label')!.textContent = label;
 
     excludeFromRecording(this.host, style, wrap);
     this.shadow.append(style, wrap);
     document.body.appendChild(this.host);
-  }
-
-  static update(percent: number): void {
-    if (!this.shadow) return;
-    const fill = this.shadow.querySelector<HTMLElement>('#fill');
-    if (fill) fill.style.width = `${percent}%`;
   }
 
   static hide(): void {
