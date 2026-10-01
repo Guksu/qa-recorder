@@ -103,7 +103,7 @@ describe('NetworkCapture', () => {
 
     it('요청 body와 URL 쿼리의 민감 키 값을 마스킹한다', async () => {
       vi.stubGlobal('fetch', makeMockFetch());
-      const capture = new NetworkCapture(100, [], ['password', 'token']);
+      const capture = new NetworkCapture(100, [], { maskKeys: ['password', 'token'] });
       capture.start();
 
       const body = '{"id":"kim","password":"pw"}';
@@ -127,7 +127,7 @@ describe('NetworkCapture', () => {
     it('요청 URL fragment의 민감 키 값도 쿼리와 함께 마스킹한다', async () => {
       const mockFetch = makeMockFetch();
       vi.stubGlobal('fetch', mockFetch);
-      const capture = new NetworkCapture(100, [], ['token']);
+      const capture = new NetworkCapture(100, [], { maskKeys: ['token'] });
       capture.start();
 
       const url = 'https://example.com/callback?code=1&token=abc#access_token=xyz&token_type=bearer';
@@ -148,7 +148,7 @@ describe('NetworkCapture', () => {
     it('비동기로 채워지는 응답 body도 마스킹하고, 앱이 받는 응답은 원본 그대로다', async () => {
       const body = '{"access_token":"a","user":"kim"}';
       vi.stubGlobal('fetch', makeMockFetch(200, body));
-      const capture = new NetworkCapture(100, [], ['token']);
+      const capture = new NetworkCapture(100, [], { maskKeys: ['token'] });
       capture.start();
 
       const response = await window.fetch('https://example.com/oauth/token');
@@ -245,7 +245,7 @@ describe('NetworkCapture', () => {
       const mockFetch = makeMockFetch(500);
       vi.stubGlobal('fetch', mockFetch);
       const endpoint = 'https://qa.example.com/upload?token=SECRET';
-      const capture = new NetworkCapture(1, [], [], [endpoint]);
+      const capture = new NetworkCapture(1, [], { ignoreUrls: [endpoint] });
       capture.start();
 
       await window.fetch('https://example.com/api');
@@ -260,7 +260,7 @@ describe('NetworkCapture', () => {
 
     it('상대 경로 ignoreUrls는 페이지 URL 기준으로 해석해 비교한다', async () => {
       vi.stubGlobal('fetch', makeMockFetch());
-      const capture = new NetworkCapture(100, [], [], ['/qa/upload']);
+      const capture = new NetworkCapture(100, [], { ignoreUrls: ['/qa/upload'] });
       capture.start();
 
       await window.fetch(new URL('/qa/upload', window.location.href).href, { method: 'POST' });
@@ -331,7 +331,7 @@ describe('NetworkCapture', () => {
     });
 
     it('ignoreUrls에 해당하는 XHR 요청은 기록하지 않는다', () => {
-      const capture = new NetworkCapture(100, [], [], ['https://qa.example.com/upload']);
+      const capture = new NetworkCapture(100, [], { ignoreUrls: ['https://qa.example.com/upload'] });
       capture.start();
 
       const ignored = new window.XMLHttpRequest();
@@ -375,7 +375,7 @@ describe('NetworkCapture', () => {
     });
 
     it('요청 body·URL 쿼리와 응답 body의 민감 키 값을 마스킹한다', () => {
-      const capture = new NetworkCapture(100, [], ['password', 'token']);
+      const capture = new NetworkCapture(100, [], { maskKeys: ['password', 'token'] });
       capture.start();
 
       const xhr = new window.XMLHttpRequest();
@@ -394,7 +394,7 @@ describe('NetworkCapture', () => {
     });
 
     it('XHR 요청 URL의 해시 라우트 쿼리도 마스킹하고, 원본 XHR에는 원래 URL을 전달한다', () => {
-      const capture = new NetworkCapture(100, [], ['token']);
+      const capture = new NetworkCapture(100, [], { maskKeys: ['token'] });
       capture.start();
 
       const xhr = new window.XMLHttpRequest();

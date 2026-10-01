@@ -95,6 +95,28 @@ export class MaskingFilter {
   }
 
   /**
+   * 끝까지 읽지 못하고 잘린 body의 민감 키 값을 가린다 (maxBodySize를 넘은 fetch 응답).
+   * 잘린 JSON은 JSON.parse가 실패해 maskBody가 원문을 그대로 두므로, JSON으로 보이면 토큰 단위로 훑어
+   * 민감 키의 값(문자열·숫자·리터럴·객체·배열)을 "[MASKED]"로 바꾼다. 값이 잘린 끝까지 이어지면 거기서 텍스트를 끝낸다.
+   * form 형식은 필드 단위로 가리고(마지막 필드가 잘려 있어도 키가 보이면 가림), 그 밖의 형식은 원문을 둔다.
+   * 예기치 못한 예외 시에는 [MASKED]를 반환한다 (fail-closed).
+   */
+  static maskTruncatedBody(text: string, mimeType: string, isSensitiveKey: KeyMatcher | null): string {
+    if (!isSensitiveKey || !text) return text;
+    try {
+      if (mimeType.toLowerCase().includes('json') || /^\s*[[{]/.test(text)) {
+        return maskPartialJson(text, isSensitiveKey);
+      }
+      if (mimeType.toLowerCase().includes('application/x-www-form-urlencoded')) {
+        return maskFormEncoded(text, isSensitiveKey);
+      }
+      return text;
+    } catch {
+      return MASKED;
+    }
+  }
+
+  /**
    * URL의 쿼리와 fragment에서 민감 키의 값만 [MASKED]로 바꾼다. 요청 URL과 rrweb이 기록하는 페이지 URL에 사용.
    * fragment는 '='를 포함할 때만 form 필드로 보며, 해시 라우트의 쿼리(`#/reset?token=...`)와
    * OAuth implicit flow처럼 fragment 자체가 form 필드인 경우(`#access_token=...&token_type=bearer`)를 모두 검사한다
@@ -227,4 +249,95 @@ function maskJsonNode(node: unknown, isSensitiveKey: KeyMatcher): boolean {
     }
   }
   return masked;
+}
+
+/**
+ * JSON.parse 없이 JSON 텍스트를 앞에서부터 훑으며 민감 키의 값을 가린다 (끝이 잘린 텍스트용).
+ * 객체 키 = 문자열 토큰 뒤에 (공백 후) ':'가 오는 경우. null·빈 문자열 값은 maskJsonNode처럼 유지한다.
+ */
+function maskPartialJson(text: string, isSensitiveKey: KeyMatcher): string {
+  let out = '';
+  let i = 0;
+  while (i < text.length) {
+    if (text[i] !== '"') {
+      out += text[i++];
+      continue;
+    }
+    const keyEnd = scanString(text, i);
+    if (keyEnd === -1) return out + text.slice(i); // 잘린 문자열 — 민감 키의 값이라면 아래에서 이미 처리됐다
+    let colon = keyEnd;
+    while (isJsonSpace(text[colon])) colon++;
+    if (text[colon] !== ':') {
+      out += text.slice(i, keyEnd);
+      i = keyEnd;
+      continue;
+    }
+
+    const key = decodeJsonString(text.slice(i, keyEnd));
+    out += text.slice(i, colon + 1);
+    i = colon + 1;
+    if (!isSensitiveKey(key)) continue;
+
+    let valueStart = i;
+    while (isJsonSpace(text[valueStart])) valueStart++;
+    out += text.slice(i, valueStart);
+    const valueEnd = scanValue(text, valueStart);
+    // 값이 잘린 끝까지 이어지면 남은 부분이 모두 그 값이다
+    if (valueEnd === -1) return out + JSON.stringify(MASKED);
+    const value = text.slice(valueStart, valueEnd);
+    out += value === 'null' || value === '""' ? value : JSON.stringify(MASKED);
+    i = valueEnd;
+  }
+  return out;
+}
+
+function isJsonSpace(ch: string | undefined): boolean {
+  return ch === ' ' || ch === '\n' || ch === '\r' || ch === '\t';
+}
+
+/** start의 '"'로 시작하는 문자열 토큰이 끝나는 위치(닫는 따옴표 다음). 잘려서 닫히지 않으면 -1 */
+function scanString(text: string, start: number): number {
+  for (let j = start + 1; j < text.length; j++) {
+    if (text[j] === '\\') j++;
+    else if (text[j] === '"') return j + 1;
+  }
+  return -1;
+}
+
+/** start에서 시작하는 JSON 값이 끝나는 위치. 값이 텍스트 끝까지 이어지면(잘림) -1 */
+function scanValue(text: string, start: number): number {
+  const first = text[start];
+  if (first === undefined) return -1;
+  if (first === '"') return scanString(text, start);
+  if (first === '{' || first === '[') {
+    let depth = 0;
+    for (let j = start; j < text.length; j++) {
+      const ch = text[j];
+      if (ch === '"') {
+        const end = scanString(text, j);
+        if (end === -1) return -1;
+        j = end - 1;
+      } else if (ch === '{' || ch === '[') {
+        depth++;
+      } else if ((ch === '}' || ch === ']') && --depth === 0) {
+        return j + 1;
+      }
+    }
+    return -1;
+  }
+  // 숫자·true·false·null — 구분자가 나오기 전에 텍스트가 끝나면 잘린 값일 수 있다
+  for (let j = start; j < text.length; j++) {
+    const ch = text[j];
+    if (ch === ',' || ch === '}' || ch === ']' || isJsonSpace(ch)) return j;
+  }
+  return -1;
+}
+
+/** 따옴표를 포함한 JSON 문자열 토큰을 디코딩 (잘못된 이스케이프면 따옴표만 벗긴 원문) */
+function decodeJsonString(token: string): string {
+  try {
+    return JSON.parse(token) as string;
+  } catch {
+    return token.slice(1, -1);
+  }
 }

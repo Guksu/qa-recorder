@@ -52,12 +52,11 @@ export class QARecorder {
   constructor(overrides?: QARecorderConfig) {
     this.config = resolveConfig(overrides);
     // 업로드 요청은 앱 트래픽이 아니므로 캡처하지 않는다 (저장 실패로 버퍼를 보존할 때 리포트에 섞이지 않도록)
-    this.networkCapture = new NetworkCapture(
-      this.config.maxRequests,
-      this.config.maskHeaders,
-      this.config.maskKeys,
-      this.config.endpoint ? [this.config.endpoint] : [],
-    );
+    this.networkCapture = new NetworkCapture(this.config.maxRequests, this.config.maskHeaders, {
+      maskKeys: this.config.maskKeys,
+      ignoreUrls: this.config.endpoint ? [this.config.endpoint] : [],
+      maxBodySize: this.config.maxBodySize,
+    });
     this.screenRecorder = new ScreenRecorder(this.config.mode, {
       maskAllInputs: this.config.maskAllInputs,
       maskTextSelector: this.config.maskTextSelector,

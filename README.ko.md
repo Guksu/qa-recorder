@@ -144,6 +144,7 @@ POST /upload
 window.__QA_RECORDER_CONFIG__ = {
   endpoint: '',              // 원격 업로드 URL. 비워두면 로컬 저장 (기본값).
   maxRequests: 100,          // 순환 버퍼 최대 기록 수 (기본값: 100).
+  maxBodySize: 102400,       // 요청/응답 body 하나에 저장할 최대 글자 수 (기본값: 약 100K). 0이면 body 저장 안 함.
   maskHeaders: [             // 저장 전 마스킹할 헤더 (기본값 표시).
     'Authorization',
     'Cookie',
@@ -174,11 +175,12 @@ window.__QA_RECORDER_CONFIG__ = {
 |---|---|---|---|
 | `endpoint` | `string` | `''` | 원격 업로드 URL. 비어있으면 로컬 다운로드. |
 | `maxRequests` | `number` | `100` | 순환 버퍼에 유지할 최대 네트워크 기록 수. |
+| `maxBodySize` | `number` | `102400` | 요청/응답 body 하나에 저장할 최대 글자 수 (ASCII 텍스트면 바이트 수와 거의 같음). 넘으면 앞부분만 저장하고 끝에 `…[truncated by qa-recorder …]`를 붙임. fetch 응답은 이 길이까지만 읽으므로 큰 다운로드나 끝나지 않는 스트림(SSE 등)이 메모리에 쌓이지 않음. 바이너리 응답(이미지, 오디오, 영상, 폰트, PDF, ZIP, octet-stream)은 읽지 않고 `"[binary]"`로 기록. `maskKeys` 마스킹은 자르기 전에 적용하며, 잘린 응답은 읽은 데까지 키 단위로 마스킹. `0`이면 body를 저장하지 않고, `Infinity`면 자르지 않음. |
 | `maskHeaders` | `string[]` | `['Authorization', 'Cookie', 'Set-Cookie', 'Proxy-Authorization', 'X-API-Key', 'X-Auth-Token', 'X-CSRF-Token', 'X-XSRF-Token']` | 마스킹할 헤더 이름 목록 (대소문자 무시). 지정하면 기본 목록을 대체. |
 | `maskKeys` | `string[]` | `['password', 'passwd', 'pwd', 'passwordConfirm', 'passwordConfirmation', 'passphrase', 'passcode', 'secret', 'secretKey', 'token', 'jwt', 'apiKey', 'accessKey', 'clientSecret', 'privateKey', 'credential', 'authorization', 'sessionId', 'otp', 'otpCode', 'ssn', 'cardNumber', 'cvv', 'cvc']` | 저장 전에 값을 `"[MASKED]"`로 바꿀 키 목록. 적용 대상: 캡처한 요청의 URL — 쿼리 파라미터와 `=`를 포함한 fragment(OAuth `#access_token=…&token_type=bearer`, `#/reset?token=…` 같은 해시 라우트의 쿼리), 요청/응답 body(JSON은 중첩 객체·배열까지 재귀 탐색, `application/x-www-form-urlencoded`는 필드 단위), 그리고 rrweb이 리플레이에 기록하는 페이지 URL(쿼리·fragment 규칙 동일) — 비밀번호 재설정·매직 링크의 `?token=`이나 OAuth `#access_token=`이 페이지 URL의 최상위 쿼리·fragment 파라미터이면 리플레이에 기록되는 페이지 URL에서 가려짐. 단, `maskKeys`는 키 이름만 비교하고 문자열 값 안은 검사하지 않으므로, 주소창 URL과 그 안의 토큰은 이 옵션이 다루지 않는 경로로 리플레이·HTML 리포트·sessionStorage 백업에 남을 수 있음. 예: 페이지 URL의 경로에 있거나 매칭되지 않는 키의 파라미터 값 안에 중첩된 토큰(`/reset-password/{token}`, `?next=/reset?token=…`, 퍼센트 인코딩된 경우 포함)은 기록되는 페이지 URL에 그대로 남음. 매칭되지 않는 키의 값으로 페이지 URL을 담은 캡처 요청·응답 — `dl=` 파라미터, `context.page.url`, `request.url` 같은 분석·에러 리포팅 페이로드, `returnTo=` 리다이렉트, 앱 자체의 로그 전송 요청 — 에도 토큰이 그대로 남음. 페이지 DOM 안의 텍스트와 링크(rrweb은 `href="#main"` 같은 상대 링크와 SVG `<use href="#icon">`을 페이지 쿼리가 포함된 절대 URL로 기록함)에도 남음 — 이런 텍스트는 `maskTextSelector`로 가리고, 토큰이 담긴 링크가 있는 요소는 `rr-block` 클래스를 붙여 리플레이에서 제외할 것. 콘솔 기록(인라인 스크립트에서 발생한 에러의 메시지와 스택 트레이스 등)에도 남음. 대소문자와 `_`, `-`, `.` 등 기호를 무시하고 비교하며, 키가 항목과 같거나 항목으로 끝나면(끝의 숫자는 무시), 또는 키 전체가 항목의 복수형이면 매칭 — `access_token`, `x-api-key`, `newPassword`, `password2`, `tokens`, `apiKeys` 모두 매칭 (`max_tokens` 같은 카운터는 제외). 트레이드오프: 페이지네이션 커서 `nextPageToken`처럼 접미사가 같은 비민감 키도 마스킹되고, 일부 JWT 라이브러리가 반환하는 `access`/`refresh`나 Firebase 이메일 액션 링크의 `oobCode`처럼 항목을 포함하지 않는 이름의 비밀 값은 감지되지 않음 — 이런 키는 기본 목록과 함께 `maskKeys`에 직접 지정. `null`과 빈 값은 유지. 지정하면 기본 목록을 대체하며, `[]`이면 이 마스킹을 모두 비활성 (헤더는 `maskHeaders`로 별도 설정). |
 | `zIndex` | `number` | `2147483647` | UI 요소(버튼, 프로그레스 바, 공유 패널)의 z-index. |
 | `consoleLevels` | `string[]` | `['error', 'warn']` | 캡처할 콘솔 레벨. 유효값: `'error'`, `'warn'`, `'log'`, `'info'`. |
-| `maxConsoleEntries` | `number` | `200` | 순환 버퍼에 유지할 최대 콘솔 기록 수. |
+| `maxConsoleEntries` | `number` | `200` | 순환 버퍼에 유지할 최대 콘솔 기록 수. 기록 하나의 메시지와 stack trace는 각각 10,000자에서 자름. |
 | `enableBackup` | `boolean` | `false` | `true`로 설정 시, 탭이 숨겨질 때(새로고침·이동) 현재 세션을 sessionStorage에 자동 저장. 다음 `init()` 호출 시 팝업 없이 현재 세션 버퍼에 조용히 복원. 롤링 윈도우는 `mode` 값에 따름 (light: 30분 / normal: 20분 / heavy: 5분). 탭 닫기 시 데이터 삭제. |
 | `mode` | `'light' \| 'normal' \| 'heavy'` | `'normal'` | rrweb의 checkout 주기와 이벤트 샘플링을 조정하는 녹화 강도 프리셋. 메모리 버퍼를 일정 수준으로 유지함. DOM 변화가 잦거나 애니메이션이 많은 페이지, 장시간 세션에는 `'heavy'` 사용 — 5분 checkout + `mousemove`/`scroll`/`input` 스로틀. 가벼운 페이지에서 더 긴 30분 이력을 원하면 `'light'`. |
 | `maskAllInputs` | `boolean` | `false` | `true`면 리플레이에서 모든 `<input>`(hidden input과 `type` 속성이 없는 input 포함), `<textarea>`, `<select>` 값을 마스킹. 체크박스·라디오 버튼의 선택 상태는 기록됨. `<textarea>`는 텍스트 콘텐츠(마크업에 담긴 초기값, React 제어 컴포넌트처럼 `defaultValue`로 쓰인 값)도 마스킹되며 공백 외 문자가 `*`로 표시됨. `false`면 비밀번호 입력만 마스킹 (rrweb 기본값). |
