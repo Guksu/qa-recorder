@@ -690,7 +690,6 @@ createApp(App).mount('#app');`,
   window.__QA_RECORDER_CONFIG__ = {
     enableBackup: true,
     maxRequests: 100,
-    maskHeaders: ['Authorization', 'Cookie'],
   };
 <\/script>
 <script src="https://unpkg.com/qa-recorder/dist/qa-recorder.umd.js"><\/script>`,
@@ -812,7 +811,6 @@ createApp(App).mount('#app');`,
     if (recorder) recorder.destroy();
     recorder = new QARecorder({
       maxRequests: 100,
-      maskHeaders: ['Authorization', 'Cookie'],
       enableBackup: true,
       ...(m === 'remote' && IS_LOCAL ? { endpoint: '/upload' } : {}),
     });

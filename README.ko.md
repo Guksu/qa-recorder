@@ -40,7 +40,7 @@
 | 🖥️ | **콘솔 캡처** | `console.error`, `console.warn`, `window.onerror`, `unhandledrejection` 자동 수집. |
 | 📋 | **통합 QA 리포트** | 하나의 HTML 파일: 세션 리플레이(좌) + 네트워크 인스펙터 + 콘솔 로그(우). 시간 동기화 — 네트워크 행이나 콘솔 항목 클릭 시 해당 시점으로 즉시 이동. |
 | 🔍 | **네트워크 상세 패널** | 요청 행 클릭 시 Headers, Payload, Response, Timing 탭 — Chrome 개발자도구 스타일. |
-| 🔒 | **헤더 마스킹** | `Authorization`, `Cookie` 등 민감 헤더 자동 마스킹. |
+| 🔒 | **민감 정보 마스킹** | 비밀번호·토큰·API 키 등 민감 키(`maskKeys`)의 값을 요청 URL(쿼리와 fragment), JSON·form 요청/응답 body, 리플레이에 기록되는 페이지 URL에서 저장 전에 자동 마스킹하고, `Authorization`, `Cookie` 등 인증 헤더도 가림. 키 이름으로만 판별하므로 URL 경로나 다른 키의 값 안에 담긴 토큰(`?next=` 리다이렉트, 분석 도구로 보내는 페이지 URL 등)은 감지하지 못함 (`maskKeys` 참고). 페이지 DOM 안의 텍스트와 링크는 `maskKeys` 대상이 아니며, `maskAllInputs`·`maskTextSelector`로 리플레이의 입력값·텍스트를 가리고 `rr-block` 클래스를 붙인 요소는 리플레이에서 제외 (`blockSelector`는 아래 제약 참고). SDK 자체 UI(버튼, 버그 메모 입력 창 등)는 리플레이에 녹화되지 않음. |
 | 📦 | **로컬 저장** | 파일 3종을 로컬에 다운로드 — 백엔드 불필요. |
 | ☁️ | **원격 업로드** | 서버 endpoint 설정 시 POST 업로드. 응답 URL이 있으면 링크 복사 버튼 노출. |
 | 📝 | **버그 메모** | 저장 시 입력하는 선택적 텍스트 메모 — 통합 HTML 리포트에 포함되고 원격 업로드 시 함께 전송. |
@@ -86,7 +86,6 @@ await recorder.init();
 <script>
   window.__QA_RECORDER_CONFIG__ = {
     maxRequests: 100,
-    maskHeaders: ['Authorization', 'Cookie'],
   };
 </script>
 <script src="https://unpkg.com/qa-recorder/dist/qa-recorder.umd.js"></script>
@@ -149,12 +148,25 @@ window.__QA_RECORDER_CONFIG__ = {
     'Authorization',
     'Cookie',
     'Set-Cookie',
+    'Proxy-Authorization',
+    'X-API-Key',
+    'X-Auth-Token',
+    'X-CSRF-Token',
+    'X-XSRF-Token',
+  ],
+  maskKeys: [                // 요청 URL·body·리플레이 페이지 URL에서 저장 전 마스킹할 키 (기본값 표시). []이면 비활성.
+    'password', 'passwd', 'pwd', 'passwordConfirm', 'passwordConfirmation', 'passphrase', 'passcode',
+    'secret', 'secretKey', 'token', 'jwt', 'apiKey', 'accessKey', 'clientSecret', 'privateKey',
+    'credential', 'authorization', 'sessionId', 'otp', 'otpCode', 'ssn', 'cardNumber', 'cvv', 'cvc',
   ],
   zIndex: 2147483647,        // UI 요소의 z-index (기본값: 최대 정수).
   consoleLevels: ['error', 'warn'],  // 캡처할 콘솔 레벨 (기본값 표시).
   maxConsoleEntries: 200,    // 순환 버퍼 최대 콘솔 기록 수 (기본값: 200).
   enableBackup: false,       // 탭 숨김 시 세션을 sessionStorage에 자동 저장하고 새로고침 후 복원 (기본값: false). 탭 닫기 시 삭제됨.
   mode: 'normal',            // 녹화 강도 프리셋: 'light' | 'normal' | 'heavy' (기본값: 'normal').
+  maskAllInputs: false,      // 리플레이에서 모든 input/textarea/select 값 마스킹 (기본값: false = 비밀번호만).
+  maskTextSelector: null,    // 리플레이에서 텍스트를 마스킹할 요소의 CSS 셀렉터 (기본값: null).
+  blockSelector: null,       // 리플레이에서 제외할 요소의 CSS 셀렉터 — 제약은 아래 표 참고 (기본값: null).
 };
 ```
 
@@ -162,12 +174,16 @@ window.__QA_RECORDER_CONFIG__ = {
 |---|---|---|---|
 | `endpoint` | `string` | `''` | 원격 업로드 URL. 비어있으면 로컬 다운로드. |
 | `maxRequests` | `number` | `100` | 순환 버퍼에 유지할 최대 네트워크 기록 수. |
-| `maskHeaders` | `string[]` | `['Authorization', 'Cookie', 'Set-Cookie']` | 마스킹할 헤더 이름 목록. |
+| `maskHeaders` | `string[]` | `['Authorization', 'Cookie', 'Set-Cookie', 'Proxy-Authorization', 'X-API-Key', 'X-Auth-Token', 'X-CSRF-Token', 'X-XSRF-Token']` | 마스킹할 헤더 이름 목록 (대소문자 무시). 지정하면 기본 목록을 대체. |
+| `maskKeys` | `string[]` | `['password', 'passwd', 'pwd', 'passwordConfirm', 'passwordConfirmation', 'passphrase', 'passcode', 'secret', 'secretKey', 'token', 'jwt', 'apiKey', 'accessKey', 'clientSecret', 'privateKey', 'credential', 'authorization', 'sessionId', 'otp', 'otpCode', 'ssn', 'cardNumber', 'cvv', 'cvc']` | 저장 전에 값을 `"[MASKED]"`로 바꿀 키 목록. 적용 대상: 캡처한 요청의 URL — 쿼리 파라미터와 `=`를 포함한 fragment(OAuth `#access_token=…&token_type=bearer`, `#/reset?token=…` 같은 해시 라우트의 쿼리), 요청/응답 body(JSON은 중첩 객체·배열까지 재귀 탐색, `application/x-www-form-urlencoded`는 필드 단위), 그리고 rrweb이 리플레이에 기록하는 페이지 URL(쿼리·fragment 규칙 동일) — 비밀번호 재설정·매직 링크의 `?token=`이나 OAuth `#access_token=`이 페이지 URL의 최상위 쿼리·fragment 파라미터이면 리플레이에 기록되는 페이지 URL에서 가려짐. 단, `maskKeys`는 키 이름만 비교하고 문자열 값 안은 검사하지 않으므로, 주소창 URL과 그 안의 토큰은 이 옵션이 다루지 않는 경로로 리플레이·HTML 리포트·sessionStorage 백업에 남을 수 있음. 예: 페이지 URL의 경로에 있거나 매칭되지 않는 키의 파라미터 값 안에 중첩된 토큰(`/reset-password/{token}`, `?next=/reset?token=…`, 퍼센트 인코딩된 경우 포함)은 기록되는 페이지 URL에 그대로 남음. 매칭되지 않는 키의 값으로 페이지 URL을 담은 캡처 요청·응답 — `dl=` 파라미터, `context.page.url`, `request.url` 같은 분석·에러 리포팅 페이로드, `returnTo=` 리다이렉트, 앱 자체의 로그 전송 요청 — 에도 토큰이 그대로 남음. 페이지 DOM 안의 텍스트와 링크(rrweb은 `href="#main"` 같은 상대 링크와 SVG `<use href="#icon">`을 페이지 쿼리가 포함된 절대 URL로 기록함)에도 남음 — 이런 텍스트는 `maskTextSelector`로 가리고, 토큰이 담긴 링크가 있는 요소는 `rr-block` 클래스를 붙여 리플레이에서 제외할 것. 콘솔 기록(인라인 스크립트에서 발생한 에러의 메시지와 스택 트레이스 등)에도 남음. 대소문자와 `_`, `-`, `.` 등 기호를 무시하고 비교하며, 키가 항목과 같거나 항목으로 끝나면(끝의 숫자는 무시), 또는 키 전체가 항목의 복수형이면 매칭 — `access_token`, `x-api-key`, `newPassword`, `password2`, `tokens`, `apiKeys` 모두 매칭 (`max_tokens` 같은 카운터는 제외). 트레이드오프: 페이지네이션 커서 `nextPageToken`처럼 접미사가 같은 비민감 키도 마스킹되고, 일부 JWT 라이브러리가 반환하는 `access`/`refresh`나 Firebase 이메일 액션 링크의 `oobCode`처럼 항목을 포함하지 않는 이름의 비밀 값은 감지되지 않음 — 이런 키는 기본 목록과 함께 `maskKeys`에 직접 지정. `null`과 빈 값은 유지. 지정하면 기본 목록을 대체하며, `[]`이면 이 마스킹을 모두 비활성 (헤더는 `maskHeaders`로 별도 설정). |
 | `zIndex` | `number` | `2147483647` | UI 요소(버튼, 프로그레스 바, 공유 패널)의 z-index. |
 | `consoleLevels` | `string[]` | `['error', 'warn']` | 캡처할 콘솔 레벨. 유효값: `'error'`, `'warn'`, `'log'`, `'info'`. |
 | `maxConsoleEntries` | `number` | `200` | 순환 버퍼에 유지할 최대 콘솔 기록 수. |
 | `enableBackup` | `boolean` | `false` | `true`로 설정 시, 탭이 숨겨질 때(새로고침·이동) 현재 세션을 sessionStorage에 자동 저장. 다음 `init()` 호출 시 팝업 없이 현재 세션 버퍼에 조용히 복원. 롤링 윈도우는 `mode` 값에 따름 (light: 30분 / normal: 20분 / heavy: 5분). 탭 닫기 시 데이터 삭제. |
 | `mode` | `'light' \| 'normal' \| 'heavy'` | `'normal'` | rrweb의 checkout 주기와 이벤트 샘플링을 조정하는 녹화 강도 프리셋. 메모리 버퍼를 일정 수준으로 유지함. DOM 변화가 잦거나 애니메이션이 많은 페이지, 장시간 세션에는 `'heavy'` 사용 — 5분 checkout + `mousemove`/`scroll`/`input` 스로틀. 가벼운 페이지에서 더 긴 30분 이력을 원하면 `'light'`. |
+| `maskAllInputs` | `boolean` | `false` | `true`면 리플레이에서 모든 `<input>`(hidden input과 `type` 속성이 없는 input 포함), `<textarea>`, `<select>` 값을 마스킹. 체크박스·라디오 버튼의 선택 상태는 기록됨. `<textarea>`는 텍스트 콘텐츠(마크업에 담긴 초기값, React 제어 컴포넌트처럼 `defaultValue`로 쓰인 값)도 마스킹되며 공백 외 문자가 `*`로 표시됨. `false`면 비밀번호 입력만 마스킹 (rrweb 기본값). |
+| `maskTextSelector` | `string \| null` | `null` | 리플레이에서 텍스트를 마스킹할 요소의 CSS 셀렉터 (공백 외 문자가 `*`로 표시됨). `rr-mask` 클래스가 붙은 요소는 항상 마스킹. |
+| `blockSelector` | `string \| null` | `null` | 리플레이에서 제외할 요소의 CSS 셀렉터 — 전체 스냅샷에 포함된 요소는 같은 크기의 빈 placeholder로만 기록. rrweb 1.1.3은 이 셀렉터를 직렬화되는 요소 자신에만 검사하므로, 이후 해당 요소 안에 추가·변경된 콘텐츠(예: 녹화 시작 후 SPA가 렌더링한 영역)와 입력 필드에 입력한 값은 여전히 기록됨. 민감하거나 동적으로 바뀌는 영역과 입력 필드를 확실히 제외하려면 요소에 `rr-block` 클래스를 붙일 것. |
 
 ---
 
@@ -186,7 +202,7 @@ window.__QA_RECORDER_CONFIG__ = {
   ├─ ScreenRecorder.stop()
   ├─ NetworkCapture.snapshot()  → HAR 1.2 JSON 생성
   ├─ ConsoleCapture.snapshot()  → 콘솔 엔트리 배열 생성
-  ├─ MaskingFilter.apply()      → 민감 헤더 마스킹
+  ├─ MaskingFilter.apply()      → 민감 헤더·body 키·쿼리 파라미터 마스킹
   ├─ ProgressBar.show()         → "Saving..."
   │
   ├─ [endpoint 설정된 경우]

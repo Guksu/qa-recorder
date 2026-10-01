@@ -1,4 +1,4 @@
-import { MaskingFilter } from './MaskingFilter.js';
+import { MaskingFilter, type KeyMatcher } from './MaskingFilter.js';
 import type { HAREntry } from '@qa-recorder/shared';
 
 /**
@@ -11,17 +11,21 @@ export class NetworkCapture {
   private originalXHR: typeof XMLHttpRequest;
   private recordingStartedAt: Date | null = null;
   private readonly maskSet: Set<string>;
+  private readonly isSensitiveKey: KeyMatcher | null;
 
   /**
+   * @param maskKeys body·URL에서 값을 가릴 키 목록 (MaskingFilter.createKeyMatcher 참고)
    * @param ignoreUrls 캡처하지 않을 URL 목록 (녹화기 자체의 업로드 endpoint 등).
    *   상대 경로는 요청 시점의 페이지 URL 기준으로 해석하고 fragment는 무시하고 비교한다.
    */
   constructor(
     private readonly maxRequests: number,
     maskHeaders: string[],
+    maskKeys: string[] = [],
     private readonly ignoreUrls: string[] = [],
   ) {
     this.maskSet = new Set(maskHeaders.map((h) => h.toLowerCase()));
+    this.isSensitiveKey = MaskingFilter.createKeyMatcher(maskKeys);
     this.originalFetch = window.fetch;
     this.originalXHR = window.XMLHttpRequest;
   }
@@ -148,12 +152,15 @@ export class NetworkCapture {
             timings: { send: 0, wait: elapsed, receive: 0 },
           },
           this.maskSet,
+          this.isSensitiveKey,
         ),
       );
 
       if (response) {
         response.clone().text().then((text) => {
-          stored.response.content.text = text;
+          // body는 엔트리 기록 이후에 도착하므로 여기서 따로 마스킹 (size/bodySize는 원본 기준)
+          stored.response.content.text =
+            MaskingFilter.maskBody(text, stored.response.content.mimeType, this.isSensitiveKey);
           stored.response.content.size = text.length;
           stored.response.bodySize = text.length;
         }).catch(() => { /* body 읽기 실패 무시 */ });
@@ -250,6 +257,7 @@ export class NetworkCapture {
                 timings: { send: 0, wait: elapsed, receive: 0 },
               },
               self.maskSet,
+              self.isSensitiveKey,
             ),
           );
         }, { once: true });

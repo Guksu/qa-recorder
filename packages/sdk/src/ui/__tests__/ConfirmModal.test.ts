@@ -14,6 +14,18 @@ describe('ConfirmModal.show', () => {
     await promise;
   });
 
+  it('host에 data-qa 식별자와 rr-block 클래스를 붙여 메모 입력이 리플레이에 녹화되지 않게 한다', async () => {
+    const promise = ConfirmModal.show('Save?');
+    const host = document.querySelector<HTMLElement>('[data-qa="confirm-modal"]')!;
+    expect(host).not.toBeNull();
+    expect(host.classList.contains('rr-block')).toBe(true);
+    for (const child of Array.from(host.shadowRoot!.children)) {
+      expect(child.classList.contains('rr-block')).toBe(true);
+    }
+    host.shadowRoot!.querySelector<HTMLButtonElement>('#cancel')!.click();
+    await promise;
+  });
+
   it('확인 클릭 시 { confirmed: true, memo }를 반환한다', async () => {
     const promise = ConfirmModal.show('Save?');
     const host = document.body.lastElementChild as HTMLElement;

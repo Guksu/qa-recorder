@@ -24,11 +24,64 @@ export interface QARecorderConfig {
 
   /**
    * HTTP header names to redact before saving. Values are replaced with `"[MASKED]"`.
-   * Matching is case-insensitive.
+   * Matching is case-insensitive. Setting this replaces the default list.
    *
-   * @default ['Authorization', 'Cookie', 'Set-Cookie']
+   * @default ['Authorization', 'Cookie', 'Set-Cookie', 'Proxy-Authorization', 'X-API-Key', 'X-Auth-Token', 'X-CSRF-Token', 'X-XSRF-Token']
    */
   maskHeaders?: string[];
+
+  /**
+   * Keys whose values are redacted (replaced with `"[MASKED]"`) before anything is stored, in:
+   *
+   * - Request URLs of captured `fetch` / XHR calls: query parameters (also in the HAR
+   *   `queryString`) and a fragment that contains `=` — an OAuth implicit-flow fragment such as
+   *   `#access_token=…&token_type=bearer`, or the query of a hash route such as `#/reset?token=…`.
+   * - JSON or `application/x-www-form-urlencoded` request and response bodies. JSON bodies are
+   *   searched recursively through nested objects and arrays; a matching key's whole value is
+   *   masked, even if it is an object.
+   * - The page URL that rrweb records in the replay (the `href` of the Meta event it emits with
+   *   each full snapshot), with the same query and fragment rules — so a reset-password or
+   *   magic-link `?token=` or an OAuth `#access_token=` is masked there when it is a top-level
+   *   query or fragment parameter of the page URL.
+   *
+   * `null` and empty-string values are kept as-is.
+   *
+   * `maskKeys` matches key names only and never looks inside a string value, so the address-bar
+   * URL, and any token in it, can still reach the replay, the HTML report and the sessionStorage
+   * backup in ways it does not cover — for example:
+   *
+   * - A token in the page URL's path, or nested inside the value of a parameter whose key does
+   *   not match (plain or percent-encoded), such as `/reset-password/{token}` or
+   *   `?next=/reset?token=…`, stays in the recorded page URL.
+   * - Captured requests and responses that carry the page URL as the value of a key that does
+   *   not match keep the token in it: analytics or error-reporting payloads (a `dl=` parameter,
+   *   `context.page.url`, `request.url`), a `returnTo=` redirect, or the app's own logging
+   *   requests.
+   * - Text and links inside the page's DOM. rrweb stores relative links such as `href="#main"`
+   *   and SVG `<use href="#icon">` as absolute URLs that include the page's query string. Mask
+   *   such text with `maskTextSelector`, and leave elements whose links carry a token out of the
+   *   replay with the `rr-block` class.
+   * - Console entries, such as the message and stack trace of an uncaught error thrown from an
+   *   inline script, which include the page URL.
+   *
+   * Matching: the key and each entry are lowercased and stripped of ASCII non-alphanumeric
+   * characters (`_`, `-`, `.`, spaces, …). A key matches when it equals or ends with an entry,
+   * ignoring trailing digits, or when the whole key is the plural of an entry — so
+   * `access_token`, `x-api-key`, `newPassword`, `refreshToken`, `password2`, `tokens` and
+   * `apiKeys` all match. Plurals only count as the whole key, so counters such as `max_tokens`
+   * are not masked.
+   *
+   * Trade-offs: non-secret keys with a matching suffix are masked too (e.g. a pagination cursor
+   * named `nextPageToken`). Secrets under names that contain no entry — such as the
+   * `access` / `refresh` pair some JWT libraries return, or the `oobCode` of a Firebase
+   * email-action link — are not detected; add those keys to the list if your app uses them.
+   *
+   * Setting this replaces the default list; `[]` turns off all of the masking above (header
+   * masking is controlled separately by `maskHeaders`).
+   *
+   * @default ['password', 'passwd', 'pwd', 'passwordConfirm', 'passwordConfirmation', 'passphrase', 'passcode', 'secret', 'secretKey', 'token', 'jwt', 'apiKey', 'accessKey', 'clientSecret', 'privateKey', 'credential', 'authorization', 'sessionId', 'otp', 'otpCode', 'ssn', 'cardNumber', 'cvv', 'cvc']
+   */
+  maskKeys?: string[];
 
   /**
    * CSS `z-index` applied to all UI elements (floating button, progress bar, share panel).
@@ -79,17 +132,62 @@ export interface QARecorderConfig {
    * @default 'normal'
    */
   mode?: RecorderMode;
+
+  /**
+   * When `true`, the replay masks the values of every `<input>` (including hidden inputs and
+   * inputs without a `type` attribute), `<textarea>` and `<select>`; the checked state of
+   * checkboxes and radio buttons is still recorded. For a `<textarea>` this also covers its text
+   * content (text in the page markup, or written through `defaultValue` as React does for
+   * controlled textareas), whose non-whitespace characters become `*`. When `false`, only
+   * password inputs are masked (rrweb's default).
+   *
+   * @default false
+   */
+  maskAllInputs?: boolean;
+
+  /**
+   * CSS selector for elements whose text is masked in the replay (non-whitespace characters
+   * become `*`).
+   * Elements with the `rr-mask` class are always masked.
+   *
+   * @default null
+   */
+  maskTextSelector?: string | null;
+
+  /**
+   * CSS selector for elements to leave out of the replay — a matched element present in a full
+   * snapshot is recorded as an empty placeholder of the same size. rrweb (1.1.3) checks this
+   * selector only against the element being serialized, so content added to or changed inside a
+   * matched element after the snapshot (e.g. a region your SPA renders later) and values typed
+   * into its form fields are still recorded. For reliable exclusion of private or dynamic
+   * regions and form fields, add the `rr-block` class to the element instead (rrweb honours it
+   * for the element's whole subtree, including later mutations and input events).
+   *
+   * @default null
+   */
+  blockSelector?: string | null;
 }
 
 const DEFAULT_CONFIG: Required<QARecorderConfig> = {
   endpoint: '',
   maxRequests: 100,
-  maskHeaders: ['Authorization', 'Cookie', 'Set-Cookie'],
+  maskHeaders: [
+    'Authorization', 'Cookie', 'Set-Cookie',
+    'Proxy-Authorization', 'X-API-Key', 'X-Auth-Token', 'X-CSRF-Token', 'X-XSRF-Token',
+  ],
+  maskKeys: [
+    'password', 'passwd', 'pwd', 'passwordConfirm', 'passwordConfirmation', 'passphrase', 'passcode',
+    'secret', 'secretKey', 'token', 'jwt', 'apiKey', 'accessKey', 'clientSecret', 'privateKey',
+    'credential', 'authorization', 'sessionId', 'otp', 'otpCode', 'ssn', 'cardNumber', 'cvv', 'cvc',
+  ],
   zIndex: 2147483647,
   consoleLevels: ['error', 'warn'],
   maxConsoleEntries: 200,
   enableBackup: false,
   mode: 'normal',
+  maskAllInputs: false,
+  maskTextSelector: null,
+  blockSelector: null,
 };
 
 /** 명시적으로 undefined가 담긴 키가 기본값을 덮어쓰지 않도록 제거 */

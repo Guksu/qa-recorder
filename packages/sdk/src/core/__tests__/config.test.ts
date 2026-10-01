@@ -10,8 +10,20 @@ describe('resolveConfig', () => {
     const config = resolveConfig();
     expect(config.endpoint).toBe('');
     expect(config.maxRequests).toBe(100);
-    expect(config.maskHeaders).toEqual(['Authorization', 'Cookie', 'Set-Cookie']);
+    expect(config.maskHeaders).toEqual([
+      'Authorization', 'Cookie', 'Set-Cookie',
+      'Proxy-Authorization', 'X-API-Key', 'X-Auth-Token', 'X-CSRF-Token', 'X-XSRF-Token',
+    ]);
     expect(config.enableBackup).toBe(false);
+  });
+
+  it('maskKeys 기본값은 비밀번호·토큰·카드 정보 등 민감 키 목록이다 (body/쿼리 마스킹 기본 활성)', () => {
+    const config = resolveConfig();
+    expect(config.maskKeys).toEqual([
+      'password', 'passwd', 'pwd', 'passwordConfirm', 'passwordConfirmation', 'passphrase', 'passcode',
+      'secret', 'secretKey', 'token', 'jwt', 'apiKey', 'accessKey', 'clientSecret', 'privateKey',
+      'credential', 'authorization', 'sessionId', 'otp', 'otpCode', 'ssn', 'cardNumber', 'cvv', 'cvc',
+    ]);
   });
 
   it('overrides로 endpoint를 설정한다', () => {
@@ -27,6 +39,25 @@ describe('resolveConfig', () => {
   it('overrides로 maskHeaders를 덮어쓴다', () => {
     const config = resolveConfig({ maskHeaders: ['X-Token'] });
     expect(config.maskHeaders).toEqual(['X-Token']);
+  });
+
+  it('overrides로 maskKeys를 덮어쓰고, 빈 배열로 body/쿼리 마스킹을 끌 수 있다', () => {
+    expect(resolveConfig({ maskKeys: ['memberNo'] }).maskKeys).toEqual(['memberNo']);
+    expect(resolveConfig({ maskKeys: [] }).maskKeys).toEqual([]);
+  });
+
+  it('rrweb 프라이버시 옵션 기본값은 rrweb 기본 동작과 같다 (비밀번호 입력만 마스킹, 셀렉터 없음)', () => {
+    const config = resolveConfig();
+    expect(config.maskAllInputs).toBe(false);
+    expect(config.maskTextSelector).toBeNull();
+    expect(config.blockSelector).toBeNull();
+  });
+
+  it('overrides로 rrweb 프라이버시 옵션을 설정한다', () => {
+    const config = resolveConfig({ maskAllInputs: true, maskTextSelector: '.pii', blockSelector: '.private' });
+    expect(config.maskAllInputs).toBe(true);
+    expect(config.maskTextSelector).toBe('.pii');
+    expect(config.blockSelector).toBe('.private');
   });
 
   it('window.__QA_RECORDER_CONFIG__ 값을 반영한다', () => {

@@ -1,4 +1,5 @@
 import { buildStyles } from './styles.js';
+import { excludeFromRecording } from './recordingExclusion.js';
 
 export type ButtonState = 'idle' | 'recording';
 
@@ -23,6 +24,7 @@ export class FloatingButton {
 
     this._attachDrag(btn);
 
+    excludeFromRecording(this.host, style, btn);
     this.shadow.append(style, btn);
     document.body.appendChild(this.host);
   }

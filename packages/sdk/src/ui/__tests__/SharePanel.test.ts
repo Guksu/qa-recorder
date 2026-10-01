@@ -19,6 +19,15 @@ describe('SharePanel', () => {
     expect(host).not.toBeNull();
   });
 
+  it('host와 shadow 최상위 요소에 rr-block 클래스를 붙여 리플레이 녹화에서 제외한다', () => {
+    SharePanel.show('https://example.com/share/abc');
+    const host = document.querySelector('[data-qa="share-panel"]') as HTMLElement;
+    expect(host.classList.contains('rr-block')).toBe(true);
+    for (const child of Array.from(host.shadowRoot!.children)) {
+      expect(child.classList.contains('rr-block')).toBe(true);
+    }
+  });
+
   it('show(url)는 URL 텍스트를 표시한다', () => {
     SharePanel.show('https://example.com/share/abc');
     const host = document.querySelector('[data-qa="share-panel"]') as HTMLElement;

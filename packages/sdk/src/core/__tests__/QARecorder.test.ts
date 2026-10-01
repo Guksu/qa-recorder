@@ -117,6 +117,68 @@ describe('QARecorder', () => {
     recorder.destroy();
   });
 
+  it('rrweb 프라이버시 옵션을 record()에 전달한다', async () => {
+    const recorder = new QARecorder({ maskAllInputs: true, blockSelector: '.private' });
+    await recorder.init();
+    expect(mocks.record).toHaveBeenCalledWith(expect.objectContaining({
+      maskInputOptions: expect.objectContaining({ input: true, text: true }),
+      blockSelector: '.private',
+    }));
+    recorder.destroy();
+  });
+
+  describe('페이지 URL 마스킹 (rrweb Meta 이벤트 href)', () => {
+    const SECRET_HREF = 'https://app.example.com/reset?token=RESET-SECRET#access_token=AT-SECRET&token_type=bearer';
+
+    beforeEach(() => {
+      mocks.record.mockImplementation(({ emit }: { emit: (event: unknown) => void }) => {
+        emit({ type: 4, data: { href: SECRET_HREF, width: 1280, height: 720 }, timestamp: 1000 });
+        emit({ type: 2, data: {}, timestamp: 1000 });
+        return mocks.stopFn;
+      });
+    });
+
+    /** 플로팅 버튼으로 저장하고 LocalStorage.save()에 전달된 rrweb 이벤트(rr.json·HTML 리포트의 원본)를 반환 */
+    async function saveAndGetEvents(recorder: QARecorder): Promise<{ type: number; data: { href?: string } }[]> {
+      await recorder.init();
+      document.getElementById('qa-recorder-root')!.shadowRoot!.querySelector('button')!.click();
+      await vi.waitFor(() => expect(mocks.localStorageSave).toHaveBeenCalledOnce());
+      return mocks.localStorageSave.mock.calls[0]![0];
+    }
+
+    it('기본 설정(maskKeys 기본 목록)에서 저장되는 페이지 URL의 토큰을 가린다', async () => {
+      const recorder = new QARecorder();
+      const events = await saveAndGetEvents(recorder);
+      expect(events[0]!.data.href)
+        .toBe('https://app.example.com/reset?token=[MASKED]#access_token=[MASKED]&token_type=bearer');
+      recorder.destroy();
+    });
+
+    it('maskKeys: []이면 페이지 URL을 그대로 저장한다', async () => {
+      const recorder = new QARecorder({ maskKeys: [] });
+      const events = await saveAndGetEvents(recorder);
+      expect(events[0]!.data.href).toBe(SECRET_HREF);
+      recorder.destroy();
+    });
+  });
+
+  it('기본 설정에서 fetch 요청 body의 민감 키가 마스킹되어 기록된다', async () => {
+    vi.unstubAllGlobals(); // 요청 URL 파싱에 실제 URL이 필요 — beforeEach의 URL stub 해제
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}')));
+    const recorder = new QARecorder();
+    await recorder.init();
+
+    await window.fetch('https://example.com/login', {
+      method: 'POST',
+      body: '{"email":"a@b.com","password":"pw"}',
+    });
+
+    expect(recorder.getNetworkEntries()[0].request.postData?.text)
+      .toBe('{"email":"a@b.com","password":"[MASKED]"}');
+    recorder.destroy();
+    vi.unstubAllGlobals();
+  });
+
   it('버튼 클릭 시 ConfirmModal이 표시된다', async () => {
     const recorder = new QARecorder();
     await recorder.init();

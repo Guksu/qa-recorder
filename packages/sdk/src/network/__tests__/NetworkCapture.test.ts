@@ -101,6 +101,66 @@ describe('NetworkCapture', () => {
       capture.stop();
     });
 
+    it('요청 body와 URL 쿼리의 민감 키 값을 마스킹한다', async () => {
+      vi.stubGlobal('fetch', makeMockFetch());
+      const capture = new NetworkCapture(100, [], ['password', 'token']);
+      capture.start();
+
+      const body = '{"id":"kim","password":"pw"}';
+      await window.fetch('https://example.com/login?access_token=abc&lang=ko', {
+        method: 'POST',
+        body,
+        headers: { 'content-type': 'application/json' },
+      });
+
+      const entry = capture.snapshot()[0];
+      expect(entry.request.url).toBe('https://example.com/login?access_token=[MASKED]&lang=ko');
+      expect(entry.request.queryString).toEqual([
+        { name: 'access_token', value: '[MASKED]' },
+        { name: 'lang', value: 'ko' },
+      ]);
+      expect(entry.request.postData?.text).toBe('{"id":"kim","password":"[MASKED]"}');
+      expect(entry.request.bodySize).toBe(body.length); // 크기는 원본 기준
+      capture.stop();
+    });
+
+    it('요청 URL fragment의 민감 키 값도 쿼리와 함께 마스킹한다', async () => {
+      const mockFetch = makeMockFetch();
+      vi.stubGlobal('fetch', mockFetch);
+      const capture = new NetworkCapture(100, [], ['token']);
+      capture.start();
+
+      const url = 'https://example.com/callback?code=1&token=abc#access_token=xyz&token_type=bearer';
+      await window.fetch(url);
+
+      const entry = capture.snapshot()[0];
+      expect(entry.request.url).toBe(
+        'https://example.com/callback?code=1&token=[MASKED]#access_token=[MASKED]&token_type=bearer',
+      );
+      expect(entry.request.queryString).toEqual([
+        { name: 'code', value: '1' },
+        { name: 'token', value: '[MASKED]' },
+      ]);
+      expect(mockFetch).toHaveBeenCalledWith(url, undefined); // 실제 요청은 원본 URL
+      capture.stop();
+    });
+
+    it('비동기로 채워지는 응답 body도 마스킹하고, 앱이 받는 응답은 원본 그대로다', async () => {
+      const body = '{"access_token":"a","user":"kim"}';
+      vi.stubGlobal('fetch', makeMockFetch(200, body));
+      const capture = new NetworkCapture(100, [], ['token']);
+      capture.start();
+
+      const response = await window.fetch('https://example.com/oauth/token');
+      await new Promise((r) => setTimeout(r, 0)); // body 비동기 캡처 대기
+
+      expect(await response.json()).toEqual({ access_token: 'a', user: 'kim' });
+      const entry = capture.snapshot()[0];
+      expect(entry.response.content.text).toBe('{"access_token":"[MASKED]","user":"kim"}');
+      expect(entry.response.bodySize).toBe(body.length);
+      capture.stop();
+    });
+
     it('응답 body를 content에 기록한다 (비동기로 채워짐)', async () => {
       vi.stubGlobal('fetch', makeMockFetch(200, '{"id":1}'));
       const capture = new NetworkCapture(100, []);
@@ -185,7 +245,7 @@ describe('NetworkCapture', () => {
       const mockFetch = makeMockFetch(500);
       vi.stubGlobal('fetch', mockFetch);
       const endpoint = 'https://qa.example.com/upload?token=SECRET';
-      const capture = new NetworkCapture(1, [], [endpoint]);
+      const capture = new NetworkCapture(1, [], [], [endpoint]);
       capture.start();
 
       await window.fetch('https://example.com/api');
@@ -200,7 +260,7 @@ describe('NetworkCapture', () => {
 
     it('상대 경로 ignoreUrls는 페이지 URL 기준으로 해석해 비교한다', async () => {
       vi.stubGlobal('fetch', makeMockFetch());
-      const capture = new NetworkCapture(100, [], ['/qa/upload']);
+      const capture = new NetworkCapture(100, [], [], ['/qa/upload']);
       capture.start();
 
       await window.fetch(new URL('/qa/upload', window.location.href).href, { method: 'POST' });
@@ -271,7 +331,7 @@ describe('NetworkCapture', () => {
     });
 
     it('ignoreUrls에 해당하는 XHR 요청은 기록하지 않는다', () => {
-      const capture = new NetworkCapture(100, [], ['https://qa.example.com/upload']);
+      const capture = new NetworkCapture(100, [], [], ['https://qa.example.com/upload']);
       capture.start();
 
       const ignored = new window.XMLHttpRequest();
@@ -311,6 +371,38 @@ describe('NetworkCapture', () => {
         (h) => h.name.toLowerCase() === 'authorization',
       );
       expect(auth?.value).toBe('[MASKED]');
+      capture.stop();
+    });
+
+    it('요청 body·URL 쿼리와 응답 body의 민감 키 값을 마스킹한다', () => {
+      const capture = new NetworkCapture(100, [], ['password', 'token']);
+      capture.start();
+
+      const xhr = new window.XMLHttpRequest();
+      MockXHR.lastInstance!.responseText = '{"refreshToken":"r","ok":true}';
+      xhr.open('POST', '/api/login?token=abc');
+      xhr.setRequestHeader('content-type', 'application/x-www-form-urlencoded');
+      xhr.send('user=kim&password=p%40ss');
+
+      const entry = capture.snapshot()[0];
+      expect(entry.request.url).toBe('/api/login?token=[MASKED]');
+      expect(entry.request.queryString).toEqual([{ name: 'token', value: '[MASKED]' }]);
+      expect(entry.request.postData?.text).toBe('user=kim&password=[MASKED]');
+      expect(entry.response.content.text).toBe('{"refreshToken":"[MASKED]","ok":true}');
+      expect(xhr.responseText).toBe('{"refreshToken":"r","ok":true}'); // 앱이 받는 응답은 원본
+      capture.stop();
+    });
+
+    it('XHR 요청 URL의 해시 라우트 쿼리도 마스킹하고, 원본 XHR에는 원래 URL을 전달한다', () => {
+      const capture = new NetworkCapture(100, [], ['token']);
+      capture.start();
+
+      const xhr = new window.XMLHttpRequest();
+      xhr.open('GET', '/app?lang=ko#/reset?token=abc&step=2');
+      xhr.send();
+
+      expect(capture.snapshot()[0].request.url).toBe('/app?lang=ko#/reset?token=[MASKED]&step=2');
+      expect(MockXHR.lastInstance!.openedWith?.url).toBe('/app?lang=ko#/reset?token=abc&step=2');
       capture.stop();
     });
 

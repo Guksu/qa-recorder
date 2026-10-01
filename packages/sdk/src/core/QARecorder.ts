@@ -55,9 +55,15 @@ export class QARecorder {
     this.networkCapture = new NetworkCapture(
       this.config.maxRequests,
       this.config.maskHeaders,
+      this.config.maskKeys,
       this.config.endpoint ? [this.config.endpoint] : [],
     );
-    this.screenRecorder = new ScreenRecorder(this.config.mode);
+    this.screenRecorder = new ScreenRecorder(this.config.mode, {
+      maskAllInputs: this.config.maskAllInputs,
+      maskTextSelector: this.config.maskTextSelector,
+      blockSelector: this.config.blockSelector,
+      maskKeys: this.config.maskKeys,
+    });
     this.consoleCapture = new ConsoleCapture(this.config.maxConsoleEntries, this.config.consoleLevels);
     this.floatingButton = new FloatingButton(this.onButtonClick.bind(this), this.config.zIndex);
   }

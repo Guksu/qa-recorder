@@ -1,4 +1,5 @@
 import { BASE_STYLES } from './styles.js';
+import { excludeFromRecording } from './recordingExclusion.js';
 
 export interface ConfirmResult {
   confirmed: boolean;
@@ -9,6 +10,7 @@ export class ConfirmModal {
   static show(message: string): Promise<ConfirmResult> {
     return new Promise((resolve) => {
       const host = document.createElement('div');
+      host.setAttribute('data-qa', 'confirm-modal');
       const shadow = host.attachShadow({ mode: 'open' });
 
       const style = document.createElement('style');
@@ -59,6 +61,7 @@ export class ConfirmModal {
       overlay.querySelector('#confirm')!.addEventListener('click', () => cleanup(true));
       overlay.querySelector('#cancel')!.addEventListener('click', () => cleanup(false));
 
+      excludeFromRecording(host, style, overlay);
       shadow.append(style, overlay);
       document.body.appendChild(host);
     });

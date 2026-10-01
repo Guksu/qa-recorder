@@ -34,6 +34,55 @@ describe('ScreenRecorder', () => {
     );
   });
 
+  it('프라이버시 옵션 미지정 시 rrweb 기본값(비밀번호 입력만 마스킹, 셀렉터 없음)을 유지한다', () => {
+    const recorder = new ScreenRecorder();
+    recorder.start();
+    const opts = mocks.record.mock.calls[0]![0] as Record<string, unknown>;
+    expect(opts.maskAllInputs).toBe(false);
+    expect(opts).not.toHaveProperty('maskInputOptions');
+    expect(opts).not.toHaveProperty('maskTextSelector');
+    expect(opts).not.toHaveProperty('blockSelector');
+  });
+
+  it('maskTextSelector / blockSelector를 record()에 그대로 전달한다', () => {
+    const recorder = new ScreenRecorder('normal', {
+      maskTextSelector: '.pii',
+      blockSelector: '[data-private]',
+    });
+    recorder.start();
+    expect(mocks.record).toHaveBeenCalledWith(expect.objectContaining({
+      maskTextSelector: '.pii',
+      blockSelector: '[data-private]',
+    }));
+  });
+
+  it('maskAllInputs: true는 textarea 텍스트 자식도 가리도록 maskTextSelector에 textarea를 더한다', () => {
+    new ScreenRecorder('normal', { maskAllInputs: true }).start();
+    new ScreenRecorder('normal', { maskAllInputs: true, maskTextSelector: '.pii', blockSelector: '[data-private]' }).start();
+    const [onlyInputs, withSelectors] = mocks.record.mock.calls.map(([opts]) => opts as Record<string, unknown>);
+    expect(onlyInputs!.maskTextSelector).toBe('textarea');
+    expect(withSelectors!.maskTextSelector).toBe('.pii, textarea');
+    expect(withSelectors!.blockSelector).toBe('[data-private]');
+  });
+
+  it('maskAllInputs: true는 태그 이름 키(input)를 더한 maskInputOptions로 전달한다 (rrweb은 maskAllInputs: true면 이를 무시)', () => {
+    const recorder = new ScreenRecorder('normal', { maskAllInputs: true });
+    recorder.start();
+    const opts = mocks.record.mock.calls[0]![0] as Record<string, unknown>;
+    expect(opts).not.toHaveProperty('maskAllInputs');
+    expect(opts.maskInputOptions).toEqual(expect.objectContaining({
+      input: true, text: true, email: true, textarea: true, select: true, password: true,
+    }));
+  });
+
+  it('셀렉터가 null이면 record()에 전달하지 않는다', () => {
+    const recorder = new ScreenRecorder('normal', { maskTextSelector: null, blockSelector: null });
+    recorder.start();
+    const opts = mocks.record.mock.calls[0]![0] as Record<string, unknown>;
+    expect(opts).not.toHaveProperty('maskTextSelector');
+    expect(opts).not.toHaveProperty('blockSelector');
+  });
+
   it('start()를 중복 호출해도 record는 한 번만 호출된다', () => {
     const recorder = new ScreenRecorder();
     recorder.start();
@@ -318,6 +367,94 @@ describe('ScreenRecorder', () => {
     const events = recorder.getEvents();
     expect((events[0] as { timestamp: number }).timestamp).toBe(initial[0].timestamp);
     expect((events[events.length - 1] as { type: number }).type).toBe(3);
+  });
+
+  describe('페이지 URL 마스킹 (Meta 이벤트 href)', () => {
+    type Emit = (event: unknown, isCheckout?: boolean) => void;
+    const MASK_KEYS = ['token', 'password'];
+    const SECRET_HREF = 'https://app.example.com/reset?token=RESET-SECRET&lang=ko#access_token=AT-SECRET&token_type=bearer';
+    const MASKED_HREF = 'https://app.example.com/reset?token=[MASKED]&lang=ko#access_token=[MASKED]&token_type=bearer';
+
+    const meta = (href: string, timestamp = 1000) => ({ type: 4, data: { href, width: 1280, height: 720 }, timestamp });
+
+    /** record()가 주어진 이벤트를 순서대로 emit하도록 설정 */
+    function emitOnRecord(...calls: [event: unknown, isCheckout?: boolean][]) {
+      mocks.record.mockImplementation(({ emit }: { emit: Emit }) => {
+        calls.forEach(([event, isCheckout]) => emit(event, isCheckout));
+        return mocks.stopFn;
+      });
+    }
+
+    it('maskKeys에 매칭되는 쿼리·fragment 값을 Meta 이벤트의 href에서 가린다 (체크아웃 스냅샷 포함)', () => {
+      emitOnRecord(
+        [meta(SECRET_HREF, 1000)],
+        [{ type: 2, data: {}, timestamp: 1001 }],
+        [meta(SECRET_HREF, 5000), true], // 체크아웃 → 새 구간
+        [{ type: 2, data: {}, timestamp: 5001 }],
+      );
+      const recorder = new ScreenRecorder('normal', { maskKeys: MASK_KEYS });
+      recorder.start();
+
+      const metas = recorder.getEvents().filter((e) => (e as { type: number }).type === 4);
+      expect(metas).toEqual([
+        { type: 4, data: { href: MASKED_HREF, width: 1280, height: 720 }, timestamp: 1000 },
+        { type: 4, data: { href: MASKED_HREF, width: 1280, height: 720 }, timestamp: 5000 },
+      ]);
+    });
+
+    it('rrweb이 넘긴 Meta 이벤트 객체는 수정하지 않고 새 객체로 저장한다', () => {
+      const original = meta(SECRET_HREF);
+      emitOnRecord([original]);
+      const recorder = new ScreenRecorder('normal', { maskKeys: MASK_KEYS });
+      recorder.start();
+
+      const [stored] = recorder.getEvents() as (typeof original)[];
+      expect(stored).not.toBe(original);
+      expect(stored!.data).not.toBe(original.data);
+      expect(stored!.data.href).toBe(MASKED_HREF);
+      expect(original).toEqual(meta(SECRET_HREF));
+    });
+
+    it('Meta 이외의 이벤트와 가릴 값이 없거나 href가 없는 Meta 이벤트는 받은 객체 그대로 저장한다', () => {
+      const emitted = [
+        { type: 2, data: { node: { type: 0, childNodes: [] } }, timestamp: 1000 },
+        { type: 3, data: { source: 0, adds: [], removes: [] }, timestamp: 1001 },
+        { type: 5, data: { tag: 'route', payload: { path: '/reset' } }, timestamp: 1002 },
+        meta('https://app.example.com/search?q=token#section', 1003),
+        { type: 4, data: {}, timestamp: 1004 },
+      ];
+      emitOnRecord(...emitted.map((event): [unknown] => [event]));
+      const recorder = new ScreenRecorder('normal', { maskKeys: MASK_KEYS });
+      recorder.start();
+
+      const events = recorder.getEvents();
+      expect(events).toHaveLength(emitted.length);
+      events.forEach((event, i) => expect(event).toBe(emitted[i]));
+    });
+
+    it('maskKeys: []이거나 미지정이면 페이지 URL을 마스킹하지 않는다', () => {
+      const original = meta(SECRET_HREF);
+      emitOnRecord([original]);
+      const disabled = new ScreenRecorder('normal', { maskKeys: [] });
+      const unset = new ScreenRecorder();
+      disabled.start();
+      unset.start();
+
+      expect(disabled.getEvents()[0]).toBe(original);
+      expect(unset.getEvents()[0]).toBe(original);
+      expect(original.data.href).toBe(SECRET_HREF);
+    });
+
+    it('prependEvents()로 복원한 백업의 Meta href도 가린다 (마스킹 이전 버전이 저장한 백업 대비)', () => {
+      const recorder = new ScreenRecorder('normal', { maskKeys: MASK_KEYS });
+      recorder.start();
+      const restoredMeta = meta(SECRET_HREF, Date.now() - 2000);
+      recorder.prependEvents([restoredMeta, { type: 2, data: {}, timestamp: Date.now() - 1000 }]);
+
+      const first = recorder.getEvents()[0] as typeof restoredMeta;
+      expect(first.data.href).toBe(MASKED_HREF);
+      expect(restoredMeta.data.href).toBe(SECRET_HREF);
+    });
   });
 
   describe('mode preset', () => {
