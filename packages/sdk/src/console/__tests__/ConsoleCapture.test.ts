@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { ConsoleCapture } from '../ConsoleCapture.js';
+import { ConsoleCapture, MAX_CONSOLE_TEXT_LENGTH } from '../ConsoleCapture.js';
 
 let capture: ConsoleCapture;
 
@@ -467,6 +467,33 @@ describe('ConsoleCapture', () => {
       bag.self = bag;
       expectForwardedWithoutThrow(['ctx', bag, 'tail']);
       expect(capture.snapshot().map((e) => e.message)).toEqual(['ctx [unserializable] tail']);
+    });
+  });
+
+  describe('메시지·stack 길이 상한', () => {
+    it('MAX_CONSOLE_TEXT_LENGTH보다 긴 메시지는 앞부분만 저장하고 잘렸다고 표시한다', () => {
+      capture.start();
+      console.error({ state: 'x'.repeat(MAX_CONSOLE_TEXT_LENGTH * 2) });
+      const { message } = capture.snapshot()[0];
+      expect(message.startsWith('{"state":"xxx')).toBe(true);
+      expect(message).toContain(`…[truncated by qa-recorder: kept the first ${MAX_CONSOLE_TEXT_LENGTH} of`);
+      expect(message.length).toBeLessThan(MAX_CONSOLE_TEXT_LENGTH + 100);
+    });
+
+    it('긴 stack도 자른다', () => {
+      const err = new Error('deep');
+      err.stack = 'Error: deep\n' + '    at f (app.js:1:1)\n'.repeat(2000);
+      capture.start();
+      console.error(err);
+      const { stack } = capture.snapshot()[0];
+      expect(stack!.startsWith('Error: deep')).toBe(true);
+      expect(stack!.length).toBeLessThan(MAX_CONSOLE_TEXT_LENGTH + 100);
+    });
+
+    it('상한 이하 메시지는 그대로 둔다', () => {
+      capture.start();
+      console.error('short');
+      expect(capture.snapshot()[0].message).toBe('short');
     });
   });
 });
