@@ -58,10 +58,10 @@ pnpm add qa-recorder
 Or drop it in via `<script>` tag (UMD build, no bundler required):
 
 ```html
-<script src="https://unpkg.com/qa-recorder@1/dist/qa-recorder.umd.js"></script>
+<script src="https://unpkg.com/qa-recorder@2/dist/qa-recorder.umd.js"></script>
 ```
 
-`@1` loads the latest 1.x release, so a future major version with breaking changes is never picked up automatically. Pin an exact version (for example `@1.13.0`) if you need fully predictable builds.
+`@2` loads the latest 2.x release, so a future major version with breaking changes is never picked up automatically. Pin an exact version (for example `@2.0.0`) if you need fully predictable builds. Upgrading from 1.x? See [Upgrading from 1.x](#upgrading-from-1x).
 
 ---
 
@@ -123,7 +123,7 @@ createApp(App).mount('#app');
     maxRequests: 100,
   };
 </script>
-<script src="https://unpkg.com/qa-recorder@1/dist/qa-recorder.umd.js"></script>
+<script src="https://unpkg.com/qa-recorder@2/dist/qa-recorder.umd.js"></script>
 ```
 
 ---
@@ -395,6 +395,20 @@ The `qa-report-{timestamp}.html` file is a fully self-contained QA report — no
 | WebView (Android/iOS) | Full support |
 
 > rrweb uses only `MutationObserver` and standard DOM APIs — no screen capture permission required, no platform restrictions.
+
+---
+
+## Upgrading from 1.x
+
+2.0 changes the HAR output and a few behaviors. What to check:
+
+- **HAR files are now standard HAR 1.2.** `qa-network-*.har` and the uploaded `har` field are `{ "log": { "version", "creator", "entries", … } }`; 1.x wrote the `log` object without the top-level `log` key. A server that reads uploads must read `har.log.entries` instead of `har.entries`.
+- **HAR values a page cannot measure are marked as unknown** instead of being filled in: `httpVersion` is `""`, header sizes and `response.bodySize` are `-1`, and the timing split is explained in `timings.comment` (see [HAR output](#har-output)). XHR URLs are recorded as absolute URLs, `[MASKED]` inside URLs is percent-encoded, and each response has a `_bodyStatus` field.
+- **`rrweb` and `fflate` are no longer dependencies of the package** — they were always bundled into the build. If your app imports `rrweb` itself, add it to your own dependencies.
+- **Saving does not stop recording any more**, and requests whose response body is still arriving can appear in two consecutive reports (see [Save Modes](#save-modes)). A failure message may now say that part of the recording was dropped to stay within the memory limits.
+- **`destroy()` cancels** an open save dialog and an upload or local save in flight, and removes the progress bar and share panel. Calling `init()` on the same instance afterwards starts with empty network and console logs, like the replay already did.
+
+New in 2.0: the `uploadTimeout` and `pendingBodyTimeout` options, and exported TypeScript types (`HARDocument`, `HAREntry`, `HARBodyStatus`, `ConsoleEntry`, …).
 
 ---
 
