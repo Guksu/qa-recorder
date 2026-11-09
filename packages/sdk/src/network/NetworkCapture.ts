@@ -2,7 +2,18 @@ import { MaskingFilter, type KeyMatcher } from './MaskingFilter.js';
 import {
   BINARY_PLACEHOLDER, isBinaryMime, limitText, readLimitedText, requestBodySize, truncationNote, utf8ByteLength,
 } from './bodyLimit.js';
-import type { HAREntry } from '../types/har.js';
+import type { HARBodyStatus, HAREntry } from '../types/har.js';
+import { isAbortError } from '../core/abort.js';
+
+/** 아직 받는 중인 fetch 응답 본문 (fillResponseBody) */
+interface PendingBody {
+  /** 읽기가 끝나면(성공·실패·취소 모두) resolve */
+  readonly settled: Promise<void>;
+  /** 지금까지 받은 텍스트 (마스킹 전, maxBodySize 이하) */
+  partial: string;
+  /** 사본 읽기를 취소한다 — 앱의 원본 응답 스트림은 그대로 */
+  readonly controller: AbortController;
+}
 
 export interface NetworkCaptureOptions {
   /** body·URL에서 값을 가릴 키 목록 (MaskingFilter.createKeyMatcher 참고) */
@@ -37,6 +48,8 @@ export class NetworkCapture {
   private originalXHR: typeof XMLHttpRequest;
   private patchedFetch: typeof fetch | null = null;
   private patchedXHR: typeof XMLHttpRequest | null = null;
+  /** 본문을 아직 받는 중인 엔트리 — 읽기가 끝나거나 취소되면 빠진다 */
+  private readonly pendingBodies = new Map<HAREntry, PendingBody>();
   private recordingStartedAt: Date | null = null;
   /** 지금 세션 번호 (stop() 중이면 0) */
   private session = 0;
@@ -73,6 +86,8 @@ export class NetworkCapture {
 
   stop(): void {
     this.session = 0;
+    // 받는 중인 본문 사본 읽기를 취소한다 — 끝난 녹화의 엔트리가 늦게 바뀌지 않고, 앱의 원본 응답은 그대로다
+    this.abortPendingBodies();
     if (this.patchedFetch && window.fetch === this.patchedFetch) window.fetch = this.originalFetch;
     if (this.patchedXHR && window.XMLHttpRequest === this.patchedXHR) {
       (window as Window & { XMLHttpRequest: typeof XMLHttpRequest }).XMLHttpRequest = this.originalXHR;
@@ -83,6 +98,7 @@ export class NetworkCapture {
 
   /** 버퍼를 비우고 기록 시작 시점을 현재로 재설정 */
   clearBuffer(): void {
+    this.abortPendingBodies();
     this.buffer = [];
     this.recordingStartedAt = new Date();
   }
@@ -90,11 +106,69 @@ export class NetworkCapture {
   /**
    * 저장한 엔트리만 버퍼에서 뺀다 (저장 성공 후). 저장하는 동안 새로 기록된 엔트리는 남는다.
    * 엔트리는 snapshot()이 돌려준 객체와 같은 객체인지로 비교한다.
+   * keep에 든 엔트리(저장할 때 본문을 아직 받는 중이던 요청)는 빼지 않고 `_alsoInEarlierReport`로 표시해
+   * 본문을 마저 받은 뒤 다음 저장에 다시 들어가게 한다.
    */
-  discard(entries: readonly HAREntry[]): void {
+  discard(entries: readonly HAREntry[], keep: ReadonlySet<HAREntry> = new Set()): void {
     if (entries.length === 0) return;
     const saved = new Set(entries);
-    this.buffer = this.buffer.filter((entry) => !saved.has(entry));
+    for (const entry of keep) if (saved.has(entry)) entry._alsoInEarlierReport = true;
+    this.buffer = this.buffer.filter((entry) => !saved.has(entry) || keep.has(entry));
+  }
+
+  /**
+   * entries 중 본문을 아직 받는 중인 요청을 최대 timeoutMs 동안 기다린다 (저장 직전).
+   * 모두 끝나거나, 시간이 지나거나, signal이 취소되면 resolve한다 — 끝나지 않는 스트림(SSE 등)이 있어도
+   * timeoutMs보다 오래 기다리지 않는다. 0 이하면 기다리지 않는다.
+   */
+  waitForBodies(entries: readonly HAREntry[], timeoutMs: number, signal?: AbortSignal): Promise<void> {
+    const pending = entries.map((entry) => this.pendingBodies.get(entry)?.settled).filter(Boolean);
+    if (pending.length === 0 || !(timeoutMs > 0) || signal?.aborted) return Promise.resolve();
+    return new Promise((resolve) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const done = () => {
+        if (timer !== undefined) clearTimeout(timer);
+        signal?.removeEventListener('abort', done);
+        resolve();
+      };
+      if (Number.isFinite(timeoutMs)) timer = setTimeout(done, timeoutMs);
+      signal?.addEventListener('abort', done);
+      Promise.all(pending).then(done, done);
+    });
+  }
+
+  /**
+   * entries 중 본문을 아직 받는 중인 요청에 지금까지 받은 부분을 마스킹해 담고(상태 'pending'), 그 엔트리들을 돌려준다.
+   * 읽기는 계속되며, 다 받으면 전체 본문과 'complete'(또는 'truncated' 등)로 바뀐다.
+   */
+  markPendingBodies(entries: readonly HAREntry[]): Set<HAREntry> {
+    const marked = new Set<HAREntry>();
+    for (const entry of entries) {
+      const pending = this.pendingBodies.get(entry);
+      if (!pending) continue;
+      const { content } = entry.response;
+      content.text = pending.partial
+        ? MaskingFilter.maskTruncatedBody(pending.partial, content.mimeType, this.isSensitiveKey)
+        : '';
+      content._bodyStatus = 'pending';
+      marked.add(entry);
+    }
+    return marked;
+  }
+
+  /** 받는 중인 본문 읽기를 모두 취소한다 (상태 'aborted') */
+  private abortPendingBodies(): void {
+    for (const [entry, pending] of [...this.pendingBodies]) this.abortBody(entry, pending);
+  }
+
+  private abortBody(entry: HAREntry, pending: PendingBody): void {
+    this.pendingBodies.delete(entry);
+    pending.controller.abort();
+    entry.response.content._bodyStatus = 'aborted';
+    if (pending.partial) {
+      entry.response.content.text =
+        MaskingFilter.maskTruncatedBody(pending.partial, entry.response.content.mimeType, this.isSensitiveKey);
+    }
   }
 
   /** 기록 시작 시점을 바꾸고 남은 엔트리의 _offsetMs를 그 기준으로 다시 계산한다 */
@@ -103,13 +177,25 @@ export class NetworkCapture {
     for (const entry of this.buffer) entry._offsetMs = this.offsetOf(entry.startedDateTime);
   }
 
+  /** entries 중 이제 버퍼에 없는(maxRequests를 넘어 밀려난) 엔트리 수 */
+  countMissing(entries: readonly HAREntry[]): number {
+    const inBuffer = new Set(this.buffer);
+    return entries.filter((entry) => !inBuffer.has(entry)).length;
+  }
+
   /** 현재 버퍼의 복사본 반환 (저장 시점 스냅샷) */
   snapshot(): HAREntry[] {
     return [...this.buffer];
   }
 
-  /** 백업에서 복원된 엔트리를 버퍼 앞에 추가 (maxRequests 초과분 앞에서 제거) */
+  /**
+   * 백업에서 복원된 엔트리를 버퍼 앞에 추가 (maxRequests 초과분 앞에서 제거).
+   * 백업할 때(페이지를 떠날 때) 본문을 받는 중이던 엔트리는 더 받을 수 없으므로 'aborted'로 바꾼다.
+   */
   restoreEntries(entries: HAREntry[]): void {
+    for (const entry of entries) {
+      if (entry?.response?.content?._bodyStatus === 'pending') entry.response.content._bodyStatus = 'aborted';
+    }
     this.buffer = [...entries, ...this.buffer].slice(-this.maxRequests);
   }
 
@@ -132,28 +218,60 @@ export class NetworkCapture {
   }
 
   /**
-   * fetch 응답 body를 비동기로 채운다. 바이너리 MIME은 읽지 않고, 나머지는 maxBodySize까지만 읽는다.
+   * fetch 응답 body를 비동기로 채운다. 바이너리 MIME은 읽지 않고('binary'), maxBodySize가 0이면 기록하지 않고('omitted'),
+   * 나머지는 응답 사본을 maxBodySize까지만 읽는다 — 읽는 동안 'pending', 끝까지 읽으면 'complete',
+   * 잘리면 'truncated', 실패하면 'error', 취소되면(stop(), 버퍼에서 밀려남) 'aborted'.
    * 끝까지 읽은 body는 maskBody로, 잘린 body는 maskTruncatedBody로 가린다.
    * content.size는 끝까지 읽어 디코딩한 본문의 바이트 수만 기록하고, 읽지 않았거나 잘렸으면 -1(알 수 없음)로 둔다.
    * response.bodySize(네트워크로 받은 압축된 크기)는 페이지에서 알 수 없어 항상 -1이다.
+   * 취소되거나 버퍼에서 빠진 엔트리에는 늦게 끝난 읽기 결과를 쓰지 않는다.
    */
   private fillResponseBody(stored: HAREntry, response: Response): void {
     const { content } = stored.response;
     if (isBinaryMime(content.mimeType)) {
       content.text = BINARY_PLACEHOLDER;
+      content._bodyStatus = 'binary';
       return;
     }
-    if (this.maxBodySize <= 0) return;
+    if (this.maxBodySize <= 0) {
+      content._bodyStatus = 'omitted';
+      return;
+    }
 
-    readLimitedText(response, this.maxBodySize).then(({ text, truncated }) => {
+    content._bodyStatus = 'pending';
+    const controller = new AbortController();
+    let pending!: PendingBody;
+    const finish = (status: HARBodyStatus, apply?: () => void) => {
+      if (this.pendingBodies.get(stored) !== pending) return; // 취소됐거나 버퍼에서 빠졌다
+      this.pendingBodies.delete(stored);
+      apply?.();
+      content._bodyStatus = status;
+    };
+    const settled = readLimitedText(response, this.maxBodySize, {
+      signal: controller.signal,
+      onProgress: (text) => { pending.partial = text; },
+    }).then(({ text, truncated }) => {
       if (truncated) {
-        content.text = MaskingFilter.maskTruncatedBody(text, content.mimeType, this.isSensitiveKey)
-          + truncationNote(this.maxBodySize);
+        finish('truncated', () => {
+          content.text = MaskingFilter.maskTruncatedBody(text, content.mimeType, this.isSensitiveKey)
+            + truncationNote(this.maxBodySize);
+        });
       } else {
-        content.size = utf8ByteLength(text);
-        content.text = MaskingFilter.maskBody(text, content.mimeType, this.isSensitiveKey);
+        finish('complete', () => {
+          content.size = utf8ByteLength(text);
+          content.text = MaskingFilter.maskBody(text, content.mimeType, this.isSensitiveKey);
+        });
       }
-    }).catch(() => { /* body 읽기 실패 무시 */ });
+    }, (err: unknown) => {
+      finish(isAbortError(err) ? 'aborted' : 'error', () => {
+        // 실패 전까지 받은 부분이 있으면 남긴다
+        if (pending.partial) {
+          content.text = MaskingFilter.maskTruncatedBody(pending.partial, content.mimeType, this.isSensitiveKey);
+        }
+      });
+    });
+    pending = { settled, partial: '', controller };
+    this.pendingBodies.set(stored, pending);
   }
 
   private offsetOf(startedDateTime: string): number {
@@ -166,7 +284,9 @@ export class NetworkCapture {
   private push(entry: HAREntry, session: number): HAREntry | null {
     if (session !== this.session) return null;
     if (this.buffer.length >= this.maxRequests) {
-      this.buffer.shift(); // FIFO: 가장 오래된 항목 제거
+      const evicted = this.buffer.shift()!; // FIFO: 가장 오래된 항목 제거
+      const pending = this.pendingBodies.get(evicted);
+      if (pending) this.abortBody(evicted, pending); // 더 받아도 저장할 곳이 없다
     }
     const stored = { ...entry, _offsetMs: this.offsetOf(entry.startedDateTime) };
     this.buffer.push(stored);
@@ -406,7 +526,12 @@ export class NetworkCapture {
             statusText: xhr.statusText,
             httpVersion: UNKNOWN_HTTP_VERSION,
             headers: responseHeaders,
-            content: { size: contentSize, mimeType, text: responseText },
+            content: {
+              size: contentSize, mimeType, text: responseText,
+              _bodyStatus: !isText ? 'binary'
+                : this.maxBodySize <= 0 ? 'omitted'
+                : responseText.length > this.maxBodySize ? 'truncated' : 'complete',
+            },
             bodySize: -1,
             headersSize: -1,
           },

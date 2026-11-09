@@ -235,3 +235,16 @@ describe('리포트 런타임 — 재생 iframe 문서 닫기', () => {
     void win;
   });
 });
+
+describe('리포트 런타임 — 받는 중이던 응답 본문', () => {
+  it('저장할 때 본문을 받는 중이었으면 받은 부분과 함께 그 이유를 보여 준다', async () => {
+    const { HARBuilder } = await import('../../network/HARBuilder.js');
+    const pending = entry();
+    pending.response.content = { size: -1, mimeType: 'application/json', text: '{"part":', _bodyStatus: 'pending' };
+    const { doc } = render(HARBuilder.build([pending]).log.entries);
+    doc.querySelector<HTMLElement>('.net-row')!.click();
+    const pane = doc.getElementById('pane-response')!;
+    expect(pane.querySelector('.body-note')!.textContent).toMatch(/still being received/);
+    expect(pane.querySelector('.body-pre')!.textContent).toBe('{"part":');
+  });
+});

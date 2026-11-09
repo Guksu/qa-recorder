@@ -5,12 +5,43 @@ import { MaskingFilter, type KeyMatcher } from '../network/MaskingFilter.js';
 export type RecorderState = 'idle' | 'recording' | 'stopped';
 
 /**
+ * 리플레이의 한 구간. 녹화 시작이나 체크아웃의 Meta + FullSnapshot으로 시작하므로 따로 재생할 수 있다
+ * (백업에서 복원한 구간도 FullSnapshot부터 시작하도록 정렬한다).
+ */
+interface Segment {
+  /** 녹화 시작과 체크아웃마다 1씩 늘어나는 번호 (복원한 백업 구간은 0) */
+  readonly id: number;
+  events: unknown[];
+  /** JSON 문자 수 — maxReplaySize가 있을 때만 센다 (없으면 0) */
+  size: number;
+  /** FullSnapshot까지(앞의 Meta 포함)의 JSON 문자 수 */
+  snapshotSize: number;
+}
+
+/**
  * 저장을 시작할 때 잘라 낸 녹화 (cutForSave 참고).
  * events는 저장할 이벤트이고, segment는 자른 직후 시작된 새 구간의 번호다.
  */
 export interface SaveCut {
   readonly events: unknown[];
   readonly segment: number;
+  /** 자르기 전 구간들 — 저장에 실패하면 되돌린다 */
+  readonly saved: readonly Readonly<Segment>[];
+  /**
+   * 새 구간을 같은 record() 안의 takeFullSnapshot(true)로 시작했는지.
+   * 그렇다면 노드 id가 그대로라(rrweb-snapshot은 노드에 붙인 __sn.id를 다시 쓴다) 저장에 실패했을 때
+   * 그 Meta + FullSnapshot을 빼고 뒤의 변경 이벤트를 잘라 낸 구간에 그대로 이어 붙일 수 있다.
+   */
+  readonly mergeable: boolean;
+}
+
+/** rollbackSave의 결과 */
+export interface RollbackResult {
+  /**
+   * 잘라 낸(저장에 실패한) 녹화 중 메모리 제한(maxReplaySize) 때문에 되돌리지 못하고 버린 이벤트 수.
+   * 0이면 잘라 낸 녹화가 모두 남았다.
+   */
+  droppedEvents: number;
 }
 
 /**
@@ -69,22 +100,20 @@ const MODE_PRESETS: Record<RecorderMode, ModePreset> = {
  * rrweb 래퍼.
  * MutationObserver 기반 DOM 이벤트를 수집하여 JSON Blob으로 직렬화.
  * getDisplayMedia 권한 불필요 — 모바일/WebView 포함 모든 환경 지원.
+ *
+ * 보관 정책 (구간 = Meta + FullSnapshot으로 시작해 따로 재생할 수 있는 이벤트 묶음):
+ * - 기본: 마지막 두 구간(직전 + 지금)을 보관한다. 체크아웃(mode의 시간 주기, 또는 지금 구간이
+ *   maxReplaySize의 절반을 넘고 변경분이 스냅샷보다 커질 때)마다 그보다 오래된 구간은 버린다.
+ *   그래서 저장하면 항상 최소 한 주기의 리플레이가 들어간다 (구간이 일찍 넘어가면 더 짧을 수 있다).
+ * - 저장 실패로 되돌린 구간(rollbackSave)이나 복원한 백업처럼 마지막 두 구간보다 오래된 구간은
+ *   전체가 maxReplaySize 안에 들어갈 때만 남긴다 — 넘으면 다음 체크아웃을 기다리지 않고 바로
+ *   가장 오래된 구간부터 통째로 버린다 (남은 리플레이는 항상 FullSnapshot부터 시작한다).
+ * - 예외: 마지막 두 구간은 크기와 상관없이 남긴다. 스냅샷 하나가 maxReplaySize의 4분의 1보다 큰 페이지에서는
+ *   한 구간이 스냅샷의 약 두 배까지 커질 수 있어(trackSize 참고) 보관량이 제한을 넘을 수 있다 (최대 약 스냅샷 네 개 분량).
  */
 export class ScreenRecorder {
-  private events: unknown[] = [];
-  /**
-   * 직전 체크아웃 구간. 체크아웃 시 현재 구간을 즉시 버리면 저장 시점에 따라
-   * 히스토리가 0에 수렴할 수 있으므로, 마지막 두 구간을 유지해
-   * 항상 최소 한 주기(checkoutEveryNms)만큼의 리플레이를 보장한다 (최대 두 주기).
-   * 구간이 maxReplaySize의 절반을 넘어 일찍 넘어가면 한 주기보다 짧을 수 있다 (trackSize 참고).
-   * 또, resume()으로 보존된 녹화 전체가 prevEvents가 되고 새 record()가 체크아웃 주기를
-   * 처음부터 다시 세므로, 저장 실패 후 다음 체크아웃 전까지는 두 주기를 넘을 수 있다.
-   */
-  private prevEvents: unknown[] = [];
-  /** 지금 구간(events)의 번호 — 녹화 시작과 체크아웃마다 1씩 늘어난다 */
-  private segment = 0;
-  /** 직전 구간(prevEvents)의 마지막 구간 번호 (없으면 0) */
-  private prevSegment = 0;
+  /** 오래된 구간부터 지금 구간(마지막)까지 */
+  private segments: Segment[] = [];
   /** 마지막으로 만든 구간 번호 */
   private segmentSeq = 0;
   /**
@@ -95,10 +124,6 @@ export class ScreenRecorder {
   private generation = 0;
   /** 다음 emit을 새 구간의 시작으로 다룰지 — record()를 다시 시작해 구간을 나눌 때 사용 (checkoutNow 참고) */
   private startNewSegmentOnNextEmit = false;
-  /** 지금 구간(events)의 JSON 문자 수 — maxReplaySize가 있을 때만 센다 */
-  private eventsSize = 0;
-  /** 지금 구간의 FullSnapshot까지(앞의 Meta 포함)의 JSON 문자 수 */
-  private snapshotSize = 0;
   private stopFn: (() => void) | null = null;
   private state: RecorderState = 'idle';
   private preset: ModePreset;
@@ -117,15 +142,23 @@ export class ScreenRecorder {
     this.maxReplaySize = typeof maxReplaySize === 'number' && maxReplaySize > 0 ? maxReplaySize : Infinity;
   }
 
+  private get sizeLimited(): boolean {
+    return this.maxReplaySize !== Infinity;
+  }
+
+  /** 지금 구간 (녹화 전이면 없음) */
+  private get current(): Segment | undefined {
+    return this.segments[this.segments.length - 1];
+  }
+
+  private newSegment(events: unknown[] = []): Segment {
+    return { id: ++this.segmentSeq, events, size: 0, snapshotSize: 0 };
+  }
+
   start(): void {
     if (this.state === 'recording') return;
 
-    this.events = [];
-    this.prevEvents = [];
-    this.eventsSize = 0;
-    this.snapshotSize = 0;
-    this.segment = ++this.segmentSeq;
-    this.prevSegment = 0;
+    this.segments = [this.newSegment()];
     this.startNewSegmentOnNextEmit = false;
     this.startRecord();
   }
@@ -137,15 +170,13 @@ export class ScreenRecorder {
       emit: (event, isCheckout) => {
         if (generation !== this.generation) return;
         const stored = maskMetaHref(event, this.isSensitiveKey);
-        if (isCheckout || this.startNewSegmentOnNextEmit) {
+        if (isCheckout || this.startNewSegmentOnNextEmit || !this.current) {
           this.startNewSegmentOnNextEmit = false;
-          this.prevEvents = this.events;
-          this.prevSegment = this.segment;
-          this.segment = ++this.segmentSeq;
-          this.events = [stored];
-          this.eventsSize = 0;
+          this.segments.push(this.newSegment([stored]));
+          // 체크아웃: 마지막 두 구간(직전 + 지금)만 남긴다
+          if (this.segments.length > 2) this.segments = this.segments.slice(-2);
         } else {
-          this.events.push(stored);
+          this.current!.events.push(stored);
         }
         this.trackSize(stored);
       },
@@ -174,45 +205,74 @@ export class ScreenRecorder {
    */
   cutForSave(): SaveCut {
     if (this.state !== 'recording') throw new Error('No recording available');
+    const saved = this.segments.map((seg) => ({ ...seg, events: [...seg.events] }));
     const events = this.getEvents();
-    this.checkoutNow();
-    return { events, segment: this.segment };
+    const mergeable = this.checkoutNow();
+    return { events, segment: this.current!.id, saved, mergeable };
   }
 
   /**
    * 저장에 성공 — 잘라 낸 시점 이전의 녹화를 버리고, 저장하는 동안 기록된 녹화(잘라 낸 시점의 새 구간부터)는 남긴다.
    */
   commitSave(cut: SaveCut): void {
-    if (this.prevSegment < cut.segment) this.prevEvents = [];
+    this.segments = this.segments.filter((seg) => seg.id >= cut.segment);
   }
 
   /**
    * 저장에 실패 — 잘라 낸 녹화를 되돌려 다음 저장에 함께 들어가게 한다 (중복 없이).
-   * 되돌린 녹화는 직전 구간(prevEvents)에 들어가므로, 일반 직전 구간과 마찬가지로 다음 체크아웃 때 버려진다
-   * — 실패가 반복돼도 메모리가 끝없이 늘지 않는다.
+   * 자를 때 같은 record() 안에서 찍은 Meta + FullSnapshot은 저장을 나누려고 찍은 것이므로 빼고,
+   * 그 뒤에 기록된 변경 이벤트를 잘라 낸 마지막 구간에 이어 붙인다 — 실패를 반복해도 스냅샷이 쌓이지 않는다.
+   * 되돌린 뒤 maxReplaySize를 넘으면 마지막 두 구간보다 오래된 구간을 가장 오래된 것부터 버리고,
+   * 잘라 낸 녹화 중 버린 이벤트 수를 돌려준다.
    */
-  rollbackSave(cut: SaveCut): void {
-    if (this.state === 'idle') return;
-    this.prevEvents = this.prevSegment < cut.segment
-      // 직전 구간은 잘라 낸 녹화의 마지막 구간뿐이다 — 잘라 낸 녹화 전체로 바꾼다
-      ? cut.events
-      // 저장하는 동안 체크아웃이 일어나 직전 구간이 이미 새 구간이다 — 그 앞에 붙인다
-      : [...cut.events, ...this.prevEvents];
+  rollbackSave(cut: SaveCut): RollbackResult {
+    if (this.state === 'idle') return { droppedEvents: 0 };
+    const restored = cut.saved.map((seg) => ({ ...seg, events: [...seg.events] }));
+    let after = this.segments.filter((seg) => seg.id >= cut.segment);
+    const cutSegment = after[0];
+    const last = restored[restored.length - 1];
+    if (cut.mergeable && last && cutSegment?.id === cut.segment && startsWithSnapshot(cutSegment.events)) {
+      last.events.push(...cutSegment.events.slice(2));
+      last.size += cutSegment.size - cutSegment.snapshotSize;
+      after = after.slice(1);
+    }
+    this.segments = [...restored, ...after];
+    const dropped = this.enforceBudget();
+    const savedIds = new Set(cut.saved.map((seg) => seg.id));
+    return {
+      droppedEvents: dropped.filter((seg) => savedIds.has(seg.id)).reduce((n, seg) => n + seg.events.length, 0),
+    };
+  }
+
+  /**
+   * 마지막 두 구간보다 오래된 구간을 전체 크기가 maxReplaySize 안에 들 때까지 가장 오래된 것부터 버린다.
+   * 구간 단위로만 버리므로 남은 리플레이는 항상 FullSnapshot부터 시작한다. 버린 구간을 돌려준다.
+   */
+  private enforceBudget(): Segment[] {
+    if (!this.sizeLimited) return [];
+    const dropped: Segment[] = [];
+    let total = this.segments.reduce((n, seg) => n + seg.size, 0);
+    while (this.segments.length > 2 && total > this.maxReplaySize) {
+      const oldest = this.segments.shift()!;
+      total -= oldest.size;
+      dropped.push(oldest);
+    }
+    return dropped;
   }
 
   /**
    * 지금 새 구간을 시작한다 (rrweb의 시간 기준 체크아웃과 같은 takeFullSnapshot(true)).
    * rrweb이 체크아웃 이벤트를 emit하지 않으면(예외 등) record()를 다시 시작해 그 첫 이벤트부터 새 구간으로 다룬다
-   * — 동기적으로 이어지므로 기록 공백은 없다.
+   * — 동기적으로 이어지므로 기록 공백은 없다. takeFullSnapshot으로 나눴으면 true.
    */
-  private checkoutNow(): void {
+  private checkoutNow(): boolean {
     const before = this.segmentSeq;
     try {
       record.takeFullSnapshot(true);
     } catch {
       /* 아래에서 record()를 다시 시작한다 */
     }
-    if (this.segmentSeq !== before) return;
+    if (this.segmentSeq !== before) return true;
     this.stopFn?.();
     this.stopFn = null;
     this.startNewSegmentOnNextEmit = true;
@@ -220,13 +280,10 @@ export class ScreenRecorder {
     if (this.segmentSeq === before) {
       // record()가 아무것도 emit하지 않았다 — 빈 새 구간을 직접 연다
       this.startNewSegmentOnNextEmit = false;
-      this.prevEvents = this.events;
-      this.prevSegment = this.segment;
-      this.segment = ++this.segmentSeq;
-      this.events = [];
-      this.eventsSize = 0;
-      this.snapshotSize = 0;
+      this.segments.push(this.newSegment());
+      if (this.segments.length > 2) this.segments = this.segments.slice(-2);
     }
+    return false;
   }
 
   /**
@@ -235,30 +292,29 @@ export class ScreenRecorder {
    * 가장 오래된 구간이 버려지고, 남은 두 구간은 각각 FullSnapshot으로 시작해 그대로 재생된다.
    * 새 구간도 스냅샷 크기만큼은 차지하므로, 스냅샷 뒤에 쌓인 변경분이 스냅샷보다 작으면 넘기지 않는다
    * — 스냅샷 하나가 제한의 절반보다 큰 페이지에서 이벤트마다 스냅샷을 다시 찍지 않도록.
+   * 저장 실패로 되돌린 오래된 구간은 새 이벤트로 전체가 제한을 넘으면 바로 버린다 (enforceBudget).
    * stop() 뒤에 늦게 emit된 이벤트(throttle된 mousemove 등)로는 스냅샷을 찍지 않는다.
    */
   private trackSize(event: unknown): void {
-    if (this.maxReplaySize === Infinity) return;
-    this.eventsSize += JSON.stringify(event).length;
+    if (!this.sizeLimited) return;
+    const seg = this.current!;
+    seg.size += JSON.stringify(event).length;
     if ((event as { type?: unknown }).type === FULL_SNAPSHOT) {
-      this.snapshotSize = this.eventsSize;
+      seg.snapshotSize = seg.size;
       return;
     }
+    if (this.segments.length > 2) this.enforceBudget();
     if (
       this.state === 'recording' &&
-      this.eventsSize > this.maxReplaySize / 2 &&
-      this.eventsSize - this.snapshotSize > this.snapshotSize
+      seg.size > this.maxReplaySize / 2 &&
+      seg.size - seg.snapshotSize > seg.snapshotSize
     ) {
       record.takeFullSnapshot(true);
     }
   }
 
   clearBuffer(): void {
-    this.events = [];
-    this.prevEvents = [];
-    this.prevSegment = 0;
-    this.eventsSize = 0;
-    this.snapshotSize = 0;
+    this.segments = [this.newSegment()];
     // takeFullSnapshot은 record()가 실행 중일 때만 유효 — idle/stopped에서 호출하면 rrweb이 throw
     if (this.state === 'recording') record.takeFullSnapshot();
   }
@@ -271,22 +327,24 @@ export class ScreenRecorder {
   }
 
   /**
-   * 정지된 녹화를 기존 이벤트를 유지한 채 재개 (저장 실패 시 녹화 보존용).
+   * 정지된 녹화를 기존 이벤트를 유지한 채 재개.
    * 새 record()는 Meta + FullSnapshot부터 emit하므로 [...기존, ...신규] 순서로 이어 붙여도 재생 가능하다.
-   * 보존된 이벤트는 prevEvents로 들어가므로 일반 직전 구간과 마찬가지로 다음 체크아웃 때 폐기된다.
+   * 보존된 이벤트는 직전 구간이 되므로 일반 직전 구간과 마찬가지로 다음 체크아웃 때 폐기된다.
    * recording 중이면 무시하고, idle이면 보존할 녹화가 없으므로 start()와 동일하게 동작한다.
    */
   resume(): void {
     if (this.state === 'recording') return;
     const kept = this.state === 'stopped' ? this.getEvents() : [];
     this.start();
-    // start()가 비운 버퍼의 앞쪽(prevEvents)에 기존 이벤트를 되돌려 놓는다
-    this.prevEvents = kept;
+    // start()가 비운 버퍼의 앞쪽(직전 구간)에 기존 이벤트를 되돌려 놓는다
+    if (kept.length) this.segments.unshift(this.measured({ id: 0, events: kept, size: 0, snapshotSize: 0 }));
   }
 
   getEvents(): unknown[] {
     if (this.state === 'idle') throw new Error('No recording available');
-    return [...this.prevEvents, ...this.events];
+    const all: unknown[] = [];
+    for (const seg of this.segments) all.push(...seg.events);
+    return all;
   }
 
   /**
@@ -295,7 +353,7 @@ export class ScreenRecorder {
    */
   getRecentEvents(): unknown[] {
     if (this.state === 'idle') throw new Error('No recording available');
-    return [...this.events];
+    return [...(this.current?.events ?? [])];
   }
 
   getBlob(): Blob {
@@ -313,19 +371,36 @@ export class ScreenRecorder {
     const filtered = alignToFullSnapshot(
       events.filter((e) => ((e as { timestamp: number }).timestamp ?? 0) >= cutoff),
     );
+    if (filtered.length === 0) return;
     const masked = filtered.map((e) => maskMetaHref(e, this.isSensitiveKey));
-    this.prevEvents = [...masked, ...this.prevEvents];
+    this.segments.unshift(this.measured({ id: 0, events: masked, size: 0, snapshotSize: 0 }));
+    this.enforceBudget();
+  }
+
+  /** 이벤트로 구간 크기를 다시 센다 (크기 제한이 있을 때만) */
+  private measured(seg: Segment): Segment {
+    if (!this.sizeLimited) return seg;
+    let size = 0;
+    for (const event of seg.events) {
+      size += JSON.stringify(event).length;
+      if ((event as { type?: unknown }).type === FULL_SNAPSHOT && seg.snapshotSize === 0) seg.snapshotSize = size;
+    }
+    seg.size = size;
+    return seg;
   }
 
   reset(): void {
     if (this.state === 'recording') return;
-    this.events = [];
-    this.prevEvents = [];
-    this.eventsSize = 0;
-    this.snapshotSize = 0;
+    this.segments = [];
     this.stopFn = null;
     this.state = 'idle';
   }
+}
+
+/** 구간이 Meta + FullSnapshot으로 시작하는지 (자를 때 찍은 체크아웃을 뺄 수 있는지 확인) */
+function startsWithSnapshot(events: unknown[]): boolean {
+  return (events[0] as { type?: unknown } | undefined)?.type === META
+    && (events[1] as { type?: unknown } | undefined)?.type === FULL_SNAPSHOT;
 }
 
 /* rrweb EventType: 2 = FullSnapshot, 4 = Meta (스냅샷 직전에 viewport 정보로 선행) */

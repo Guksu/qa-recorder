@@ -142,11 +142,16 @@ When no `endpoint` is configured, a single ZIP file is downloaded to the user's 
 | `qa-env-{timestamp}.json` | Environment info (browser, language, time zone, viewport, masked page URL, SDK version) |
 | `qa-report-{timestamp}.html` | Unified QA report — session replay + network + console in one file |
 
-Recording does not stop while saving. Everything captured up to the click is saved; what happens on the page while the ZIP is being built (DOM changes, requests, console entries) is kept for the next save. After a successful save only the saved part is cleared, so consecutive saves never repeat or lose data. If saving fails, nothing is cleared: the next save includes the failed part as well, with no duplicates.
+Recording does not stop while saving. Everything captured up to the click is saved; what happens on the page while the ZIP is being built (DOM changes, requests, console entries) is kept for the next save. After a successful save only the saved part is cleared, so consecutive saves never repeat or lose data (the one exception is a request whose response body was still arriving — see [Response bodies still arriving when you save](#response-bodies-still-arriving-when-you-save)). If saving fails, nothing is cleared: the next save includes the failed part as well, with no duplicates, within the memory limits:
+
+- Retrying never grows the replay by a full page snapshot: the extra snapshot taken to split the save off is removed again when the save fails, so ten failed saves of a static page keep one snapshot, not eleven.
+- The replay kept for the retry stays within `maxReplaySize`. If the page kept changing during the failed save and the replay would grow past it, the oldest whole segments (beyond the last two) are dropped at once, so it still starts with a full snapshot.
+- Network and console entries stay within `maxRequests` and `maxConsoleEntries`; entries pushed out by newer ones while the save was running are not kept.
+- When anything from the failed save had to be dropped this way, the message says so ("…except for its oldest part, which no longer fit within the memory limits … and was dropped: N replay events, M network requests …") instead of "The recording was kept".
 
 ### Remote upload
 
-Set an `endpoint` to POST files to your server instead. On success, if the server returns a `url` field, a share-link copy button is shown automatically. If the upload fails — an error response, a network error, or no answer within `uploadTimeout` (default 2 minutes) — the same data is downloaded as a local ZIP instead; if that also fails, the recording is kept so you can try again. As with local saves, recording continues while the upload is in flight.
+Set an `endpoint` to POST files to your server instead. On success, if the server returns a `url` field, a share-link copy button is shown automatically. If the upload fails — an error response, a network error, or no answer within `uploadTimeout` (default 2 minutes) — the same data is downloaded as a local ZIP instead; if that also fails, the recording is kept (within the memory limits described above) so you can try again. As with local saves, recording continues while the upload is in flight.
 
 Calling `destroy()` during an upload aborts the request. That is not treated as a failed upload: no ZIP is downloaded, no message is shown, and a late server response has no effect.
 
@@ -196,7 +201,32 @@ The SDK captures requests from inside the page, where some details are not obser
 | `cookies` | `[]` | Cookies are not captured (`Cookie`/`Set-Cookie` are not readable by the page and are masked anyway). |
 | `timings` | `send: 0`, `wait: time`, `receive: 0`, others `-1`, plus a `comment` | Only the total time is measured (fetch: until the response headers arrive; XHR: until `loadend`). HAR requires `send`/`wait`/`receive` to add up to `time`, so the total is reported as `wait` and the `comment` says the split was not measured. |
 
-Bodies that were not captured have no `text` and carry a `comment` (binary content, non-text request bodies); a body cut at `maxBodySize` keeps the captured text and notes the cut in `comment`. Masked values appear as `[MASKED]` (percent-encoded as `%5BMASKED%5D` inside URLs, which must be valid URIs). Each entry also keeps a custom `_offsetMs` field (milliseconds since recording started), used by the report's timeline.
+Bodies that were not captured have no `text` and carry a `comment` (binary content, non-text request bodies); a body cut at `maxBodySize` keeps the captured text and notes the cut in `comment`. Each response also carries a custom `_bodyStatus` field saying how much of its body was recorded:
+
+| `_bodyStatus` | Meaning |
+|---|---|
+| `complete` | The whole body was read. |
+| `pending` | The body was still arriving when the report was saved; `text` is what had arrived by then (`size` is `-1`). |
+| `truncated` | The body was cut at `maxBodySize`. |
+| `error` | Reading the body failed (the response stream errored); `text` is what had arrived, if anything. |
+| `aborted` | Capture stopped before the body was complete: `destroy()`, leaving the page (restored backups), or the request was pushed out of the `maxRequests` buffer. |
+| `binary` | Binary content, not read. |
+| `omitted` | Not recorded because `maxBodySize` is `0`. |
+
+Reports made by older versions have no `_bodyStatus`.
+
+#### Response bodies still arriving when you save
+
+`fetch()` resolves as soon as the response headers arrive, so a request can be in the buffer while its body is still streaming in. When you save:
+
+1. The save waits up to `pendingBodyTimeout` (default 2 seconds, with the progress bar showing) for those bodies. Bodies that finish in time are saved in full.
+2. A body still unfinished after that — a slow download, or a stream that never ends such as Server-Sent Events — is saved with the part received so far, masked like any body, and marked `_bodyStatus: "pending"` with a `comment`. The report viewer shows the same note. The save never waits longer than `pendingBodyTimeout`.
+3. If the save succeeds, such a request is **not** removed from the buffer: it is included again in the next report with whatever it has by then (the full body once it has finished), marked `_alsoInEarlierReport: true` with a `comment`. The same request can therefore appear in two (or, for a stream that stays open, more) consecutive reports. Its `startedDateTime` is before the next report's replay starts, so the report timeline shows it at the very beginning. Once a report contains its finished body, it is removed as usual.
+4. The recorder reads a copy of the response (`response.clone()`), never the app's own stream, and calling `destroy()` stops reading the copy (`_bodyStatus: "aborted"`) without touching the app's stream.
+
+Requests that have not received their response headers yet when you save are not in that report; they are captured when the response arrives and appear in the next one.
+
+Limitation: because the recorder reads a clone, the browser keeps the underlying connection open until both the app and the recorder are done with the body. If the app cancels a still-open stream (`reader.cancel()`), the connection stays open until the recorder's copy finishes or reaches `maxBodySize`. Calling `destroy()` releases it. Masked values appear as `[MASKED]` (percent-encoded as `%5BMASKED%5D` inside URLs, which must be valid URIs). Each entry also keeps a custom `_offsetMs` field (milliseconds since recording started), used by the report's timeline.
 
 ---
 
@@ -208,6 +238,7 @@ All options can be set via `window.__QA_RECORDER_CONFIG__` or passed to `QARecor
 window.__QA_RECORDER_CONFIG__ = {
   endpoint: '',              // Remote upload URL. Leave empty for local save (default).
   uploadTimeout: 120000,     // Time limit for one upload in ms (default: 2 minutes). 0 or Infinity = no limit.
+  pendingBodyTimeout: 2000,  // How long a save waits for response bodies still arriving, in ms (default: 2 seconds). 0 = don't wait.
   maxRequests: 100,          // Max network entries in the circular buffer (default: 100).
   maxBodySize: 102400,       // Max characters kept per request/response body (default: 100K). 0 = no bodies.
   maskHeaders: [             // Headers to redact before saving (default shown).
@@ -240,6 +271,7 @@ window.__QA_RECORDER_CONFIG__ = {
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `endpoint` | `string` | `''` | Remote upload URL. Empty = local download. |
+| `pendingBodyTimeout` | `number` | `2000` | How long, in milliseconds, a save waits for fetch response bodies that are still arriving (headers received, body not finished). Bodies that finish in time are saved in full; the rest are saved with the part received so far, marked `_bodyStatus: "pending"`, and included again in the next report — see [Response bodies still arriving when you save](#response-bodies-still-arriving-when-you-save). A never-ending stream (SSE) never makes a save wait longer than this. `0` saves at once. |
 | `uploadTimeout` | `number` | `120000` | Time limit in milliseconds for one upload to `endpoint`, from sending the request until the response body has been read. When it runs out the request is aborted and treated as a failed upload (local ZIP fallback). `0` or `Infinity` turns the limit off. `destroy()` always aborts an upload in flight, without the fallback. |
 | `maxRequests` | `number` | `100` | Max network entries to keep. |
 | `maxBodySize` | `number` | `102400` | Max characters kept for each request and response body (about the same in bytes for ASCII text). Longer bodies are cut and end with a `…[truncated by qa-recorder …]` note. fetch responses are read only up to this limit, so large downloads and never-ending streams (e.g. SSE) do not pile up in memory. Binary responses (images, audio, video, fonts, PDF, ZIP, octet-stream) are recorded as `"[binary]"` without being read. `maskKeys` masking runs before cutting; a cut response is masked key by key as far as it was read. `0` records no bodies; `Infinity` keeps whole bodies. |
@@ -249,8 +281,8 @@ window.__QA_RECORDER_CONFIG__ = {
 | `consoleLevels` | `string[]` | `['error', 'warn']` | Console levels to capture. Valid values: `'error'`, `'warn'`, `'log'`, `'info'`. |
 | `maxConsoleEntries` | `number` | `200` | Max console entries to keep in the circular buffer. Each entry's message and stack trace is cut at 10,000 characters. |
 | `enableBackup` | `boolean` | `false` | When `true`, auto-saves the current session to sessionStorage whenever the tab becomes hidden (refresh, navigate). On the next `init()`, the backup is silently restored into the current session buffers before recording continues. The rolling window matches `mode` (light: 30m / normal: 20m / heavy: 5m). sessionStorage holds a limited amount (5,242,880 characters per origin in Chromium, keys included): when the whole session doesn't fit, only the current checkout segment of the replay is backed up, and when that doesn't fit either, only the network and console logs are. Note: data is cleared when the tab is closed. |
-| `mode` | `'light' \| 'normal' \| 'heavy'` | `'normal'` | Recording intensity preset that controls rrweb's checkout interval and event sampling to keep the in-memory buffer bounded. Use `'heavy'` for pages with frequent DOM mutations, animations, or long sessions — 5-minute checkout plus throttled `mousemove`/`scroll`/`input`. Use `'light'` for lightweight pages where you want a longer 30-minute history. A segment also ends early when it grows past half of `maxReplaySize`, so a busy page can keep less time than this. |
-| `maxReplaySize` | `number` | `20971520` (20 MB) | Approximate upper limit, in characters of JSON (about the same in bytes for ASCII text), on the replay kept in memory. When the current checkout segment grows past half of this, a new segment starts right away with a fresh full snapshot and the oldest segment is dropped — the same thing `mode`'s timed checkout does — so the saved replay still plays from its start. Each new segment begins with a full snapshot, which pauses the page briefly (measured in Chromium: about 40 ms for 3,000 elements, 500 ms for 60,000). A segment only ends early once the changes recorded after its snapshot outgrow the snapshot itself, so on a page whose single snapshot is larger than a quarter of this limit, the kept replay can exceed it (up to about four snapshots' worth). `Infinity` turns the size limit off. |
+| `mode` | `'light' \| 'normal' \| 'heavy'` | `'normal'` | Recording intensity preset that controls rrweb's checkout interval and event sampling to keep the in-memory buffer bounded. Use `'heavy'` for pages with frequent DOM mutations, animations, or long sessions — 5-minute checkout plus throttled `mousemove`/`scroll`/`input`. Use `'light'` for lightweight pages where you want a longer 30-minute history. A segment also ends early when it grows past half of `maxReplaySize`, so a busy page can keep less time than this. After a failed save, the part that could not be saved is kept for the next attempt even if it is older than this, within `maxReplaySize` (see [Save Modes](#save-modes)). |
+| `maxReplaySize` | `number` | `20971520` (20 MB) | Approximate upper limit, in characters of JSON (about the same in bytes for ASCII text), on the replay kept in memory. When the current checkout segment grows past half of this, a new segment starts right away with a fresh full snapshot and the oldest segment is dropped — the same thing `mode`'s timed checkout does — so the saved replay still plays from its start. Each new segment begins with a full snapshot, which pauses the page briefly (measured in Chromium: about 40 ms for 3,000 elements, 500 ms for 60,000). A segment only ends early once the changes recorded after its snapshot outgrow the snapshot itself, so on a page whose single snapshot is larger than a quarter of this limit, the kept replay can exceed it (up to about four snapshots' worth): the last two segments are always kept, whatever their size. After a failed save, the recording kept for the retry also stays within this limit — older segments are dropped at once, oldest first, and the failure message says so (see [Save Modes](#save-modes)). `Infinity` turns the size limit off. |
 | `maskAllInputs` | `boolean` | `false` | When `true`, the replay masks the values of every `<input>` (including hidden inputs and inputs without a `type` attribute), `<textarea>` and `<select>`; the checked state of checkboxes and radio buttons is still recorded. For a `<textarea>` this also covers its text content (text in the page markup, or written through `defaultValue` as React does for controlled textareas), whose non-whitespace characters become `*`. When `false`, only password inputs are masked (rrweb's default). |
 | `maskTextSelector` | `string \| null` | `null` | CSS selector for elements whose text is masked in the replay (non-whitespace characters become `*`). Elements with the `rr-mask` class are always masked. |
 | `blockSelector` | `string \| null` | `null` | CSS selector for elements left out of the replay: a matched element in a full snapshot is recorded as an empty placeholder of the same size. rrweb 1.1.3 checks the selector only against the element being serialized, so content added to or changed inside a matched element later (e.g. a region your SPA renders after recording starts) and values typed into its form fields are still recorded. For reliable exclusion of private or dynamic regions and form fields, add the `rr-block` class to the element instead. |
@@ -281,6 +313,7 @@ User clicks the button
   ├─ cut for saving             → recording keeps running:
   │   ├─ ScreenRecorder.cutForSave()  → events so far; a new checkout segment (full snapshot) starts now
   │   ├─ NetworkCapture.snapshot()    → entries so far (new requests keep being captured)
+  │   │   └─ waitForBodies()          → wait up to pendingBodyTimeout for bodies still arriving
   │   └─ ConsoleCapture.snapshot()    → entries so far
   ├─ HARBuilder.build()         → standard HAR 1.2 document
   ├─ collectEnvironment()       → browser, screen, masked page URL, SDK version
@@ -300,7 +333,9 @@ User clicks the button
   │
   ├─ [destroy() meanwhile] → stop here: no buffer changes, no UI, no fallback download
   ├─ [saved]  drop only the saved part — what was captured during the save stays for the next save
-  ├─ [failed] keep everything — the next save includes the failed part again (no duplicates)
+  │           (requests saved with a body still arriving stay too, for the next report)
+  ├─ [failed] keep the failed part for the retry (no duplicates, no extra snapshot), within
+  │           maxReplaySize / maxRequests / maxConsoleEntries — the message says if some was dropped
   └─ ProgressBar hidden → SharePanel (upload with url) or an alert (fallback / failure)
 ```
 

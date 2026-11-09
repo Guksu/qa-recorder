@@ -625,6 +625,120 @@ describe('ScreenRecorder 크기 제한 (maxReplaySize)', () => {
     expect(mocks.takeFullSnapshot).not.toHaveBeenCalled();
   });
 
+  describe('저장 실패 복구와 보관량', () => {
+    const snapshots = (events: unknown[]) => types(events).filter((t) => t === 2).length;
+    /** 남은 리플레이가 재생 가능한지: Meta + FullSnapshot으로 시작한다 */
+    const playable = (events: unknown[]) => types(events).slice(0, 2).join() === '4,2';
+
+    it('정적인 페이지에서 저장 실패를 10번 반복해도 보관량과 스냅샷 수가 늘지 않는다 (자연 체크아웃 없이)', () => {
+      mockRrweb(13_000); // 스냅샷 약 13,000자, 제한 20,000자
+      const recorder = new ScreenRecorder('normal', {}, 20_000);
+      recorder.start();
+      const initial = jsonSize(recorder.getEvents());
+
+      for (let i = 1; i <= 10; i++) {
+        const cut = recorder.cutForSave();
+        expect(recorder.rollbackSave(cut)).toEqual({ droppedEvents: 0 });
+        const events = recorder.getEvents();
+        expect(jsonSize(events)).toBe(initial);
+        expect(snapshots(events)).toBe(1);
+        expect(playable(events)).toBe(true);
+      }
+    });
+
+    it('실패를 반복하는 동안 기록된 변경은 중복도 소실도 없이 이어지고, 재시도에 성공하면 저장 중의 기록만 남는다', () => {
+      mockRrweb(500);
+      const recorder = new ScreenRecorder('normal', {}, 20_000);
+      recorder.start();
+      const changes: unknown[] = [];
+      let lastCut = recorder.cutForSave();
+      for (let i = 0; i < 5; i++) {
+        const change = incremental(100); // 저장(실패)하는 동안 기록
+        emit(change);
+        changes.push(change);
+        recorder.rollbackSave(lastCut);
+        lastCut = recorder.cutForSave();
+      }
+      // 마지막 저장의 데이터 = 처음 스냅샷 + 저장 중에 기록된 변경 전부, 한 번씩
+      expect(types(lastCut.events)).toEqual([4, 2, 3, 3, 3, 3, 3]);
+      expect(lastCut.events.slice(2)).toEqual(changes);
+
+      const during = incremental(100);
+      emit(during);
+      recorder.commitSave(lastCut);
+      // 성공: 저장한 부분은 버리고, 자를 때 시작한 구간(스냅샷 + 저장 중 기록)만 남는다
+      expect(types(recorder.getEvents())).toEqual([4, 2, 3]);
+      expect(recorder.getEvents()[2]).toEqual(during);
+    });
+
+    it('되돌린 녹화로 제한을 넘으면 마지막 두 구간보다 오래된 구간을 바로 버리고, 버린 이벤트 수를 알린다', () => {
+      mockRrweb(1_000);
+      const recorder = new ScreenRecorder('normal', {}, 10_000);
+      recorder.start();
+      for (let i = 0; i < 4; i++) emit(incremental(1_000)); // 구간 A: 약 5,100자
+      const cut = recorder.cutForSave();
+      // 저장하는 동안 많이 바뀌어 크기 기준 체크아웃이 두 번 일어난다 (A는 메모리에서 밀려난다)
+      for (let i = 0; i < 12; i++) emit(incremental(1_000));
+      expect(mocks.takeFullSnapshot.mock.calls.length).toBeGreaterThanOrEqual(3);
+
+      const result = recorder.rollbackSave(cut);
+
+      const events = recorder.getEvents();
+      // 자르기 전에 이미 크기 기준 체크아웃이 한 번 있어 잘라 낸 녹화는 두 구간이다: A(Meta, 스냅샷, 변경 4개) + B(Meta, 스냅샷).
+      // 되돌린 A를 더하면 제한을 넘으므로 가장 오래된 A만 통째로 버리고(구간 경계), 그 수를 알린다
+      expect(types(cut.events)).toEqual([4, 2, 3, 3, 3, 3, 4, 2]);
+      expect(result.droppedEvents).toBe(6);
+      // 남은 리플레이는 B부터 중복 없이 이어진다
+      expect(events.slice(0, 2)).toEqual(cut.events.slice(6));
+      expect(jsonSize(events)).toBeLessThan(10_000 + 2 * 1_100);
+      expect(playable(events)).toBe(true);
+    });
+
+    it('제한 안이면 되돌린 녹화를 모두 남긴다 (다음 체크아웃 전까지)', () => {
+      mockRrweb(100);
+      const recorder = new ScreenRecorder('normal', {}, 100_000);
+      recorder.start();
+      emit(incremental(500));
+      const cut = recorder.cutForSave();
+      emit(incremental(500));
+      emit({ type: 4, data: {}, timestamp: ++now }, true); // 저장 중 자연 체크아웃
+      emit({ type: 2, data: {}, timestamp: ++now });
+
+      expect(recorder.rollbackSave(cut)).toEqual({ droppedEvents: 0 });
+      expect(recorder.getEvents().slice(0, cut.events.length)).toEqual(cut.events);
+    });
+
+    it('스냅샷 하나가 제한보다 큰 페이지: 마지막 두 구간은 남기고, 실패를 반복해도 그 이상 쌓이지 않는다', () => {
+      mockRrweb(30_000); // 스냅샷이 제한(20,000자)보다 크다
+      const recorder = new ScreenRecorder('normal', {}, 20_000);
+      recorder.start();
+      const sizes: number[] = [];
+      for (let i = 0; i < 5; i++) {
+        emit(incremental(200));
+        recorder.rollbackSave(recorder.cutForSave());
+        sizes.push(jsonSize(recorder.getEvents()));
+        expect(snapshots(recorder.getEvents())).toBe(1);
+        expect(playable(recorder.getEvents())).toBe(true);
+      }
+      // 스냅샷 하나 + 변경분만큼만 — 실패마다 스냅샷이 더해지지 않는다
+      expect(sizes[4] - sizes[0]).toBeLessThan(5 * 300);
+    });
+
+    it('복원한 백업(prependEvents)도 제한을 넘으면 오래된 것부터 버린다', () => {
+      mockRrweb(100);
+      const recorder = new ScreenRecorder('normal', {}, 5_000);
+      recorder.start();
+      emit({ type: 4, data: {}, timestamp: ++now }, true);
+      emit({ type: 2, data: {}, timestamp: ++now });
+      const t = Date.now();
+      recorder.prependEvents([
+        { type: 4, data: {}, timestamp: t }, { type: 2, data: { pad: 'b'.repeat(6_000) }, timestamp: t },
+      ]);
+      // 백업 구간을 더하면 제한을 넘는다 — 마지막 두 구간(시작 구간, 체크아웃 구간)보다 오래된 백업을 버린다
+      expect(JSON.stringify(recorder.getEvents())).not.toContain('bbbb');
+    });
+  });
+
   it('getRecentEvents()는 지금 구간만 반환하고, 녹화 전에는 에러를 던진다', () => {
     mockRrweb();
     const recorder = new ScreenRecorder();
@@ -694,18 +808,19 @@ describe('ScreenRecorder 저장 구간 (cutForSave / commitSave / rollbackSave)'
     expect(recorder.getEvents()).toEqual([...checkoutEvents(1), ev(2)]);
   });
 
-  it('rollbackSave()는 잘라 낸 이벤트 전체(직전 구간 포함)를 중복 없이 되돌린다', () => {
+  it('rollbackSave()는 잘라 낸 이벤트 전체(직전 구간 포함)를 중복 없이 되돌리고, 자를 때 찍은 스냅샷은 빼고 이어 붙인다', () => {
     const recorder = new ScreenRecorder();
     recorder.start();
     emit(ev(1));
     checkout(); // 저장 전 자연 체크아웃: 직전 구간 = [START, ev1]
     emit(ev(2));
-    const cut = recorder.cutForSave(); // 이 시점의 체크아웃이 [START, ev1]을 메모리에서 밀어낸다
-    emit(ev(3));
+    const cut = recorder.cutForSave(); // 이 시점의 체크아웃(checkout 2)이 [START, ev1]을 메모리에서 밀어낸다
+    emit(ev(3)); // 저장하는 동안 기록
 
-    recorder.rollbackSave(cut);
+    expect(recorder.rollbackSave(cut)).toEqual({ droppedEvents: 0 });
 
-    const all = [START, ev(1), ...checkoutEvents(1), ev(2), ...checkoutEvents(2), ev(3)];
+    // checkout 2는 저장을 나누려고 찍은 스냅샷이라 빠지고, 저장 중의 ev3는 잘라 낸 구간 뒤에 그대로 이어진다
+    const all = [START, ev(1), ...checkoutEvents(1), ev(2), ev(3)];
     expect(recorder.getEvents()).toEqual(all);
     // 다시 저장하면 되돌린 이벤트가 한 번씩만 들어간다
     expect(recorder.cutForSave().events).toEqual(all);
@@ -722,7 +837,8 @@ describe('ScreenRecorder 저장 구간 (cutForSave / commitSave / rollbackSave)'
 
     recorder.rollbackSave(cut);
 
-    expect(recorder.getEvents()).toEqual([START, ev(1), ...checkoutEvents(1), ev(2), ...checkoutEvents(2), ev(3)]);
+    // 자를 때의 checkout 1은 빠지고 ev2가 잘라 낸 구간에 이어 붙는다. 저장 중 자연 체크아웃(2)은 그대로 남는다
+    expect(recorder.getEvents()).toEqual([START, ev(1), ev(2), ...checkoutEvents(2), ev(3)]);
   });
 
   it('저장하는 동안 체크아웃이 일어난 뒤의 commitSave()는 남은 구간을 버리지 않는다', () => {
@@ -738,20 +854,29 @@ describe('ScreenRecorder 저장 구간 (cutForSave / commitSave / rollbackSave)'
     expect(recorder.getEvents()).toEqual([...checkoutEvents(1), ev(2), ...checkoutEvents(2), ev(3)]);
   });
 
-  it('실패가 반복돼도 되돌린 녹화는 다음 체크아웃 때 버려져 메모리가 끝없이 늘지 않는다', () => {
+  it('실패를 반복해도 자를 때 찍은 스냅샷이 쌓이지 않는다 (자연 체크아웃 없이)', () => {
     const recorder = new ScreenRecorder();
     recorder.start();
     for (let i = 0; i < 20; i++) {
       emit(ev(i));
       recorder.rollbackSave(recorder.cutForSave());
+      expect(recorder.getEvents().filter((e) => (e as { type: number }).type === 2)).toHaveLength(1);
     }
-    const beforeCheckout = recorder.getEvents().length;
-    expect(beforeCheckout).toBe(1 + 20 + 20 * 2); // START + 이벤트 20개 + 자를 때마다의 체크아웃 스냅샷
+    expect(recorder.getEvents()).toEqual([START, ...Array.from({ length: 20 }, (_, i) => ev(i))]);
+  });
 
-    checkout();
-    checkout();
-    // 자연 체크아웃 두 번 뒤에는 마지막 두 구간만 남는다
-    expect(recorder.getEvents()).toEqual([...checkoutEvents(21), ...checkoutEvents(22)]);
+  it('자를 때 rrweb이 체크아웃하지 못해 record()를 다시 시작했으면, 실패해도 새 스냅샷을 빼지 않는다 (노드 id가 이어지지 않을 수 있다)', () => {
+    mocks.takeFullSnapshot.mockImplementation(() => { throw new Error('not recording'); });
+    const recorder = new ScreenRecorder();
+    recorder.start();
+    emit(ev(1));
+    const cut = recorder.cutForSave();
+    expect(cut.mergeable).toBe(false);
+    emit(ev(2));
+
+    recorder.rollbackSave(cut);
+
+    expect(recorder.getEvents()).toEqual([START, ev(1), START, ev(2)]);
   });
 
   it('rrweb이 체크아웃을 emit하지 않으면 record()를 다시 시작해 새 구간으로 나눈다', () => {

@@ -8,6 +8,10 @@
  *   GET  /api/missing         404 응답
  *   POST /api/echo            받은 본문을 JSON으로 돌려준다 (XHR 테스트용)
  *   GET  /api/slow?ms=        ms만큼 늦게 응답
+ *   GET  /api/stream/<id>?type=  응답 헤더만 바로 보내고 본문은 아래 제어 endpoint로 나중에 보낸다 (type: 응답 content-type)
+ *   POST /__stream/<id>/push  요청 본문의 텍스트를 그 스트림에 보낸다
+ *   POST /__stream/<id>/end   그 스트림을 끝낸다
+ *   GET  /__streams           열린 스트림 id 목록 (헤더를 보냈는지 확인용)
  *   POST /upload?mode=&delay= 녹화기의 업로드 endpoint. mode: ok(기본) | error(500) | slow(delay ms 후 ok) | hang(응답 없음)
  *   GET  /uploads/<id>/<field>  받은 파일 (report는 text/html)
  *   GET  /__uploads           받은 업로드 목록과 중간에 끊긴 업로드 수 (테스트 확인용)
@@ -29,6 +33,8 @@ const port = Number(process.env.E2E_PORT ?? 4319);
 let uploads = [];
 let aborted = 0;
 let started = 0;
+/** 본문을 나중에 보내는 응답 (/api/stream/<id>) */
+const streams = new Map();
 
 const MIME = { '.js': 'text/javascript; charset=utf-8', '.map': 'application/json', '.html': 'text/html; charset=utf-8' };
 
@@ -95,6 +101,23 @@ const server = http.createServer(async (req, res) => {
   if (pathname === '/api/slow') {
     return setTimeout(() => send(res, 200, { slow: true }), Number(url.searchParams.get('ms') ?? 500));
   }
+  const streamMatch = /^\/api\/stream\/(\w+)$/.exec(pathname);
+  if (streamMatch) {
+    res.writeHead(200, { 'content-type': url.searchParams.get('type') ?? 'application/json', 'cache-control': 'no-store' });
+    res.flushHeaders(); // 본문 없이 헤더만 먼저 보낸다 — 브라우저의 fetch()는 여기서 resolve한다
+    streams.set(streamMatch[1], res);
+    res.on('close', () => streams.delete(streamMatch[1]));
+    return;
+  }
+  const controlMatch = /^\/__stream\/(\w+)\/(push|end)$/.exec(pathname);
+  if (controlMatch && req.method === 'POST') {
+    const target = streams.get(controlMatch[1]);
+    if (!target) return send(res, 404, { error: 'no such stream' });
+    if (controlMatch[2] === 'push') target.write(await readBody(req));
+    else target.end();
+    return send(res, 200, { ok: true });
+  }
+  if (pathname === '/__streams') return send(res, 200, { open: [...streams.keys()] });
   if (pathname === '/upload' && req.method === 'POST') return handleUpload(req, res, url);
   const uploadMatch = /^\/uploads\/(\d+)\/(\w+)$/.exec(pathname);
   if (uploadMatch && req.method === 'GET') {

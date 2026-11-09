@@ -1,4 +1,6 @@
-import type { HARContent, HARDocument, HAREntry, HARPostData, HARRequest, HARResponse } from '../types/har.js';
+import type {
+  HARBodyStatus, HARContent, HARDocument, HAREntry, HARPostData, HARRequest, HARResponse,
+} from '../types/har.js';
 import { VERSION } from '../core/version.js';
 import { BINARY_PLACEHOLDER } from './bodyLimit.js';
 
@@ -19,6 +21,19 @@ export const HAR_TIMINGS_COMMENT =
 const TRUNCATION_NOTE = /\n…\[truncated by qa-recorder: kept the first (\d+)(?: of (\d+))? characters\]$/;
 
 const NOT_CAPTURED_BINARY = 'Body not captured: binary or non-text content.';
+
+/** 본문 기록 상태별 설명 (complete·truncated·binary는 본문 텍스트로 따로 설명한다) */
+const BODY_STATUS_COMMENTS: Partial<Record<HARBodyStatus, string>> = {
+  pending: 'Body was still being received when this report was saved; text holds only what had arrived by then '
+    + '(it may be cut mid-way). If the body finished later, the request is included again in the next report.',
+  error: 'Body could not be read completely: the response stream failed. text holds what had arrived before the error, if anything.',
+  aborted: 'Body capture stopped before the body was complete (recording stopped, the page was left, or the request '
+    + 'was pushed out of the maxRequests buffer). text holds what had arrived, if anything.',
+  omitted: 'Body not recorded: maxBodySize is 0.',
+};
+
+const ALSO_IN_EARLIER_REPORT = 'Also included in an earlier report, which was saved while this response body was still '
+  + 'being received. Its startedDateTime may be before this report\'s replay starts.';
 
 /**
  * 캡처 버퍼의 엔트리를 표준 HAR 1.2 문서(`{ log: { version, creator, entries } }`)로 만든다.
@@ -54,8 +69,10 @@ function toHarEntry(entry: HAREntry): HAREntry {
     timings: { blocked: -1, dns: -1, connect: -1, ssl: -1, send: 0, wait: time, receive: 0, comment: HAR_TIMINGS_COMMENT },
   };
   if (entry.pageref !== undefined) out.pageref = entry.pageref;
-  if (entry.comment !== undefined) out.comment = entry.comment;
+  const comment = joinComments(entry.comment, entry._alsoInEarlierReport ? ALSO_IN_EARLIER_REPORT : undefined);
+  if (comment) out.comment = comment;
   if (typeof entry._offsetMs === 'number' && Number.isFinite(entry._offsetMs)) out._offsetMs = entry._offsetMs;
+  if (entry._alsoInEarlierReport) out._alsoInEarlierReport = true;
   return out;
 }
 
@@ -107,15 +124,18 @@ function toHarResponse(response: HARResponse): HARResponse {
 
 function toHarContent(content: HARContent | undefined): HARContent {
   const body = splitBody(content?.text);
+  const status = content?._bodyStatus;
   const out: HARContent = {
-    size: integerOrUnknown(content?.size),
+    // 다 받지 못한 본문의 크기는 알 수 없다
+    size: status === 'pending' || status === 'aborted' || status === 'error' ? -1 : integerOrUnknown(content?.size),
     mimeType: content?.mimeType ?? '',
   };
   if (body.text !== undefined) out.text = body.text;
   if (content?.encoding !== undefined) out.encoding = content.encoding;
   if (content?.compression !== undefined) out.compression = content.compression;
-  const comment = joinComments(content?.comment, body.comment);
+  const comment = joinComments(content?.comment, status ? BODY_STATUS_COMMENTS[status] : undefined, body.comment);
   if (comment) out.comment = comment;
+  if (status) out._bodyStatus = status;
   return out;
 }
 

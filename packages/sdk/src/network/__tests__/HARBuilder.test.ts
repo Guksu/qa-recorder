@@ -78,6 +78,29 @@ describe('HARBuilder.build', () => {
     expect(harProblems(har)).toEqual([]);
   });
 
+  it.each([
+    ['pending', /still being received/],
+    ['error', /could not be read completely/],
+    ['aborted', /capture stopped before the body was complete/],
+    ['omitted', /maxBodySize is 0/],
+  ] as const)('본문 상태 %s는 _bodyStatus와 이유(comment)를 남기고 크기는 알 수 없음(-1)으로 둔다', (status, reason) => {
+    const entry = makeLegacyEntry('https://a.com');
+    entry.response.content = { size: 10, mimeType: 'text/plain', text: 'part', _bodyStatus: status };
+    const har = HARBuilder.build([entry]);
+    const { content } = har.log.entries[0].response;
+    expect(content._bodyStatus).toBe(status);
+    expect(content.comment).toMatch(reason);
+    if (status !== 'omitted') expect(content.size).toBe(-1);
+    expect(harProblems(har)).toEqual([]);
+  });
+
+  it('앞선 리포트에도 들어간 요청은 _alsoInEarlierReport와 comment로 알린다', () => {
+    const entry = { ...makeLegacyEntry('https://a.com'), _alsoInEarlierReport: true };
+    const [out] = HARBuilder.build([entry]).log.entries;
+    expect(out._alsoInEarlierReport).toBe(true);
+    expect(out.comment).toMatch(/Also included in an earlier report/);
+  });
+
   it('Location 헤더가 있으면 redirectURL로 쓴다', () => {
     const entry = makeLegacyEntry('https://a.com');
     entry.response.status = 302;

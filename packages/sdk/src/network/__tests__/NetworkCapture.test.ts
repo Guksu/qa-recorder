@@ -836,3 +836,124 @@ describe('NetworkCapture XHR URL', () => {
     expect(capture.snapshot()[0].request.url).toBe(new URL('/api/echo?x=1', window.location.href).href);
   });
 });
+
+describe('NetworkCapture 응답 본문 기록 상태', () => {
+  const nativeFetch = window.fetch;
+  afterEach(() => { window.fetch = nativeFetch; });
+
+  function openBody() {
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const stream = new ReadableStream<Uint8Array>({ start(c) { controller = c; } });
+    return {
+      response: new Response(stream, { headers: { 'content-type': 'text/plain' } }),
+      push: (t: string) => controller.enqueue(new TextEncoder().encode(t)),
+      end: () => controller.close(),
+    };
+  }
+
+  it('받는 중에는 pending, 끝나면 complete — markPendingBodies는 받은 부분을 담는다', async () => {
+    const body = openBody();
+    window.fetch = vi.fn(async () => body.response) as unknown as typeof fetch;
+    const capture = new NetworkCapture(100, [], { maxBodySize: 1_000 });
+    capture.start();
+    await window.fetch('https://example.com/a');
+    body.push('hello ');
+    await new Promise((r) => setTimeout(r, 10));
+    const [entry] = capture.snapshot();
+    expect(entry.response.content._bodyStatus).toBe('pending');
+
+    expect([...capture.markPendingBodies([entry])]).toEqual([entry]);
+    expect(entry.response.content.text).toBe('hello ');
+
+    body.push('world');
+    body.end();
+    await capture.waitForBodies([entry], 1_000);
+    expect(entry.response.content._bodyStatus).toBe('complete');
+    expect(entry.response.content.text).toBe('hello world');
+    expect(capture.markPendingBodies([entry]).size).toBe(0);
+    capture.stop();
+  });
+
+  it('waitForBodies는 timeout이나 취소 신호에서 끝난다', async () => {
+    const body = openBody();
+    window.fetch = vi.fn(async () => body.response) as unknown as typeof fetch;
+    const capture = new NetworkCapture(100, []);
+    capture.start();
+    await window.fetch('https://example.com/never');
+    const entries = capture.snapshot();
+
+    const t0 = Date.now();
+    await capture.waitForBodies(entries, 50);
+    expect(Date.now() - t0).toBeLessThan(500);
+
+    const controller = new AbortController();
+    const waiting = capture.waitForBodies(entries, 60_000, controller.signal);
+    controller.abort();
+    await waiting;
+    expect(entries[0].response.content._bodyStatus).toBe('pending');
+    capture.stop();
+    expect(entries[0].response.content._bodyStatus).toBe('aborted');
+  });
+
+  it('maxRequests를 넘어 버퍼에서 밀려난 요청은 본문 읽기를 취소한다 (aborted)', async () => {
+    const bodies = [openBody(), openBody()];
+    let i = 0;
+    window.fetch = vi.fn(async () => bodies[i++].response) as unknown as typeof fetch;
+    const capture = new NetworkCapture(1, []);
+    capture.start();
+    await window.fetch('https://example.com/first');
+    const [first] = capture.snapshot();
+    await window.fetch('https://example.com/second');
+    expect(first.response.content._bodyStatus).toBe('aborted');
+    bodies[0].push('late');
+    bodies[0].end();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(first.response.content._bodyStatus).toBe('aborted');
+    capture.stop();
+  });
+
+  it('백업에서 복원한 pending 엔트리는 더 받을 수 없으므로 aborted로 바꾼다', () => {
+    const capture = new NetworkCapture(100, []);
+    capture.restoreEntries([{
+      startedDateTime: new Date().toISOString(), time: 1,
+      request: { method: 'GET', url: 'https://example.com', httpVersion: '', headers: [], queryString: [], bodySize: 0, headersSize: -1 },
+      response: {
+        status: 200, statusText: '', httpVersion: '', headers: [], bodySize: -1, headersSize: -1,
+        content: { size: -1, mimeType: 'text/plain', text: 'part', _bodyStatus: 'pending' },
+      },
+      timings: { send: 0, wait: 1, receive: 0 },
+    }]);
+    expect(capture.snapshot()[0].response.content._bodyStatus).toBe('aborted');
+  });
+
+  it('XHR은 loadend에서 본문이 끝나므로 complete·truncated·binary로 기록한다', () => {
+    const nativeXHR = window.XMLHttpRequest;
+    let loadend: (() => void) | undefined;
+    let responseText = '';
+    let responseType = '';
+    class FakeXHR {
+      status = 200; statusText = 'OK';
+      get responseText() { return responseText; }
+      get responseType() { return responseType; }
+      response = new ArrayBuffer(3);
+      open() {} setRequestHeader() {}
+      send() { loadend?.(); }
+      addEventListener(_: string, cb: () => void) { loadend = cb; }
+      getAllResponseHeaders() { return ''; }
+      getResponseHeader() { return 'text/plain'; }
+    }
+    window.XMLHttpRequest = FakeXHR as unknown as typeof XMLHttpRequest;
+    try {
+      const capture = new NetworkCapture(100, [], { maxBodySize: 5 });
+      capture.start();
+      const send = () => { const x = new window.XMLHttpRequest(); x.open('GET', 'https://example.com/x'); x.send(); };
+      responseText = 'ok'; send();
+      responseText = 'too long'; send();
+      responseType = 'arraybuffer'; send();
+      expect(capture.snapshot().map((e) => e.response.content._bodyStatus)).toEqual(['complete', 'truncated', 'binary']);
+      capture.stop();
+    } finally {
+      window.XMLHttpRequest = nativeXHR;
+    }
+  });
+});

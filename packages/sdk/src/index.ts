@@ -3,6 +3,7 @@ export { QARecorder };
 export type { QARecorderConfig, RecorderMode } from './core/config.js';
 export type { ConsoleEntry, ConsoleLevel } from './console/ConsoleCapture.js';
 export type {
+  HARBodyStatus,
   HARContent,
   HARCookie,
   HARCreator,

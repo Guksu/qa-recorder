@@ -1,3 +1,5 @@
+import { createAbortError } from '../core/abort.js';
+
 /**
  * 요청/응답 body를 메모리에 둘 때의 크기 제한.
  * 버퍼에는 maxRequests개의 엔트리가 남으므로 body 하나가 크면(파일 다운로드, 끝나지 않는 SSE) 메모리가 계속 늘어난다.
@@ -23,30 +25,53 @@ export function limitText(text: string, limit: number): string {
   return text.length > limit ? text.slice(0, limit) + truncationNote(limit, text.length) : text;
 }
 
+export interface ReadLimitedOptions {
+  /** 취소 신호. 취소되면 사본 읽기를 멈추고(앱의 원본 스트림은 그대로) AbortError로 실패한다 */
+  signal?: AbortSignal;
+  /** 조각을 받을 때마다 지금까지 읽은 텍스트로 호출된다 (아직 받는 중인 본문을 저장할 때 쓴다) */
+  onProgress?: (textSoFar: string) => void;
+}
+
 /**
  * fetch 응답 사본을 limit 글자까지만 읽는다. 넘으면 읽기를 취소해 나머지를 메모리에 모으지 않는다
- * (response.clone().text()는 끝나지 않는 스트림이면 끝없이 모은다). 앱이 쓰는 원본 body에는 영향이 없다.
+ * (response.clone().text()는 끝나지 않는 스트림이면 끝없이 모은다). 앱이 쓰는 원본 body에는 영향이 없다
+ * — 사본(tee의 한쪽)만 읽고 취소하므로 원본 스트림은 소비되지도 취소되지도 않는다.
  * text()와 같게 항상 UTF-8로 디코딩한다.
  */
-export async function readLimitedText(response: Response, limit: number): Promise<{ text: string; truncated: boolean }> {
+export async function readLimitedText(
+  response: Response,
+  limit: number,
+  options: ReadLimitedOptions = {},
+): Promise<{ text: string; truncated: boolean }> {
+  const { signal, onProgress } = options;
+  if (signal?.aborted) throw createAbortError();
   const copy = response.clone();
   const body = copy.body;
   if (!body || typeof body.getReader !== 'function') {
     const text = await copy.text();
+    if (signal?.aborted) throw createAbortError();
     return text.length > limit ? { text: text.slice(0, limit), truncated: true } : { text, truncated: false };
   }
 
   const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let text = '';
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) return { text: text + decoder.decode(), truncated: false };
-    text += decoder.decode(value, { stream: true });
-    if (text.length > limit) {
-      reader.cancel().catch(() => { /* 취소 실패는 무시 */ });
-      return { text: text.slice(0, limit), truncated: true };
+  const onAbort = () => { reader.cancel().catch(() => { /* 취소 실패는 무시 */ }); };
+  signal?.addEventListener('abort', onAbort);
+  try {
+    const decoder = new TextDecoder();
+    let text = '';
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (signal?.aborted) throw createAbortError();
+      if (done) return { text: text + decoder.decode(), truncated: false };
+      text += decoder.decode(value, { stream: true });
+      if (text.length > limit) {
+        reader.cancel().catch(() => { /* 취소 실패는 무시 */ });
+        return { text: text.slice(0, limit), truncated: true };
+      }
+      onProgress?.(text);
     }
+  } finally {
+    signal?.removeEventListener('abort', onAbort);
   }
 }
 

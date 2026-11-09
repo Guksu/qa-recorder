@@ -28,14 +28,35 @@ interface SaveSnapshot {
   console: ConsoleEntry[];
   /** 자른 시각 — 저장 성공 후 남은 기록의 기준 시각 */
   cutAt: Date;
+  /** 리포트를 만들 때 응답 본문을 아직 받는 중이던 요청 — 저장에 성공해도 버리지 않고 다음 저장에 다시 넣는다 */
+  pendingBodies: Set<HAREntry>;
+}
+
+/** 저장 실패 후 메모리 제한 때문에 되돌리지 못한(다음 저장에 들어가지 않는) 기록 */
+interface RollbackLoss {
+  replayEvents: number;
+  requests: number;
+  consoleEntries: number;
 }
 
 /** 저장 결과. aborted는 destroy()로 저장이 중단된 경우 (아무것도 하지 않는다) */
 type SaveOutcome =
   | { kind: 'saved'; url?: string; uploaded: boolean }
   | { kind: 'fallback'; uploadError: unknown }
-  | { kind: 'failed'; uploadError?: unknown; saveError: unknown }
+  | { kind: 'failed'; uploadError?: unknown; saveError: unknown; loss?: RollbackLoss }
   | { kind: 'aborted' };
+
+/** 저장 실패 안내의 마지막 줄 — 메모리 제한으로 일부를 남기지 못했으면 그렇게 말한다 */
+function keptMessage(loss: RollbackLoss | undefined): string {
+  const parts = [
+    loss?.replayEvents ? `${loss.replayEvents} replay events` : '',
+    loss?.requests ? `${loss.requests} network requests` : '',
+    loss?.consoleEntries ? `${loss.consoleEntries} console entries` : '',
+  ].filter(Boolean);
+  if (parts.length === 0) return 'The recording was kept. Please try again.';
+  return 'The recording was kept, except for its oldest part, which no longer fit within the memory limits ' +
+    `(maxReplaySize, maxRequests, maxConsoleEntries) and was dropped: ${parts.join(', ')}. Please try again.`;
+}
 
 export class QARecorder {
   private static _instance: QARecorder | null = null;
@@ -203,9 +224,14 @@ export class QARecorder {
     const snapshot = this.cutForSave();
     let outcome: SaveOutcome;
     try {
+      this.dismissProgress = ProgressBar.show('Saving...', this.config.zIndex);
+      // 응답 헤더는 왔지만 본문을 아직 받는 중인 요청은 pendingBodyTimeout까지 기다린다 (끝나지 않는 스트림도 그 이상은 기다리지 않는다).
+      // 그때까지 다 받지 못한 본문은 받은 부분만 'pending'으로 리포트에 넣고, 다음 저장에 다시 넣는다
+      await this.networkCapture.waitForBodies(snapshot.network, this.config.pendingBodyTimeout, signal);
+      if (signal.aborted) return;
+      snapshot.pendingBodies = this.networkCapture.markPendingBodies(snapshot.network);
       const har = HARBuilder.build(snapshot.network);
       const environment = collectEnvironment((url) => MaskingFilter.maskUrl(url, this.urlKeyMatcher));
-      this.dismissProgress = ProgressBar.show('Saving...', this.config.zIndex);
       outcome = this.config.endpoint
         ? await this.uploadOrSaveLocally(this.config.endpoint, snapshot, har, memo, environment, signal)
         : await this.saveLocally(snapshot, har, memo, environment, signal);
@@ -216,7 +242,7 @@ export class QARecorder {
     if (outcome.kind === 'aborted' || signal.aborted) return;
 
     if (outcome.kind === 'failed') {
-      this.rollbackSave(snapshot);
+      outcome.loss = this.rollbackSave(snapshot);
     } else {
       this.commitSave(snapshot);
     }
@@ -234,6 +260,7 @@ export class QARecorder {
       network: this.networkCapture.snapshot(),
       console: this.consoleCapture.snapshot(),
       cutAt: new Date(),
+      pendingBodies: new Set(),
     };
   }
 
@@ -243,16 +270,25 @@ export class QARecorder {
       try { sessionStorage.removeItem(SESSION_KEY); } catch { /* sessionStorage를 쓸 수 없는 환경 */ }
     }
     this.screenRecorder.commitSave(snapshot.screen);
-    this.networkCapture.discard(snapshot.network);
+    this.networkCapture.discard(snapshot.network, snapshot.pendingBodies);
     this.consoleCapture.discard(snapshot.console);
     // 남은 기록은 잘라 낸 시점에 시작한 새 구간에 속한다
     this.networkCapture.rebase(snapshot.cutAt);
     this.consoleCapture.rebase(snapshot.cutAt);
   }
 
-  /** 저장 실패: 아무것도 버리지 않는다. 잘라 낸 화면 녹화를 되돌려 다음 저장에 함께 넣는다 */
-  private rollbackSave(snapshot: SaveSnapshot): void {
-    this.screenRecorder.rollbackSave(snapshot.screen);
+  /**
+   * 저장 실패: 아무것도 버리지 않는다. 잘라 낸 화면 녹화를 되돌려 다음 저장에 함께 넣는다.
+   * 다만 메모리 제한 안에서만 남긴다 — 리플레이는 maxReplaySize, 네트워크·콘솔은 maxRequests·maxConsoleEntries
+   * (저장하는 동안 새 기록이 들어와 오래된 것이 밀려났을 수 있다). 남기지 못한 수를 돌려준다.
+   */
+  private rollbackSave(snapshot: SaveSnapshot): RollbackLoss {
+    const { droppedEvents } = this.screenRecorder.rollbackSave(snapshot.screen);
+    return {
+      replayEvents: droppedEvents,
+      requests: this.networkCapture.countMissing(snapshot.network),
+      consoleEntries: this.consoleCapture.countMissing(snapshot.console),
+    };
   }
 
   private notify(outcome: Exclude<SaveOutcome, { kind: 'aborted' }>): void {
@@ -269,7 +305,7 @@ export class QARecorder {
         alert(
           (outcome.uploadError === undefined ? '' : `Upload failed: ${errorMessage(outcome.uploadError)}\n`) +
           `Save failed: ${errorMessage(outcome.saveError)}\n` +
-          'The recording was kept. Please try again.',
+          keptMessage(outcome.loss),
         );
     }
   }
