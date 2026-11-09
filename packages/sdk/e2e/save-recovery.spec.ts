@@ -237,25 +237,48 @@ test('본문을 기다리는 중에 destroy()하면 저장하지 않고, 앱은 
   expect(dialogs).toEqual([]);
 });
 
-test('앱이 열린 스트림을 reader.cancel()하면 연결이 닫히고, 받은 부분은 cancelled로 리포트에 남는다', async ({ page }) => {
-  await start(page, { pendingBodyTimeout: 300 });
-  // 앱: 스트림을 열고 첫 이벤트를 읽은 뒤 취소한다 (fetch 기반 SSE 클라이언트가 피드를 닫을 때처럼)
-  await page.evaluate(() => {
-    const w = window as unknown as { cancelled?: number };
-    fetch('/api/stream/feed?type=text%2Fevent-stream').then(async (res) => {
+/** 앱처럼 스트림을 열고 첫 이벤트를 읽은 뒤 reader.cancel()한다 (fetch 기반 SSE 클라이언트가 피드를 닫을 때처럼) */
+async function readFirstThenCancel(page: Page, id: string) {
+  await page.evaluate((streamId) => {
+    const w = window as unknown as { cancelled?: Record<string, boolean> };
+    w.cancelled ??= {};
+    fetch(`/api/stream/${streamId}?type=text%2Fevent-stream`).then(async (res) => {
       const reader = res.body!.getReader();
       await reader.read();
       await reader.cancel('feed closed');
-      w.cancelled = Date.now();
+      w.cancelled![streamId] = true;
     });
-  });
-  await expect.poll(async () => ((await (await page.request.get('/__streams')).json()) as { open: string[] }).open).toContain('feed');
-  await push(page, 'feed', 'data: first\n\n');
-  await expect.poll(() => page.evaluate(() => (window as unknown as { cancelled?: number }).cancelled)).toBeTruthy();
+  }, id);
+  await expect.poll(async () => ((await (await page.request.get('/__streams')).json()) as { open: string[] }).open).toContain(id);
+  await push(page, id, 'data: first\n\n');
+  await expect.poll(() => page.evaluate((i) => !!(window as unknown as { cancelled?: Record<string, boolean> }).cancelled?.[i], id))
+    .toBe(true);
+}
 
-  // 녹화 중이어도 서버 쪽 연결이 닫힌다 (녹화기 사본 때문에 열려 있지 않다)
-  await expect.poll(async () => ((await (await page.request.get('/__streams')).json()) as { open: string[] }).open, { timeout: 5_000 })
-    .not.toContain('feed');
+/** 서버 쪽 연결이 timeout 안에 닫혔는지 */
+async function connectionClosed(page: Page, id: string, timeout = 5_000): Promise<boolean> {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    const { open } = (await (await page.request.get('/__streams')).json()) as { open: string[] };
+    if (!open.includes(id)) return true;
+    await page.waitForTimeout(100);
+  }
+  return false;
+}
+
+test('앱이 열린 스트림을 reader.cancel()하면 녹화기가 없을 때와 같이 연결이 처리되고, 받은 부분은 cancelled로 리포트에 남는다', async ({ page }, testInfo) => {
+  // 이 브라우저가 녹화기 없이 취소한 스트림의 연결을 닫는지 먼저 본다 (브라우저마다 다를 수 있다)
+  await page.goto('/');
+  await readFirstThenCancel(page, 'native');
+  const closesNatively = await connectionClosed(page, 'native');
+  testInfo.annotations.push({ type: 'native cancel closes connection', description: String(closesNatively) });
+  if (!closesNatively) await end(page, 'native');
+
+  await start(page, { pendingBodyTimeout: 300 }, false);
+  await readFirstThenCancel(page, 'feed');
+  // 녹화 중에도 녹화기가 없을 때와 같다 — 닫히는 브라우저에서는 녹화기 사본 때문에 열려 있지 않다
+  expect(await connectionClosed(page, 'feed')).toBe(closesNatively);
+  if (!closesNatively) await end(page, 'feed');
 
   const download = page.waitForEvent('download');
   await clickSave(page);
