@@ -62,10 +62,10 @@ pnpm add qa-recorder
 또는 script 태그로 직접 삽입 (UMD 빌드, 번들러 불필요):
 
 ```html
-<script src="https://unpkg.com/qa-recorder@1/dist/qa-recorder.umd.js"></script>
+<script src="https://unpkg.com/qa-recorder@2/dist/qa-recorder.umd.js"></script>
 ```
 
-`@1`은 1.x 중 최신 버전을 불러옵니다. 그래서 호환성이 깨질 수 있는 다음 큰 버전(2.0 등)은 자동으로 받지 않습니다. 빌드를 완전히 고정하려면 `@1.13.0`처럼 정확한 버전을 적으세요.
+`@2`는 2.x 중 최신 버전을 불러옵니다. 그래서 호환성이 깨질 수 있는 다음 큰 버전(3.0 등)은 자동으로 받지 않습니다. 빌드를 완전히 고정하려면 `@2.0.0`처럼 정확한 버전을 적으세요. 1.x에서 올린다면 [1.x에서 올리기](#1x에서-올리기)를 보세요.
 
 ---
 
@@ -127,7 +127,7 @@ createApp(App).mount('#app');
     maxRequests: 100,
   };
 </script>
-<script src="https://unpkg.com/qa-recorder@1/dist/qa-recorder.umd.js"></script>
+<script src="https://unpkg.com/qa-recorder@2/dist/qa-recorder.umd.js"></script>
 ```
 
 ---
@@ -399,6 +399,20 @@ QARecorder.setup() / init()
 | WebView (Android/iOS) | 완전 지원 |
 
 > rrweb은 `MutationObserver`와 표준 DOM API만 사용합니다. 화면 캡처 권한 불필요, 플랫폼 제약 없음.
+
+---
+
+## 1.x에서 올리기
+
+2.0은 HAR 출력과 몇 가지 동작이 바뀌었습니다. 확인할 것:
+
+- **HAR 파일이 표준 HAR 1.2입니다.** `qa-network-*.har`와 업로드되는 `har` 필드는 `{ "log": { "version", "creator", "entries", … } }`입니다. 1.x는 최상위 `log` 키 없이 log 객체를 저장했습니다. 업로드를 읽는 서버는 `har.entries` 대신 `har.log.entries`를 읽어야 합니다.
+- **페이지에서 측정할 수 없는 HAR 값은 채우지 않고 알 수 없음으로 표시합니다:** `httpVersion`은 `""`, 헤더 크기와 `response.bodySize`는 `-1`이고, 단계별 시간은 `timings.comment`로 설명합니다 ([HAR 출력](#har-출력) 참고). XHR URL은 절대 URL로 기록하고, URL 안의 `[MASKED]`는 퍼센트 인코딩하며, 응답마다 `_bodyStatus` 필드가 있습니다.
+- **`rrweb`과 `fflate`는 더 이상 패키지 의존성이 아닙니다** — 원래부터 빌드에 포함돼 있었습니다. 앱에서 `rrweb`을 직접 import한다면 앱의 의존성에 추가하세요.
+- **저장해도 녹화가 멈추지 않습니다.** 응답 본문을 받는 중이던 요청은 연속한 두 리포트에 들어갈 수 있습니다 ([저장 방식](#저장-방식) 참고). 저장 실패 안내가 메모리 제한 때문에 일부를 버렸다고 알릴 수 있습니다.
+- **`destroy()`는** 열려 있는 저장 확인창과 진행 중인 업로드·로컬 저장을 취소하고, 진행 막대와 공유 패널을 닫습니다. 그 뒤 같은 인스턴스에서 `init()`하면 리플레이처럼 네트워크·콘솔 기록도 비운 채 시작합니다.
+
+2.0에 새로 추가된 것: `uploadTimeout`, `pendingBodyTimeout` 옵션과 TypeScript 타입 export(`HARDocument`, `HAREntry`, `HARBodyStatus`, `ConsoleEntry` …).
 
 ---
 
