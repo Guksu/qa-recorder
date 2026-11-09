@@ -94,8 +94,7 @@ async function serveRrwebFromNpm(context: BrowserContext, body?: string) {
 
 /**
  * 리포트 HTML을 열어 재생기와 네트워크·콘솔 패널이 동작하는지 확인한다.
- * 리포트는 rrweb 재생 iframe 때문에 window의 load 이벤트가 끝나지 않는 경우가 있어(이번 변경 전부터 있던 동작)
- * domcontentloaded까지만 기다리고 화면 요소로 확인한다.
+ * open()은 window의 load 이벤트까지 기다린다 — 재생 iframe의 문서가 열린 채 남으면 load가 오지 않는다 (회귀 확인).
  */
 async function expectWorkingReport(page: Page, open: () => Promise<unknown>, requestCount: number) {
   await open();
@@ -103,6 +102,19 @@ async function expectWorkingReport(page: Page, open: () => Promise<unknown>, req
   await expect(page.locator('.player-unavailable')).toHaveCount(0);
   await expect(page.locator('#net-summary')).toHaveText(`${requestCount} requests`);
   await expect(page.locator('.net-row')).toHaveCount(requestCount);
+  await expectReplayedPage(page);
+
+  // 네트워크 행을 누르면 그 시점으로 탐색한다 — 전체 스냅샷을 다시 만들어도 재생 문서는 열린 채 남지 않는다
+  await page.locator('.net-row').last().click();
+  await expectReplayedPage(page);
+}
+
+/** 재생 iframe에 녹화한 페이지가 그려져 있고, 그 문서의 로딩이 끝났는지 */
+async function expectReplayedPage(page: Page) {
+  const replay = page.frameLocator('#player iframe');
+  await expect(replay.locator('h1')).toHaveText('Fixture app');
+  await expect.poll(() => page.evaluate(() => document.querySelector('iframe')!.contentDocument!.readyState)).toBe('complete');
+  expect(await page.evaluate(() => document.readyState)).toBe('complete');
 }
 
 test.beforeEach(async ({ page }) => {
@@ -147,7 +159,7 @@ test('녹화 → 로컬 ZIP 저장: rr.json·표준 HAR·환경 정보·리포�
   // 다운로드한 리포트를 열어 확인 (CDN 스크립트는 npm 파일로 대신 응답, SRI 검증은 그대로)
   await serveRrwebFromNpm(context);
   const viewer = await context.newPage();
-  await expectWorkingReport(viewer, () => viewer.setContent(report, { waitUntil: 'domcontentloaded' }), 3);
+  await expectWorkingReport(viewer, () => viewer.setContent(report, { waitUntil: 'load' }), 3);
   await expect(viewer.locator('.con-row')).toHaveCount(1);
 
   // 녹화는 멈추지 않았고, 다음 저장에는 저장 후의 기록만 들어간다
@@ -169,7 +181,7 @@ test('리포트는 rrweb 스크립트의 integrity가 맞지 않으면 재생기
 
   await serveRrwebFromNpm(context, 'window.rrweb = { Replayer: function () {} };');
   const viewer = await context.newPage();
-  await viewer.setContent(report, { waitUntil: 'domcontentloaded' });
+  await viewer.setContent(report, { waitUntil: 'load' });
   await expect(viewer.locator('.player-unavailable')).toContainText('Session replay is unavailable');
   await expect(viewer.locator('.net-row')).toHaveCount(1); // 네트워크 패널은 그대로 동작
 });
@@ -199,7 +211,7 @@ test('원격 업로드 성공: 공유 링크를 보여 주고, 서버가 받은 
 
   await serveRrwebFromNpm(context);
   const viewer = await context.newPage();
-  await expectWorkingReport(viewer, () => viewer.goto('/uploads/1/report', { waitUntil: 'domcontentloaded' }), 3);
+  await expectWorkingReport(viewer, () => viewer.goto('/uploads/1/report', { waitUntil: 'load' }), 3);
 });
 
 test('느린 업로드 중에도 녹화가 이어지고, 업로드 중의 기록은 다음 저장에 중복 없이 들어간다', async ({ page }) => {

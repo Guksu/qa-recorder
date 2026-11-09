@@ -623,6 +623,20 @@ export class UnifiedViewer {
       }
     }
 
+    /* rrweb-snapshot(1.1.x)은 전체 스냅샷을 다시 만들 때 재생 iframe의 문서를 document.open()으로 열고
+       DOM API로 채운 뒤 닫지 않는다. 열린 문서는 계속 "loading"이라, 첫 재구성(Replayer 생성 1ms 뒤)이
+       이 페이지의 파싱이 끝나기 전에 일어나면 이 페이지의 load 이벤트가 끝내 오지 않는다 (세션·로그가 클수록 잘 생김).
+       재구성이 끝날 때마다(처음, 탐색, 체크아웃) 문서를 닫는다 — DOM은 그대로 두고 iframe의 로딩만 끝낸다. */
+    if (replayer) {
+      replayer.on('fullsnapshot-rebuilded', () => {
+        try {
+          const frame = replayer.iframe || player.querySelector('iframe');
+          const doc = frame && frame.contentDocument;
+          if (doc && doc.readyState === 'loading') doc.close();
+        } catch (err) { /* 재생에는 영향이 없으므로 무시 */ }
+      });
+    }
+
     function fit() {
       if (!replayer) return;
       const iframe = player.querySelector('iframe');

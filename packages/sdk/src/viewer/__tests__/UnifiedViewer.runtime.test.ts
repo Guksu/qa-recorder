@@ -214,3 +214,24 @@ describe('리포트 런타임 — 표준 HAR 엔트리 표시', () => {
     expect(labels).toEqual(['Send', 'Wait (TTFB)', 'Receive', 'Total']);
   });
 });
+
+describe('리포트 런타임 — 재생 iframe 문서 닫기', () => {
+  it('전체 스냅샷을 다시 만들 때마다(fullsnapshot-rebuilded) 열린 재생 문서를 닫아 페이지 load가 막히지 않게 한다', () => {
+    const { win, replayer } = render([entry()]);
+    const doc = { readyState: 'loading', close: () => { doc.readyState = 'complete'; doc.closed++; }, closed: 0 };
+    const r = replayer() as FakeReplayer & { iframe?: { contentDocument: typeof doc } };
+    r.iframe = { contentDocument: doc };
+
+    r.handlers['fullsnapshot-rebuilded']();
+    expect(doc.closed).toBe(1);
+    expect(doc.readyState).toBe('complete');
+
+    r.handlers['fullsnapshot-rebuilded'](); // 이미 닫힌 문서는 다시 닫지 않는다
+    expect(doc.closed).toBe(1);
+
+    doc.readyState = 'loading'; // 탐색·체크아웃으로 다시 연 경우
+    r.handlers['fullsnapshot-rebuilded']();
+    expect(doc.closed).toBe(2);
+    void win;
+  });
+});
