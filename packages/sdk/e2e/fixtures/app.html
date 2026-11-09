@@ -43,6 +43,21 @@
     };
     document.getElementById('log-error').onclick = () => console.error('fixture error', new Error('boom'));
 
+    // 본문을 나중에 받는 요청 (fixture-server의 /api/stream/<id>) — 받은 내용은 window.streamed[id]에 쌓인다
+    window.streamed = {};
+    window.openStream = (id, type = 'application/json') => {
+      window.streamed[id] = { chunks: [], done: false };
+      fetch(`/api/stream/${id}?type=${encodeURIComponent(type)}`).then(async (res) => {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) { window.streamed[id].done = true; return; }
+          window.streamed[id].chunks.push(decoder.decode(value, { stream: true }));
+        }
+      });
+    };
+
     window.nativeFetch = window.fetch;
     window.QARecorder = QARecorder;
     window.startRecorder = async (config = {}) => {

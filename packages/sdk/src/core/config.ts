@@ -8,7 +8,8 @@ export interface QARecorderConfig {
    * instead of being downloaded locally. If the server returns `{ url: "..." }`,
    * a share-link copy button is shown automatically. If the upload fails (including an
    * error status or `uploadTimeout`), the same data is downloaded as a local ZIP instead;
-   * if that also fails, the recording is kept so the user can try again.
+   * if that also fails, the recording is kept (within the memory limits — see `maxReplaySize`)
+   * so the user can try again.
    *
    * Recording continues while the session is being saved; what is captured during the save
    * is kept for the next save.
@@ -29,6 +30,19 @@ export interface QARecorderConfig {
    * @default 120000 (2 minutes)
    */
   uploadTimeout?: number;
+
+  /**
+   * How long, in milliseconds, a save waits for fetch response bodies that are still being
+   * received when the user saves (the response headers have arrived, the body has not finished).
+   * Bodies that finish within this time are included in the report. A body still unfinished after
+   * it — a slow download, or a stream that never ends such as SSE — is saved with the part
+   * received so far and marked `_bodyStatus: "pending"` in the HAR; if the save succeeds, the
+   * request stays in the buffer and is included again, with its full body, in the next report.
+   * The save never waits longer than this. `0` saves at once without waiting.
+   *
+   * @default 2000
+   */
+  pendingBodyTimeout?: number;
 
   /**
    * Maximum number of network entries to keep in the circular buffer.
@@ -154,8 +168,9 @@ export interface QARecorderConfig {
    * Recording intensity preset. Controls rrweb's checkout interval and event sampling
    * to keep the in-memory buffer bounded on long or heavy pages. The last two checkout
    * segments are retained, so a save always includes at least one full interval of
-   * history (and at most two). After a failed save, the kept recording is retained until
-   * the next checkout (counted from when recording resumed), so a later save may include
+   * history (and at most two). After a failed save, the part that could not be saved is kept
+   * for the next attempt even if it is older than that, as long as the whole replay stays within
+   * `maxReplaySize` (it is dropped at the next checkout in any case) — so a later save may include
    * more than two intervals.
    *
    * - `'light'`: 30-minute checkout, no sampling — retains the last 30–60 minutes
@@ -180,7 +195,15 @@ export interface QARecorderConfig {
    *
    * A segment only ends early once the changes recorded after its snapshot outgrow the snapshot
    * itself, so on a page whose single snapshot is larger than a quarter of this limit, the kept
-   * replay can exceed it (up to about four snapshots' worth).
+   * replay can exceed it (up to about four snapshots' worth). The last two segments are always
+   * kept, whatever their size.
+   *
+   * After a failed save, the recording that could not be saved is kept for the next attempt, but
+   * only within this limit: when the kept replay would grow past it — at once, or later as new
+   * events arrive — whole segments older than the last two are dropped, oldest first, so the
+   * replay still starts with a full snapshot. If a failed save's recording had to be cut this way,
+   * the failure message says so instead of "The recording was kept". A failed save never adds a
+   * full snapshot to the kept replay: the snapshot taken to split the save off is removed again.
    *
    * `Infinity` turns the size limit off, leaving only `mode`'s timed checkout.
    *
@@ -226,6 +249,7 @@ export interface QARecorderConfig {
 const DEFAULT_CONFIG: Required<QARecorderConfig> = {
   endpoint: '',
   uploadTimeout: 120_000,
+  pendingBodyTimeout: 2_000,
   maxRequests: 100,
   maxBodySize: 100 * 1024,
   maskHeaders: [

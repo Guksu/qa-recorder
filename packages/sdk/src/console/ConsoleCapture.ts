@@ -128,6 +128,12 @@ export class ConsoleCapture {
     }
   }
 
+  /** entries 중 이제 버퍼에 없는(maxEntries를 넘어 밀려난) 엔트리 수 */
+  countMissing(entries: readonly ConsoleEntry[]): number {
+    const inBuffer = new Set(this.buffer);
+    return entries.filter((entry) => !inBuffer.has(entry)).length;
+  }
+
   snapshot(): ConsoleEntry[] {
     return [...this.buffer];
   }

@@ -350,9 +350,9 @@ describe('QARecorder', () => {
     expect(isProgressVisible()).toBe(false);
     expect(buttonOf().title).toBe('Stop and save recording');
 
-    // 버퍼 보존: 기존 rrweb 이벤트 뒤에 저장 시점에 시작한 새 구간이 이어지고, 네트워크/콘솔은 그대로
+    // 버퍼 보존: 기존 rrweb 이벤트가 그대로 남는다 — 저장을 나누려고 찍은 스냅샷은 실패하면 빠진다. 네트워크/콘솔도 그대로
     const after = buffersOf(recorder);
-    expect(after.events).toEqual([...before.events, ...CHECKOUT]);
+    expect(after.events).toEqual(before.events);
     expect(after.network).toEqual(before.network);
     expect(after.console).toEqual(before.console);
     // 저장되지 않았으므로 sessionStorage 백업도 유지
@@ -372,7 +372,7 @@ describe('QARecorder', () => {
     await clickSaveAndSettle(recorder);
 
     const [events, har, consoleLogs] = mocks.localStorageSave.mock.calls[1]!;
-    expect(events).toEqual([...before.events, ...CHECKOUT]);
+    expect(events).toEqual(before.events); // 실패한 저장의 스냅샷이 쌓이지 않는다
     expect(har.log.entries.map((e: HAREntry) => e.request.url)).toEqual(before.network.map((e) => e.request.url));
     expect(consoleLogs).toEqual(before.console);
 
@@ -537,7 +537,7 @@ describe('QARecorder', () => {
       expect(buttonOf().title).toBe('Stop and save recording');
 
       const after = buffersOf(recorder);
-      expect(after.events).toEqual([...before.events, ...CHECKOUT]);
+      expect(after.events).toEqual(before.events);
       expect(after.network).toEqual(before.network);
       expect(after.console).toEqual(before.console);
       expect(sessionStorageMock.removeItem).not.toHaveBeenCalled();

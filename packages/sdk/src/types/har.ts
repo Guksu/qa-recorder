@@ -49,6 +49,18 @@ export interface HARRequest {
   comment?: string;
 }
 
+/**
+ * 응답 본문을 어디까지 기록했는지 (HAR 사용자 정의 필드 `_bodyStatus`).
+ * - `complete`: 끝까지 읽었다
+ * - `pending`: 저장할 때 아직 받는 중이었다 — text는 그때까지 받은 부분
+ * - `truncated`: maxBodySize에서 잘랐다
+ * - `error`: 본문을 읽다가 실패했다 (스트림 오류 등)
+ * - `aborted`: 다 받기 전에 기록이 끝났다 (destroy(), 페이지 이동, 버퍼에서 밀려남)
+ * - `binary`: 바이너리라 읽지 않았다
+ * - `omitted`: maxBodySize가 0이라 기록하지 않았다
+ */
+export type HARBodyStatus = 'complete' | 'pending' | 'truncated' | 'error' | 'aborted' | 'binary' | 'omitted';
+
 export interface HARContent {
   /** 디코딩된 본문의 바이트 수. 알 수 없으면 -1 */
   size: number;
@@ -57,6 +69,8 @@ export interface HARContent {
   text?: string;
   encoding?: string;
   comment?: string;
+  /** 본문 기록 상태 (HAR 사용자 정의 필드). 예전 버전이 만든 엔트리에는 없다 */
+  _bodyStatus?: HARBodyStatus;
 }
 
 export interface HARResponse {
@@ -103,6 +117,11 @@ export interface HAREntry {
   comment?: string;
   /** 녹화 시작 시점으로부터 경과한 ms (뷰어 타임라인 동기화용, HAR 사용자 정의 필드) */
   _offsetMs?: number;
+  /**
+   * 응답 본문을 받는 중에 저장된 앞선 리포트에도 들어 있던 요청인지 (HAR 사용자 정의 필드).
+   * 그런 요청은 본문을 마저 받으면 다음 리포트에 다시 들어간다.
+   */
+  _alsoInEarlierReport?: boolean;
 }
 
 export interface HARCreator {
