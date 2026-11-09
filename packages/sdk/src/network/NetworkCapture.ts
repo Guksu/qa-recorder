@@ -161,10 +161,10 @@ export class NetworkCapture {
     for (const [entry, pending] of [...this.pendingBodies]) this.abortBody(entry, pending);
   }
 
-  private abortBody(entry: HAREntry, pending: PendingBody): void {
+  private abortBody(entry: HAREntry, pending: PendingBody, status: HARBodyStatus = 'aborted'): void {
     this.pendingBodies.delete(entry);
     pending.controller.abort();
-    entry.response.content._bodyStatus = 'aborted';
+    entry.response.content._bodyStatus = status;
     if (pending.partial) {
       entry.response.content.text =
         MaskingFilter.maskTruncatedBody(pending.partial, entry.response.content.mimeType, this.isSensitiveKey);
@@ -272,6 +272,12 @@ export class NetworkCapture {
     });
     pending = { settled, partial: '', controller };
     this.pendingBodies.set(stored, pending);
+
+    // 앱이 응답 스트림을 중간에 취소하면(reader.cancel()) 녹화기 사본 읽기도 멈춘다. 사본(tee의 한쪽)이 읽히는 동안에는
+    // 원본을 취소해도 연결이 닫히지 않으므로, 사본을 먼저 취소해야 앱의 취소가 실제로 연결을 닫는다
+    forwardAppCancel(response, () => {
+      if (this.pendingBodies.get(stored) === pending) this.abortBody(stored, pending, 'cancelled');
+    });
   }
 
   private offsetOf(startedDateTime: string): number {
@@ -542,6 +548,80 @@ export class NetworkCapture {
       ),
     ), session);
   }
+}
+
+/** Response.prototype.body의 원래 getter (없으면 앱 취소를 전달하지 않는다) */
+const nativeBodyGetter: ((this: Response) => ReadableStream<Uint8Array> | null) | undefined = (() => {
+  try {
+    return typeof Response === 'undefined' ? undefined : Object.getOwnPropertyDescriptor(Response.prototype, 'body')?.get;
+  } catch {
+    return undefined;
+  }
+})();
+
+/** 바이트 스트림(type: 'bytes')을 만들 수 있는지 — 그래야 전달 스트림에서도 BYOB reader를 쓸 수 있다 */
+const supportsByteStreams: boolean = (() => {
+  try {
+    new ReadableStream({ type: 'bytes' } as UnderlyingByteSource);
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
+/**
+ * 앱이 이 응답의 본문 스트림을 취소하면 onCancel을 먼저 부른 뒤 원본 스트림에 취소를 전달한다.
+ *
+ * 녹화기는 response.clone()으로 만든 사본을 읽는데, clone은 원본 스트림을 tee로 나누므로 두 쪽이 모두 취소돼야
+ * 실제 연결이 닫힌다 — 그래서 앱이 reader.cancel()해도 녹화기 사본이 끝날 때까지 연결이 열려 있었다.
+ * 이 응답 객체의 body만 원본을 그대로 넘겨주는 스트림으로 바꾼다 (처음 읽을 때 원본 reader를 잡고,
+ * 앱이 읽는 만큼만 읽는다 — highWaterMark 0). 앱이 body에 접근하지 않고 text()·json() 등을 쓰면 아무 영향이 없다.
+ * 바이트 스트림을 만들 수 있으면 type: 'bytes'로 만들어 BYOB reader도 그대로 쓸 수 있다.
+ */
+function forwardAppCancel(response: Response, onCancel: () => void): void {
+  const getter = nativeBodyGetter;
+  if (!getter) return;
+  let relay: ReadableStream<Uint8Array> | null | undefined;
+  try {
+    Object.defineProperty(response, 'body', {
+      configurable: true,
+      enumerable: true,
+      get() {
+        if (relay === undefined) {
+          const real = getter.call(response);
+          relay = real ? relayStream(real, onCancel) : real;
+        }
+        return relay;
+      },
+    });
+  } catch {
+    /* 이 응답 객체에 정의할 수 없으면 그대로 둔다 */
+  }
+}
+
+function relayStream(real: ReadableStream<Uint8Array>, onCancel: () => void): ReadableStream<Uint8Array> {
+  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  const source = {
+    ...(supportsByteStreams ? { type: 'bytes' as const } : {}),
+    async pull(controller: ReadableStreamDefaultController<Uint8Array> | ReadableByteStreamController) {
+      reader ??= real.getReader();
+      const { done, value } = await reader.read();
+      if (done) {
+        controller.close();
+        // 바이트 스트림: 기다리던 BYOB 요청을 끝낸다
+        (controller as ReadableByteStreamController).byobRequest?.respond(0);
+      } else {
+        // 바이트 스트림의 enqueue는 청크의 버퍼를 넘겨받아(detach) 쓴다. tee는 두 쪽에 같은 청크를 줄 수 있으므로
+        // (청크를 복사하지 않는 구현) 녹화기 사본이 읽을 청크가 망가지지 않도록 복사본을 넘긴다
+        (controller as ReadableStreamDefaultController<Uint8Array>).enqueue(supportsByteStreams ? value.slice() : value);
+      }
+    },
+    cancel(reason: unknown) {
+      try { onCancel(); } catch { /* 녹화기 쪽 실패가 앱의 취소를 막지 않도록 */ }
+      return reader ? reader.cancel(reason) : real.cancel(reason);
+    },
+  };
+  return new ReadableStream(source as UnderlyingDefaultSource<Uint8Array>, { highWaterMark: 0 });
 }
 
 /** 텍스트로 읽지 않은 XHR 응답의 바이트 수 (ArrayBuffer·Blob이면 실제 크기, 그 밖에는 -1) */

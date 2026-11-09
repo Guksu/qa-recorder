@@ -56,10 +56,12 @@ export interface HARRequest {
  * - `truncated`: maxBodySize에서 잘랐다
  * - `error`: 본문을 읽다가 실패했다 (스트림 오류 등)
  * - `aborted`: 다 받기 전에 기록이 끝났다 (destroy(), 페이지 이동, 버퍼에서 밀려남)
+ * - `cancelled`: 다 받기 전에 앱이 응답 스트림을 취소했다 (reader.cancel() 등)
  * - `binary`: 바이너리라 읽지 않았다
  * - `omitted`: maxBodySize가 0이라 기록하지 않았다
  */
-export type HARBodyStatus = 'complete' | 'pending' | 'truncated' | 'error' | 'aborted' | 'binary' | 'omitted';
+export type HARBodyStatus =
+  | 'complete' | 'pending' | 'truncated' | 'error' | 'aborted' | 'cancelled' | 'binary' | 'omitted';
 
 export interface HARContent {
   /** 디코딩된 본문의 바이트 수. 알 수 없으면 -1 */
