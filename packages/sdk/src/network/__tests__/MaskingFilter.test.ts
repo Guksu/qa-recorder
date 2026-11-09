@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { MaskingFilter } from '../MaskingFilter.js';
 import { resolveConfig } from '../../core/config.js';
-import type { HAREntry } from '@qa-recorder/shared';
+import type { HAREntry } from '../../types/har.js';
 
 function makeEntry(
   requestHeaders: { name: string; value: string }[],

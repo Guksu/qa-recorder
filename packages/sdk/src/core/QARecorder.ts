@@ -9,15 +9,33 @@ import { SharePanel } from '../ui/SharePanel.js';
 import { LocalStorage } from '../storage/LocalStorage.js';
 import { RemoteDelivery } from '../storage/RemoteDelivery.js';
 import { HARBuilder } from '../network/HARBuilder.js';
+import { isAbortError } from './abort.js';
 import { MaskingFilter, type KeyMatcher } from '../network/MaskingFilter.js';
 import { UnifiedViewer } from '../viewer/UnifiedViewer.js';
 import { collectEnvironment, type EnvironmentInfo } from './environment.js';
-import type { HAREntry, HARLog } from '@qa-recorder/shared';
+import type { HARDocument, HAREntry } from '../types/har.js';
 import type { ConsoleEntry } from '../console/ConsoleCapture.js';
+import type { SaveCut } from '../recorder/ScreenRecorder.js';
 
 const SESSION_KEY = 'qa-recorder-backup';
 
 const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+
+/** 저장을 시작할 때 잘라 낸 데이터. 저장이 끝나면 성공이면 commit, 실패면 rollback한다 */
+interface SaveSnapshot {
+  screen: SaveCut;
+  network: HAREntry[];
+  console: ConsoleEntry[];
+  /** 자른 시각 — 저장 성공 후 남은 기록의 기준 시각 */
+  cutAt: Date;
+}
+
+/** 저장 결과. aborted는 destroy()로 저장이 중단된 경우 (아무것도 하지 않는다) */
+type SaveOutcome =
+  | { kind: 'saved'; url?: string; uploaded: boolean }
+  | { kind: 'fallback'; uploadError: unknown }
+  | { kind: 'failed'; uploadError?: unknown; saveError: unknown }
+  | { kind: 'aborted' };
 
 export class QARecorder {
   private static _instance: QARecorder | null = null;
@@ -53,9 +71,17 @@ export class QARecorder {
   private consoleCapture: ConsoleCapture;
   private floatingButton: FloatingButton;
   private pageHideHandler: (() => void) | null = null;
-  private initialized = false;
-  /** 확인창이 떠 있거나 저장 중인지 — 그동안 버튼이 다시 눌려도(키보드 Enter 등) 저장을 한 번만 진행한다 */
-  private saving = false;
+  /**
+   * init()부터 destroy()까지의 수명. destroy()가 abort()하면 진행 중인 확인창·업로드·로컬 저장이 취소되고,
+   * 그 흐름은 이 신호를 보고 녹화·버퍼·UI를 더 건드리지 않는다. 다시 init()하면 새 컨트롤러를 만들므로
+   * 이전 수명의 늦은 완료 처리는 새 수명에 영향을 주지 않는다.
+   */
+  private lifecycle: AbortController | null = null;
+  /** 진행 중인 저장 흐름 (확인창 포함). 그동안 버튼이 다시 눌려도(키보드 Enter 등) 저장을 한 번만 진행한다 */
+  private activeSave: object | null = null;
+  /** 이 인스턴스가 띄운 진행 막대·공유 패널을 닫는 함수 (destroy()에서 정리) */
+  private dismissProgress: (() => void) | null = null;
+  private dismissShare: (() => void) | null = null;
 
   constructor(overrides?: QARecorderConfig) {
     this.config = resolveConfig(overrides);
@@ -78,9 +104,12 @@ export class QARecorder {
 
   async init(): Promise<void> {
     // 두 번 호출하면 버튼과 pagehide 리스너가 중복되고 가로채기가 겹치므로 한 번만 시작한다 (destroy() 후에는 다시 가능)
-    if (this.initialized) return;
-    this.initialized = true;
+    if (this.lifecycle) return;
+    this.lifecycle = new AbortController();
 
+    // destroy() 후 다시 init()하면 새 녹화로 시작한다 — 화면 녹화(start())처럼 네트워크·콘솔 기록도 비운다
+    this.networkCapture.clearBuffer();
+    this.consoleCapture.clearBuffer();
     this.networkCapture.start();
     this.screenRecorder.start();
     this.consoleCapture.start();
@@ -148,118 +177,173 @@ export class QARecorder {
   }
 
   private async onButtonClick(): Promise<void> {
-    if (this.saving) return;
-    this.saving = true;
+    const lifecycle = this.lifecycle;
+    if (!lifecycle || this.activeSave) return;
+    const token = {};
+    this.activeSave = token;
     try {
-      await this.confirmAndSave();
+      await this.confirmAndSave(lifecycle.signal);
+    } catch (err) {
+      // destroy()로 끊긴 흐름의 에러는 의도한 취소다
+      if (!lifecycle.signal.aborted) console.error('[qa-recorder] save failed', err);
     } finally {
-      this.saving = false;
+      if (this.activeSave === token) this.activeSave = null;
     }
-  }
-
-  private async confirmAndSave(): Promise<void> {
-    const { confirmed, memo } = await ConfirmModal.show('Save this QA session?');
-    if (!confirmed) return;
-
-    this.screenRecorder.stop();
-
-    const harLog = HARBuilder.build(this.networkCapture.snapshot());
-    const consoleLogs = this.consoleCapture.snapshot();
-    const environment = collectEnvironment((url) => MaskingFilter.maskUrl(url, this.urlKeyMatcher));
-
-    ProgressBar.show('Saving...', this.config.zIndex);
-
-    const saved = this.config.endpoint
-      ? await this.uploadOrSaveLocally(this.config.endpoint, harLog, consoleLogs, memo, environment)
-      : await this.saveLocally(harLog, consoleLogs, memo, environment);
-
-    if (saved) {
-      if (this.config.enableBackup) {
-        sessionStorage.removeItem(SESSION_KEY);
-      }
-
-      this.screenRecorder.reset();
-      this.networkCapture.clearBuffer();
-      this.consoleCapture.clearBuffer();
-      this.screenRecorder.start();
-    } else {
-      /* 저장 실패 — 버퍼를 비우지 않고 기존 이벤트 뒤에 이어서 녹화해 다시 저장할 수 있게 한다 */
-      this.screenRecorder.resume();
-    }
-    this.floatingButton.setState('recording');
   }
 
   /**
-   * 원격 업로드. 실패하면 업로드에 쓰인 것과 같은 데이터로 로컬 ZIP 저장을 시도한다.
-   * 둘 중 하나라도 성공하면 true. alert는 블로킹이므로 항상 ProgressBar를 먼저 숨긴다.
+   * 확인 → 저장. 녹화는 멈추지 않는다: 저장할 데이터를 잘라 낸 뒤 새로 기록되는 데이터는 따로 쌓이고,
+   * 저장에 성공하면 잘라 낸 데이터만 버리고, 실패하면 잘라 낸 데이터를 되돌려 다음 저장에 함께 넣는다.
+   * await 뒤에는 항상 signal을 확인해 destroy() 후에는 녹화·버퍼·UI를 건드리지 않는다.
+   */
+  private async confirmAndSave(signal: AbortSignal): Promise<void> {
+    const { confirmed, memo } = await ConfirmModal.show('Save this QA session?', { signal });
+    if (!confirmed || signal.aborted) return;
+
+    const snapshot = this.cutForSave();
+    let outcome: SaveOutcome;
+    try {
+      const har = HARBuilder.build(snapshot.network);
+      const environment = collectEnvironment((url) => MaskingFilter.maskUrl(url, this.urlKeyMatcher));
+      this.dismissProgress = ProgressBar.show('Saving...', this.config.zIndex);
+      outcome = this.config.endpoint
+        ? await this.uploadOrSaveLocally(this.config.endpoint, snapshot, har, memo, environment, signal)
+        : await this.saveLocally(snapshot, har, memo, environment, signal);
+    } catch (err) {
+      // 리포트 생성 등 예기치 못한 실패도 기록을 잃지 않도록 실패로 다룬다
+      outcome = signal.aborted ? { kind: 'aborted' } : { kind: 'failed', saveError: err };
+    }
+    if (outcome.kind === 'aborted' || signal.aborted) return;
+
+    if (outcome.kind === 'failed') {
+      this.rollbackSave(snapshot);
+    } else {
+      this.commitSave(snapshot);
+    }
+
+    // alert는 블로킹이므로 항상 진행 막대를 먼저 숨긴다
+    this.dismissProgress?.();
+    this.dismissProgress = null;
+    this.notify(outcome);
+  }
+
+  /** 저장할 데이터를 잘라 낸다. 녹화와 네트워크·콘솔 캡처는 계속된다 */
+  private cutForSave(): SaveSnapshot {
+    return {
+      screen: this.screenRecorder.cutForSave(),
+      network: this.networkCapture.snapshot(),
+      console: this.consoleCapture.snapshot(),
+      cutAt: new Date(),
+    };
+  }
+
+  /** 저장 성공: 저장한 데이터만 버리고 저장하는 동안 새로 기록된 데이터는 남긴다 */
+  private commitSave(snapshot: SaveSnapshot): void {
+    if (this.config.enableBackup) {
+      try { sessionStorage.removeItem(SESSION_KEY); } catch { /* sessionStorage를 쓸 수 없는 환경 */ }
+    }
+    this.screenRecorder.commitSave(snapshot.screen);
+    this.networkCapture.discard(snapshot.network);
+    this.consoleCapture.discard(snapshot.console);
+    // 남은 기록은 잘라 낸 시점에 시작한 새 구간에 속한다
+    this.networkCapture.rebase(snapshot.cutAt);
+    this.consoleCapture.rebase(snapshot.cutAt);
+  }
+
+  /** 저장 실패: 아무것도 버리지 않는다. 잘라 낸 화면 녹화를 되돌려 다음 저장에 함께 넣는다 */
+  private rollbackSave(snapshot: SaveSnapshot): void {
+    this.screenRecorder.rollbackSave(snapshot.screen);
+  }
+
+  private notify(outcome: Exclude<SaveOutcome, { kind: 'aborted' }>): void {
+    switch (outcome.kind) {
+      case 'saved':
+        if (!outcome.uploaded) return;
+        if (outcome.url) this.dismissShare = SharePanel.show(outcome.url, this.config.zIndex);
+        else alert('Upload complete.');
+        return;
+      case 'fallback':
+        alert(`Upload failed: ${errorMessage(outcome.uploadError)}\nA local ZIP was downloaded instead.`);
+        return;
+      case 'failed':
+        alert(
+          (outcome.uploadError === undefined ? '' : `Upload failed: ${errorMessage(outcome.uploadError)}\n`) +
+          `Save failed: ${errorMessage(outcome.saveError)}\n` +
+          'The recording was kept. Please try again.',
+        );
+    }
+  }
+
+  /**
+   * 원격 업로드. 실패하면(시간 초과 포함) 업로드에 쓰인 것과 같은 데이터로 로컬 ZIP 저장을 시도한다.
+   * destroy()로 취소되면 대체 저장 없이 aborted.
    */
   private async uploadOrSaveLocally(
     endpoint: string,
-    harLog: HARLog,
-    consoleLogs: ConsoleEntry[],
+    snapshot: SaveSnapshot,
+    har: HARDocument,
     memo: string,
     environment: EnvironmentInfo,
-  ): Promise<boolean> {
-    let events: unknown[] | undefined;
-    let url: string | undefined;
+    signal: AbortSignal,
+  ): Promise<SaveOutcome> {
+    const events = snapshot.screen.events;
+    const consoleLogs = snapshot.console;
     try {
-      // 대체 저장에도 같은 이벤트를 쓰도록 한 번만 읽는다 — rrweb은 stop() 후에도
-      // throttle된 콜백(mousemove 등)의 trailing 타이머로 이벤트를 늦게 emit할 수 있다
-      events = this.screenRecorder.getEvents();
       const sessionBlob = new Blob([JSON.stringify(events)], { type: 'application/json' });
       // 서버가 따로 뷰어를 만들지 않아도 되도록 콘솔 로그와 통합 리포트, 환경 정보도 함께 보낸다
-      url = await new RemoteDelivery(endpoint).send(sessionBlob, harLog, memo, {
+      const url = await new RemoteDelivery(endpoint).send(sessionBlob, har, memo, {
         consoleLogs,
-        reportHtml: UnifiedViewer.generate(events, harLog, consoleLogs, memo, environment),
+        reportHtml: UnifiedViewer.generate(events, har.log, consoleLogs, memo, environment),
         environment,
-      });
+      }, { timeout: this.config.uploadTimeout, signal });
+      return { kind: 'saved', url, uploaded: true };
     } catch (uploadErr) {
+      if (signal.aborted || isAbortError(uploadErr)) return { kind: 'aborted' };
       try {
-        await LocalStorage.save(events ?? this.screenRecorder.getEvents(), harLog, consoleLogs, memo, environment);
+        await LocalStorage.save(events, har, consoleLogs, memo, environment, { signal });
       } catch (saveErr) {
-        ProgressBar.hide();
-        alert(
-          `Upload failed: ${errorMessage(uploadErr)}\n` +
-          `Save failed: ${errorMessage(saveErr)}\n` +
-          'The recording was kept. Please try again.',
-        );
-        return false;
+        if (signal.aborted) return { kind: 'aborted' };
+        return { kind: 'failed', uploadError: uploadErr, saveError: saveErr };
       }
-      ProgressBar.hide();
-      alert(`Upload failed: ${errorMessage(uploadErr)}\nA local ZIP was downloaded instead.`);
-      return true;
+      return { kind: 'fallback', uploadError: uploadErr };
     }
-
-    ProgressBar.hide();
-    if (url) SharePanel.show(url, this.config.zIndex);
-    else alert('Upload complete.');
-    return true;
   }
 
-  /** 로컬 ZIP 저장. 성공하면 true */
+  /** 로컬 ZIP 저장 */
   private async saveLocally(
-    harLog: HARLog,
-    consoleLogs: ConsoleEntry[],
+    snapshot: SaveSnapshot,
+    har: HARDocument,
     memo: string,
     environment: EnvironmentInfo,
-  ): Promise<boolean> {
+    signal: AbortSignal,
+  ): Promise<SaveOutcome> {
     try {
-      await LocalStorage.save(this.screenRecorder.getEvents(), harLog, consoleLogs, memo, environment);
+      await LocalStorage.save(snapshot.screen.events, har, snapshot.console, memo, environment, { signal });
     } catch (err) {
-      ProgressBar.hide();
-      alert(`Save failed: ${errorMessage(err)}\nThe recording was kept. Please try again.`);
-      return false;
+      if (signal.aborted) return { kind: 'aborted' };
+      return { kind: 'failed', saveError: err };
     }
-    ProgressBar.hide();
-    return true;
+    return { kind: 'saved', uploaded: false };
   }
 
+  /**
+   * 녹화를 끝내고 이 인스턴스가 만든 것을 모두 정리한다: fetch/XHR·console 패치, 이벤트 리스너, 버튼,
+   * 확인창, 진행 막대, 공유 패널. 진행 중인 업로드와 로컬 저장은 취소되고(대체 저장이나 안내 없이),
+   * 그 늦은 완료가 녹화를 다시 시작하거나 UI를 띄우지 않는다. 그 뒤 init()으로 새 녹화를 시작할 수 있다.
+   */
   destroy(): void {
-    this.initialized = false;
+    const lifecycle = this.lifecycle;
+    this.lifecycle = null;
+    this.activeSave = null;
+    lifecycle?.abort();
     this.networkCapture.stop();
     this.screenRecorder.stop();
     this.consoleCapture.stop();
     this.floatingButton.unmount();
+    this.dismissProgress?.();
+    this.dismissProgress = null;
+    this.dismissShare?.();
+    this.dismissShare = null;
     if (this.pageHideHandler) {
       window.removeEventListener('pagehide', this.pageHideHandler);
       this.pageHideHandler = null;
@@ -269,7 +353,11 @@ export class QARecorder {
     }
   }
 
-  getNetworkEntries() {
+  /**
+   * 지금 버퍼에 있는 네트워크 캡처 엔트리의 복사본 (저장할 때 `.har`로 내보내는 원본).
+   * 캡처 형식이라 HAR 1.2의 cookies·cache 등 일부 필수 필드는 비어 있을 수 있다 — 표준 HAR은 저장된 파일을 쓴다.
+   */
+  getNetworkEntries(): HAREntry[] {
     return this.networkCapture.snapshot();
   }
 

@@ -5,10 +5,15 @@ export class ProgressBar {
   private static host: HTMLElement | null = null;
   private static shadow: ShadowRoot | null = null;
 
-  static show(label = 'Uploading...', zIndex = 2147483647): void {
-    if (this.host) return;
+  /**
+   * 진행 막대를 표시하고, 이 호출이 띄운 막대만 닫는 함수를 반환한다.
+   * 이미 표시 중이면 새로 띄우지 않고 아무것도 하지 않는 함수를 반환한다 — 다른 쪽이 띄운 막대를 닫지 않도록.
+   */
+  static show(label = 'Uploading...', zIndex = 2147483647): () => void {
+    if (this.host) return () => {};
 
-    this.host = document.createElement('div');
+    const host = document.createElement('div');
+    this.host = host;
     this.host.setAttribute('data-qa', 'progress-bar');
     this.shadow = this.host.attachShadow({ mode: 'open' });
 
@@ -30,6 +35,9 @@ export class ProgressBar {
     excludeFromRecording(this.host, style, wrap);
     this.shadow.append(style, wrap);
     document.body.appendChild(this.host);
+    return () => {
+      if (this.host === host) this.hide();
+    };
   }
 
   static hide(): void {

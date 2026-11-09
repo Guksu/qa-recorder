@@ -560,3 +560,46 @@ describe('ConsoleCapture', () => {
     });
   });
 });
+
+describe('ConsoleCapture 세션과 저장 구간', () => {
+  it('stop()은 그 위에 다른 코드가 감싼 console 메서드를 지우지 않고, 다시 start()해도 한 번만 기록한다', () => {
+    const native = console.warn;
+    const sink = vi.fn();
+    console.warn = sink;
+    try {
+      capture = new ConsoleCapture(200, ['warn']);
+      capture.start();
+      const ours = console.warn;
+      const outer = (...args: unknown[]) => ours(...args);
+      console.warn = outer;
+
+      capture.stop();
+      expect(console.warn).toBe(outer);
+      console.warn('after stop');
+      expect(capture.snapshot()).toEqual([]);
+
+      capture.start();
+      console.warn('again');
+      expect(capture.snapshot().map((e) => e.message)).toEqual(['again']);
+      expect(sink).toHaveBeenCalledTimes(2); // 앱의 원래 출력은 매번 한 번씩
+      capture.stop();
+    } finally {
+      console.warn = native;
+    }
+  });
+
+  it('discard()는 저장한 엔트리만 빼고 그 뒤에 기록된 엔트리는 남긴다', () => {
+    capture.start();
+    dispatchUncaught('saved');
+    const saved = capture.snapshot();
+    dispatchUncaught('during save');
+    capture.discard(saved);
+    expect(capture.snapshot().map((e) => e.message)).toEqual(['[Uncaught] during save']);
+  });
+
+  it('rebase()는 남은 엔트리의 _offsetMs를 새 기준 시각으로 다시 계산한다', () => {
+    capture.restoreEntries([{ timestamp: '2026-01-01T00:00:05.000Z', level: 'error', message: 'x', _offsetMs: 1 }]);
+    capture.rebase(new Date('2026-01-01T00:00:01.500Z'));
+    expect(capture.snapshot()[0]._offsetMs).toBe(3500);
+  });
+});

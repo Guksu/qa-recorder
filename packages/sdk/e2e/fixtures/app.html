@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>qa-recorder E2E fixture</title>
+  <style>
+    body { font-family: sans-serif; margin: 24px; }
+    button { margin: 4px; }
+    #out { white-space: pre-wrap; border: 1px solid #ccc; padding: 8px; min-height: 40px; }
+  </style>
+</head>
+<body>
+  <h1>Fixture app</h1>
+  <p>Exercises fetch, XHR, console and DOM input so the recorder has something to capture.</p>
+  <button id="load">Load items</button>
+  <button id="xhr">XHR echo</button>
+  <button id="missing">Missing</button>
+  <button id="log-error">Log error</button>
+  <label>Note <input id="note" type="text" /></label>
+  <div id="out"></div>
+
+  <script type="module">
+    // 현재 체크아웃에서 빌드한 SDK (fixture-server가 packages/sdk/dist를 /sdk/로 서빙)
+    import { QARecorder } from '/sdk/qa-recorder.esm.js';
+
+    const out = document.getElementById('out');
+    const show = (text) => { out.textContent = text; };
+
+    document.getElementById('load').onclick = async () => {
+      const res = await fetch('/api/items?page=1&token=page-secret');
+      show(`items ${res.status} ${JSON.stringify(await res.json())}`);
+    };
+    document.getElementById('xhr').onclick = () => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/echo');
+      xhr.setRequestHeader('content-type', 'application/json');
+      xhr.onload = () => show(`echo ${xhr.status} ${xhr.responseText}`);
+      xhr.send(JSON.stringify({ hello: 'world', password: 'hunter2' }));
+    };
+    document.getElementById('missing').onclick = async () => {
+      const res = await fetch('/api/missing');
+      show(`missing ${res.status}`);
+    };
+    document.getElementById('log-error').onclick = () => console.error('fixture error', new Error('boom'));
+
+    window.nativeFetch = window.fetch;
+    window.QARecorder = QARecorder;
+    window.startRecorder = async (config = {}) => {
+      window.recorder = new QARecorder(config);
+      await window.recorder.init();
+      return true;
+    };
+  </script>
+</body>
+</html>

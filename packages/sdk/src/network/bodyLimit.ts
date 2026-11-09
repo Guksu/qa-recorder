@@ -49,3 +49,36 @@ export async function readLimitedText(response: Response, limit: number): Promis
     }
   }
 }
+
+/** 문자열을 UTF-8로 인코딩했을 때의 바이트 수 (인코딩 결과를 만들지 않고 센다) */
+export function utf8ByteLength(text: string): number {
+  let bytes = 0;
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code < 0x80) bytes += 1;
+    else if (code < 0x800) bytes += 2;
+    else if (code >= 0xd800 && code <= 0xdbff && i + 1 < text.length
+      && text.charCodeAt(i + 1) >= 0xdc00 && text.charCodeAt(i + 1) <= 0xdfff) {
+      bytes += 4; // 서로게이트 쌍 = 코드 포인트 하나
+      i++;
+    } else bytes += 3; // 짝이 없는 서로게이트는 U+FFFD(3바이트)로 인코딩된다
+  }
+  return bytes;
+}
+
+/**
+ * fetch/XHR로 보내는 본문의 바이트 수. 본문이 없으면 0, 페이지에서 크기를 알 수 없는 본문(FormData, 스트림 등)은 -1.
+ */
+export function requestBodySize(body: unknown): number {
+  if (body === undefined || body === null) return 0;
+  try {
+    if (typeof body === 'string') return utf8ByteLength(body);
+    if (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams) return utf8ByteLength(body.toString());
+    if (typeof Blob !== 'undefined' && body instanceof Blob) return body.size;
+    if (body instanceof ArrayBuffer) return body.byteLength;
+    if (ArrayBuffer.isView(body)) return body.byteLength;
+  } catch {
+    /* 크기를 읽을 수 없으면 알 수 없음 */
+  }
+  return -1;
+}

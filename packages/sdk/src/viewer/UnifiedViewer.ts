@@ -1,4 +1,4 @@
-import type { HARLog } from '@qa-recorder/shared';
+import type { HARLog } from '../types/har.js';
 import type { ConsoleEntry } from '../console/ConsoleCapture.js';
 import { toScriptJson } from './scriptJson.js';
 import type { EnvironmentInfo } from '../core/environment.js';
@@ -395,6 +395,7 @@ export class UnifiedViewer {
       color: #202124;
       margin: 0;
     }
+    .timing-note, .body-note { margin: 0; padding: 8px 12px; color: #80868b; font-size: 11px; line-height: 1.5; }
     .timing-row { display: flex; align-items: center; gap: 12px; padding: 5px 12px; font-size: 11px; }
     .timing-label { width: 100px; color: #5f6368; }
     .timing-bar-wrap { flex: 1; background: #f1f3f4; border-radius: 2px; height: 8px; }
@@ -599,6 +600,8 @@ export class UnifiedViewer {
       if (s>=500) return 's-5xx'; if (s>=400) return 's-4xx';
       if (s>=300) return 's-3xx'; return 's-2xx';
     }
+    /* HAR의 url은 [MASKED]의 대괄호를 퍼센트 인코딩한다 (HARBuilder) — 읽기 쉽게 되돌려 보여 준다 */
+    function showUrl(url) { return String(url).replace(/%5BMASKED%5D/g, '[MASKED]'); }
     function getPath(url) { try { return new URL(url).pathname; } catch { return url; } }
 
     /* ── rrweb replayer ── */
@@ -717,10 +720,10 @@ export class UnifiedViewer {
       tr.dataset.idx   = i;
       tr.dataset.start = e._offsetMs || 0;
       tr.dataset.end   = (e._offsetMs || 0) + e.time;
-      tr.dataset.url   = e.request.url.toLowerCase();
+      tr.dataset.url   = showUrl(e.request.url).toLowerCase();
 
       tr.innerHTML =
-        '<td class="col-name" title="' + esc(e.request.url) + '">' + esc(getPath(e.request.url)) + '</td>' +
+        '<td class="col-name" title="' + esc(showUrl(e.request.url)) + '">' + esc(getPath(e.request.url)) + '</td>' +
         '<td class="col-method"><span class="method-badge ' + methodClass(e.request.method) + '">' + esc(e.request.method) + '</span></td>' +
         '<td class="col-status ' + statusClass(e.response.status) + '">' + (e.response.status || 'failed') + '</td>' +
         '<td class="col-time">' + Math.round(e.time) + ' ms</td>';
@@ -815,6 +818,15 @@ export class UnifiedViewer {
         '</table>';
     }
 
+    /* postData / response.content를 표시. 본문을 기록하지 않았으면(comment) 그 이유를 보여 준다 */
+    function bodyHtml(body, emptyLabel) {
+      const note = body && body.comment
+        ? '<p class="body-note">' + esc(body.comment) + '</p>'
+        : '';
+      if (body && body.text) return note + '<pre class="body-pre">' + esc(tryPrettyJson(body.text)) + '</pre>';
+      return note || '<p style="padding:10px 12px;color:#80868b;font-size:11px">' + emptyLabel + '</p>';
+    }
+
     function tryPrettyJson(s) {
       try { return JSON.stringify(JSON.parse(s), null, 2); } catch(e) { return s; }
     }
@@ -830,7 +842,7 @@ export class UnifiedViewer {
       document.getElementById('pane-headers').innerHTML =
         '<div class="kv-section-head">General</div>' +
         '<table class="kv-table">' +
-        '<tr><td>URL</td><td>' + esc(e.request.url) + '</td></tr>' +
+        '<tr><td>URL</td><td>' + esc(showUrl(e.request.url)) + '</td></tr>' +
         '<tr><td>Method</td><td>' + esc(e.request.method) + '</td></tr>' +
         '<tr><td>Status</td><td>' + e.response.status + ' ' + esc(e.response.statusText || '') + '</td></tr>' +
         '</table>' +
@@ -839,21 +851,20 @@ export class UnifiedViewer {
 
       /* Payload pane */
       const body = e.request.postData;
-      document.getElementById('pane-payload').innerHTML = body
-        ? '<pre class="body-pre">' + esc(tryPrettyJson(body.text || '')) + '</pre>'
-        : '<p style="padding:10px 12px;color:#80868b;font-size:11px">No request body</p>';
+      document.getElementById('pane-payload').innerHTML = bodyHtml(body, 'No request body');
 
       /* Response pane */
-      const resText = e.response.content && e.response.content.text;
-      document.getElementById('pane-response').innerHTML = resText
-        ? '<pre class="body-pre">' + esc(tryPrettyJson(resText)) + '</pre>'
-        : '<p style="padding:10px 12px;color:#80868b;font-size:11px">No response body</p>';
+      document.getElementById('pane-response').innerHTML = bodyHtml(e.response.content, 'No response body');
 
       /* Timing pane */
       const t = e.timings || {};
       const total = e.time || 0;
+      /* qa-recorder는 전체 시간만 측정한다 (timings.comment) — 측정하지 않은 단계별 막대는 그리지 않는다 */
+      const phases = t.comment
+        ? [['Total', total]]
+        : [['Send', t.send || 0], ['Wait (TTFB)', t.wait || 0], ['Receive', t.receive || 0], ['Total', total]];
       document.getElementById('pane-timing').innerHTML =
-        [['Send', t.send || 0], ['Wait (TTFB)', t.wait || 0], ['Receive', t.receive || 0], ['Total', total]]
+        phases
           .map(([label, ms]) =>
             '<div class="timing-row">' +
             '<span class="timing-label">' + label + '</span>' +
@@ -861,7 +872,8 @@ export class UnifiedViewer {
               (total > 0 ? Math.round(ms / total * 100) : 0) + '%"></div></div>' +
             '<span class="timing-val">' + Math.round(ms) + ' ms</span>' +
             '</div>'
-          ).join('');
+          ).join('') +
+        (t.comment ? '<p class="timing-note">' + esc(t.comment) + '</p>' : '');
 
       /* Show panel & reset to Headers tab */
       netDetail.classList.add('visible');
@@ -909,7 +921,7 @@ export class UnifiedViewer {
     NET_ENTRIES.forEach((e) => {
       const failed = !e.response.status || e.response.status >= 400;
       addMarker(e._offsetMs || 0, failed ? 'tl-marker-err' : 'tl-marker-net',
-        e.request.method + ' ' + e.request.url + ' → ' + (e.response.status || 'failed'));
+        e.request.method + ' ' + showUrl(e.request.url) + ' → ' + (e.response.status || 'failed'));
     });
     CON_LOGS.forEach((e) => {
       if (e.level !== 'error' && e.level !== 'warn') return;

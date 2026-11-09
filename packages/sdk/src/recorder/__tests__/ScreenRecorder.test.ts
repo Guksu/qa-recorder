@@ -640,3 +640,151 @@ describe('ScreenRecorder 크기 제한 (maxReplaySize)', () => {
     expect(types(recorder.getRecentEvents())).toEqual([4, 2, 3]);
   });
 });
+
+describe('ScreenRecorder 저장 구간 (cutForSave / commitSave / rollbackSave)', () => {
+  type Emit = (event: unknown, isCheckout?: boolean) => void;
+  const emit: Emit = (event, isCheckout) => (mocks.record.mock.lastCall![0] as { emit: Emit }).emit(event, isCheckout);
+  const ev = (n: number) => ({ type: 3, data: { n }, timestamp: 1000 + n });
+  let checkouts = 0;
+  /** rrweb의 takeFullSnapshot(isCheckout)처럼 Meta(isCheckout) → FullSnapshot을 동기적으로 emit */
+  const checkout = () => {
+    checkouts++;
+    emit({ type: 4, data: { checkout: checkouts }, timestamp: 5000 + checkouts }, true);
+    emit({ type: 2, data: { checkout: checkouts }, timestamp: 5000 + checkouts });
+  };
+  const checkoutEvents = (n: number) => [
+    { type: 4, data: { checkout: n }, timestamp: 5000 + n },
+    { type: 2, data: { checkout: n }, timestamp: 5000 + n },
+  ];
+  const START = { type: 2, data: {}, timestamp: 1000 };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    checkouts = 0;
+    mocks.record.mockImplementation(({ emit: e }: { emit: Emit }) => {
+      e({ ...START });
+      return mocks.stopFn;
+    });
+    mocks.takeFullSnapshot.mockImplementation(() => checkout());
+  });
+
+  it('녹화를 멈추지 않고 지금까지의 이벤트를 잘라 내고, 그 뒤 이벤트는 새 구간에 쌓는다', () => {
+    const recorder = new ScreenRecorder();
+    recorder.start();
+    emit(ev(1));
+
+    const cut = recorder.cutForSave();
+    emit(ev(2));
+
+    expect(cut.events).toEqual([START, ev(1)]);
+    expect(mocks.stopFn).not.toHaveBeenCalled();
+    expect(mocks.takeFullSnapshot).toHaveBeenCalledWith(true);
+    expect(recorder.getEvents()).toEqual([START, ev(1), ...checkoutEvents(1), ev(2)]);
+  });
+
+  it('commitSave()는 잘라 낸 이벤트만 버리고 저장하는 동안의 이벤트는 남긴다', () => {
+    const recorder = new ScreenRecorder();
+    recorder.start();
+    emit(ev(1));
+    const cut = recorder.cutForSave();
+    emit(ev(2));
+
+    recorder.commitSave(cut);
+
+    expect(recorder.getEvents()).toEqual([...checkoutEvents(1), ev(2)]);
+  });
+
+  it('rollbackSave()는 잘라 낸 이벤트 전체(직전 구간 포함)를 중복 없이 되돌린다', () => {
+    const recorder = new ScreenRecorder();
+    recorder.start();
+    emit(ev(1));
+    checkout(); // 저장 전 자연 체크아웃: 직전 구간 = [START, ev1]
+    emit(ev(2));
+    const cut = recorder.cutForSave(); // 이 시점의 체크아웃이 [START, ev1]을 메모리에서 밀어낸다
+    emit(ev(3));
+
+    recorder.rollbackSave(cut);
+
+    const all = [START, ev(1), ...checkoutEvents(1), ev(2), ...checkoutEvents(2), ev(3)];
+    expect(recorder.getEvents()).toEqual(all);
+    // 다시 저장하면 되돌린 이벤트가 한 번씩만 들어간다
+    expect(recorder.cutForSave().events).toEqual(all);
+  });
+
+  it('저장하는 동안 체크아웃이 일어나도 rollbackSave()는 잘라 낸 이벤트를 앞에 붙이고 새 이벤트를 잃지 않는다', () => {
+    const recorder = new ScreenRecorder();
+    recorder.start();
+    emit(ev(1));
+    const cut = recorder.cutForSave(); // 구간: [checkout1]
+    emit(ev(2));
+    checkout(); // 저장 중 자연 체크아웃
+    emit(ev(3));
+
+    recorder.rollbackSave(cut);
+
+    expect(recorder.getEvents()).toEqual([START, ev(1), ...checkoutEvents(1), ev(2), ...checkoutEvents(2), ev(3)]);
+  });
+
+  it('저장하는 동안 체크아웃이 일어난 뒤의 commitSave()는 남은 구간을 버리지 않는다', () => {
+    const recorder = new ScreenRecorder();
+    recorder.start();
+    const cut = recorder.cutForSave();
+    emit(ev(2));
+    checkout();
+    emit(ev(3));
+
+    recorder.commitSave(cut);
+
+    expect(recorder.getEvents()).toEqual([...checkoutEvents(1), ev(2), ...checkoutEvents(2), ev(3)]);
+  });
+
+  it('실패가 반복돼도 되돌린 녹화는 다음 체크아웃 때 버려져 메모리가 끝없이 늘지 않는다', () => {
+    const recorder = new ScreenRecorder();
+    recorder.start();
+    for (let i = 0; i < 20; i++) {
+      emit(ev(i));
+      recorder.rollbackSave(recorder.cutForSave());
+    }
+    const beforeCheckout = recorder.getEvents().length;
+    expect(beforeCheckout).toBe(1 + 20 + 20 * 2); // START + 이벤트 20개 + 자를 때마다의 체크아웃 스냅샷
+
+    checkout();
+    checkout();
+    // 자연 체크아웃 두 번 뒤에는 마지막 두 구간만 남는다
+    expect(recorder.getEvents()).toEqual([...checkoutEvents(21), ...checkoutEvents(22)]);
+  });
+
+  it('rrweb이 체크아웃을 emit하지 않으면 record()를 다시 시작해 새 구간으로 나눈다', () => {
+    mocks.takeFullSnapshot.mockImplementation(() => { throw new Error('not recording'); });
+    const recorder = new ScreenRecorder();
+    recorder.start();
+    emit(ev(1));
+
+    const cut = recorder.cutForSave();
+    emit(ev(2));
+    recorder.commitSave(cut);
+
+    expect(mocks.stopFn).toHaveBeenCalledOnce();
+    expect(mocks.record).toHaveBeenCalledTimes(2);
+    expect(cut.events).toEqual([START, ev(1)]);
+    expect(recorder.getEvents()).toEqual([START, ev(2)]);
+  });
+
+  it('다시 start()한 뒤에는 이전 record()가 늦게 emit한 이벤트를 버린다', () => {
+    const recorder = new ScreenRecorder();
+    recorder.start();
+    const oldEmit = (mocks.record.mock.lastCall![0] as { emit: Emit }).emit;
+    recorder.stop();
+    oldEmit(ev(1)); // stop() 직후 throttle trailing 이벤트는 기존처럼 남는다
+    expect(recorder.getEvents()).toEqual([START, ev(1)]);
+
+    recorder.reset();
+    recorder.start();
+    oldEmit(ev(2)); // 새 녹화에는 섞이지 않는다
+    expect(recorder.getEvents()).toEqual([START]);
+  });
+
+  it('녹화 중이 아니면 cutForSave()는 throw한다', () => {
+    expect(() => new ScreenRecorder().cutForSave()).toThrow('No recording available');
+  });
+});

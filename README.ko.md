@@ -37,13 +37,13 @@
 | 기능 | 설명 |
 |---|---|
 | **DOM 세션 리플레이** | `MutationObserver` 기반 DOM 변화 캡처 (rrweb). 모바일, WebView, 모든 브라우저 지원 — `getDisplayMedia` 불필요. |
-| **네트워크 캡처** | `fetch`와 `XHR` 인터셉트. 최대 100건 순환 버퍼, HAR 1.2 포맷. |
+| **네트워크 캡처** | `fetch`와 `XHR` 인터셉트. 최대 100건 순환 버퍼, 표준 HAR 1.2 파일로 내보냄. 페이지에서 알 수 없는 값(HTTP 버전, 헤더 크기, 단계별 시간)은 그럴듯한 값으로 채우지 않고 알 수 없음으로 표시 — [HAR 출력](#har-출력) 참고. |
 | **콘솔 캡처** | `console.error`, `console.warn`(`consoleLevels`로 `log`, `info` 추가 가능), 잡히지 않은 에러, 처리되지 않은 Promise 거부를 자동 수집. 앱의 `window.onerror`는 건드리지 않음. |
 | **통합 QA 리포트** | 하나의 HTML 파일: 세션 리플레이(좌) + 네트워크 인스펙터, 콘솔 로그, 환경 정보(우). 시간 동기화 — 네트워크 행이나 콘솔 항목 클릭 시 해당 시점으로 즉시 이동. |
 | **네트워크 상세 패널** | 요청 행 클릭 시 Headers, Payload, Response, Timing 탭 — Chrome 개발자도구 스타일. |
 | **민감 정보 마스킹** | 비밀번호·토큰·API 키 등 민감 키(`maskKeys`)의 값을 요청 URL(쿼리와 fragment), JSON·form 요청/응답 body, 리플레이에 기록되는 페이지 URL에서 저장 전에 자동 마스킹하고, `Authorization`, `Cookie` 등 인증 헤더도 가림. 키 이름으로만 판별하므로 URL 경로나 다른 키의 값 안에 담긴 토큰(`?next=` 리다이렉트, 분석 도구로 보내는 페이지 URL 등)은 감지하지 못함 (`maskKeys` 참고). 페이지 DOM 안의 텍스트와 링크는 `maskKeys` 대상이 아니며, `maskAllInputs`·`maskTextSelector`로 리플레이의 입력값·텍스트를 가리고 `rr-block` 클래스를 붙인 요소는 리플레이에서 제외 (`blockSelector`는 아래 제약 참고). SDK 자체 UI(버튼, 버그 메모 입력 창 등)는 리플레이에 녹화되지 않음. |
-| **로컬 저장** | 리포트 파일을 ZIP 하나로 로컬에 다운로드 — 백엔드 불필요. |
-| **원격 업로드** | 서버 endpoint 설정 시 POST 업로드. 응답 URL이 있으면 링크 복사 버튼 노출. |
+| **로컬 저장** | 리포트 파일을 ZIP 하나로 로컬에 다운로드 — 백엔드 불필요. ZIP을 만드는 동안에도 녹화는 이어짐. |
+| **원격 업로드** | 서버 endpoint 설정 시 제한 시간(`uploadTimeout`) 안에 POST 업로드. 응답 URL이 있으면 링크 복사 버튼 노출, 실패하면 로컬 ZIP으로 대체 저장. 업로드하는 동안에도 녹화는 이어짐. |
 | **버그 메모** | 저장 시 입력하는 선택적 텍스트 메모 — 통합 HTML 리포트에 포함되고 원격 업로드 시 함께 전송. |
 | **환경 정보** | 브라우저(user agent), 언어, 시간대, 창·화면 크기, 기기 픽셀 비율, 페이지 URL(`maskKeys`로 마스킹), SDK 버전을 리포트마다 저장 — 리포트의 **Environment** 탭에 표시되고 `qa-env-*.json`으로 저장되며 원격 업로드 시 함께 전송. 문서 제목과 referrer는 수집하지 않음. |
 | **세션 연속성** | `enableBackup: true` 설정 시 탭 숨김 시 세션을 sessionStorage에 자동 저장하고 새로고침 후 조용히 복원 — 팝업 없음. 세션이 sessionStorage에 다 들어가지 않으면 더 작게 줄여서 백업 (`enableBackup` 참고). (탭을 닫으면 데이터가 삭제됩니다.) |
@@ -146,11 +146,13 @@ createApp(App).mount('#app');
 | `qa-env-{timestamp}.json` | 환경 정보 (브라우저, 언어, 시간대, 창 크기, 마스킹된 페이지 URL, SDK 버전) |
 | `qa-report-{timestamp}.html` | 통합 QA 리포트 — 세션 리플레이 + 네트워크 + 콘솔을 하나의 파일로 |
 
-저장에 실패하면 녹화 내용이 유지된 채 녹화가 이어지므로 다시 저장할 수 있습니다.
+저장하는 동안에도 녹화는 멈추지 않습니다. 버튼을 누른 시점까지의 기록을 저장하고, ZIP을 만드는 동안 페이지에서 일어난 일(DOM 변화, 요청, 콘솔 기록)은 다음 저장을 위해 남겨 둡니다. 저장에 성공하면 저장한 부분만 지우므로 연속으로 저장해도 기록이 겹치거나 빠지지 않습니다. 저장에 실패하면 아무것도 지우지 않고, 다음 저장에 실패한 부분이 중복 없이 함께 들어갑니다.
 
 ### 원격 업로드
 
-`endpoint`를 설정하면 파일을 서버로 전송합니다. 서버가 `url` 필드를 응답하면 링크 복사 버튼이 자동으로 표시됩니다. 업로드에 실패하면 같은 데이터를 로컬 ZIP으로 대신 다운로드하고, 이마저 실패하면 녹화 내용을 유지해 다시 시도할 수 있습니다.
+`endpoint`를 설정하면 파일을 서버로 전송합니다. 서버가 `url` 필드를 응답하면 링크 복사 버튼이 자동으로 표시됩니다. 업로드에 실패하면 — 오류 응답, 네트워크 오류, 또는 `uploadTimeout`(기본 2분) 안에 응답이 없을 때 — 같은 데이터를 로컬 ZIP으로 대신 다운로드하고, 이마저 실패하면 녹화 내용을 유지해 다시 시도할 수 있습니다. 로컬 저장과 마찬가지로 업로드하는 동안에도 녹화는 이어집니다.
+
+업로드 중에 `destroy()`를 호출하면 요청을 취소합니다. 이는 업로드 실패로 다루지 않으므로 ZIP을 내려받지 않고 안내도 띄우지 않으며, 서버의 늦은 응답도 아무 영향을 주지 않습니다.
 
 ```ts
 const recorder = new QARecorder({
@@ -170,12 +172,35 @@ await recorder.init();
 ```
 POST /upload
   session  →  qa-session-{timestamp}.rr.json
-  har      →  qa-network-{timestamp}.har
+  har      →  qa-network-{timestamp}.har     (표준 HAR 1.2: { "log": { ... } })
   console  →  qa-console-{timestamp}.json   (콘솔 로그)
   report   →  qa-report-{timestamp}.html    (통합 QA 리포트)
   env      →  qa-env-{timestamp}.json       (환경 정보)
   memo     →  (선택) 사용자가 입력한 버그 메모 텍스트
 ```
+
+### HAR 출력
+
+`qa-network-*.har`(ZIP 안의 파일과 업로드의 `har` 필드)는 표준 HAR 1.2 문서입니다. 테스트에서 HAR 1.2 JSON 스키마로 검증하므로 Chrome 개발자도구, HAR 분석기 등 HAR 도구에서 열 수 있습니다:
+
+```json
+{ "log": { "version": "1.2", "creator": { "name": "qa-recorder", "version": "…" }, "entries": [ … ], "comment": "…" } }
+```
+
+> **변경:** 이전 버전은 최상위 `log` 키 없이 log 객체(`{ "version", "creator", "entries" }`)를 그대로 저장했습니다. 서버에서 업로드된 `har` 필드를 읽는다면 `har.entries` 대신 `har.log.entries`를 읽으세요.
+
+SDK는 페이지 안에서 요청을 캡처하므로 알 수 없는 정보가 있습니다. 이런 값은 그럴듯한 값으로 채우지 않고 알 수 없음으로 표시합니다:
+
+| 필드 | 값 | 이유 |
+|---|---|---|
+| `request/response.httpVersion` | `""` | `fetch`/XHR는 프로토콜(HTTP/1.1, h2, h3)을 알려 주지 않습니다. |
+| `headersSize`, `response.bodySize` | `-1` | 헤더 크기와 전송된(압축됐을 수 있는) 본문 크기는 페이지에서 알 수 없습니다. |
+| `response.content.size` | 디코딩한 본문의 바이트 수 또는 `-1` | 본문을 끝까지 읽었을 때만 압니다. 읽지 않은 바이너리 본문과 `maxBodySize`에서 잘린 본문은 `-1`. |
+| `request.bodySize` | 보낸 바이트 수, 본문이 없으면 `0`, 또는 `-1` | 페이지가 크기를 알 수 없는 본문(`FormData`, 스트림 등)은 `-1`. |
+| `cookies` | `[]` | 쿠키는 캡처하지 않습니다 (`Cookie`/`Set-Cookie`는 페이지에서 읽을 수 없고 어차피 마스킹 대상). |
+| `timings` | `send: 0`, `wait: time`, `receive: 0`, 나머지 `-1`, 그리고 `comment` | 전체 시간만 측정합니다 (fetch: 응답 헤더를 받을 때까지, XHR: `loadend`까지). HAR은 `send`/`wait`/`receive`의 합이 `time`이어야 하므로 전체를 `wait`에 넣고, `comment`로 단계별 값을 측정하지 않았음을 밝힙니다. |
+
+기록하지 않은 본문(바이너리, 텍스트가 아닌 요청 본문)은 `text` 없이 `comment`로 이유를 알리고, `maxBodySize`에서 잘린 본문은 캡처한 텍스트를 담고 잘렸음을 `comment`에 적습니다. 가린 값은 `[MASKED]`로 표시합니다 (URL은 유효한 URI여야 하므로 URL 안에서는 `%5BMASKED%5D`로 인코딩). 각 엔트리에는 리포트 타임라인용 사용자 정의 필드 `_offsetMs`(녹화 시작부터 지난 ms)도 남습니다.
 
 ---
 
@@ -186,6 +211,7 @@ POST /upload
 ```ts
 window.__QA_RECORDER_CONFIG__ = {
   endpoint: '',              // 원격 업로드 URL. 비워두면 로컬 저장 (기본값).
+  uploadTimeout: 120000,     // 업로드 한 번의 제한 시간(ms) (기본값: 2분). 0 또는 Infinity면 제한 없음.
   maxRequests: 100,          // 순환 버퍼 최대 기록 수 (기본값: 100).
   maxBodySize: 102400,       // 요청/응답 body 하나에 저장할 최대 글자 수 (기본값: 약 100K). 0이면 body 저장 안 함.
   maskHeaders: [             // 저장 전 마스킹할 헤더 (기본값 표시).
@@ -218,6 +244,7 @@ window.__QA_RECORDER_CONFIG__ = {
 | 옵션 | 타입 | 기본값 | 설명 |
 |---|---|---|---|
 | `endpoint` | `string` | `''` | 원격 업로드 URL. 비어있으면 로컬 다운로드. |
+| `uploadTimeout` | `number` | `120000` | `endpoint`로 업로드 한 번에 허용하는 시간(ms) — 요청을 보낸 뒤 응답 본문을 다 읽을 때까지. 넘기면 요청을 취소하고 업로드 실패로 다룹니다 (로컬 ZIP으로 대체 저장). `0` 또는 `Infinity`면 제한하지 않습니다. 진행 중인 업로드는 `destroy()`하면 대체 저장 없이 항상 취소됩니다. |
 | `maxRequests` | `number` | `100` | 순환 버퍼에 유지할 최대 네트워크 기록 수. |
 | `maxBodySize` | `number` | `102400` | 요청/응답 body 하나에 저장할 최대 글자 수 (ASCII 텍스트면 바이트 수와 거의 같음). 넘으면 앞부분만 저장하고 끝에 `…[truncated by qa-recorder …]`를 붙임. fetch 응답은 이 길이까지만 읽으므로 큰 다운로드나 끝나지 않는 스트림(SSE 등)이 메모리에 쌓이지 않음. 바이너리 응답(이미지, 오디오, 영상, 폰트, PDF, ZIP, octet-stream)은 읽지 않고 `"[binary]"`로 기록. `maskKeys` 마스킹은 자르기 전에 적용하며, 잘린 응답은 읽은 데까지 키 단위로 마스킹. `0`이면 body를 저장하지 않고, `Infinity`면 자르지 않음. |
 | `maskHeaders` | `string[]` | `['Authorization', 'Cookie', 'Set-Cookie', 'Proxy-Authorization', 'X-API-Key', 'X-Auth-Token', 'X-CSRF-Token', 'X-XSRF-Token']` | 마스킹할 헤더 이름 목록 (대소문자 무시). 지정하면 기본 목록을 대체. |
@@ -234,6 +261,14 @@ window.__QA_RECORDER_CONFIG__ = {
 
 ---
 
+## 수명 주기와 TypeScript
+
+`QARecorder.setup()`은 싱글톤을 만들고, `new QARecorder(config)` + `init()`은 직접 관리하는 인스턴스를 만듭니다. `destroy()`는 녹화를 끝내고 인스턴스가 추가한 것을 모두 정리합니다: `fetch`/`XHR`/`console` 패치(아직 녹화기의 패치일 때만 — 그 위에 다른 라이브러리가 감싼 패치는 남겨 둠), `error`/`unhandledrejection`/`pagehide` 리스너, 버튼, 열려 있는 저장 확인창, 진행 막대, 공유 패널. 진행 중인 업로드나 로컬 저장은 취소되고, 그 늦은 완료가 녹화를 다시 시작하거나 UI를 띄우지 않습니다. 그 뒤 `init()`(싱글톤이면 `setup()`)을 다시 호출하면 새 녹화가 시작되며, 이전 녹화의 기록은 섞이지 않습니다.
+
+패키지는 자체 타입 선언을 포함합니다 (다른 패키지 불필요). `QARecorder`, `QARecorderConfig` 외에 HAR 타입(`HARDocument`, `HARLog`, `HAREntry` …), `RecorderMode`, `ConsoleEntry`, `ConsoleLevel`을 export하므로 `getNetworkEntries()` 결과나 업로드된 파일의 타입으로 쓸 수 있습니다. `rrweb`과 `fflate`는 빌드에 포함되어 있어 런타임 의존성이 없습니다.
+
+---
+
 ## 동작 원리
 
 ```
@@ -246,18 +281,18 @@ QARecorder.setup() / init()
 
 플로팅 버튼 클릭
   ├─ ConfirmModal.show()        → { confirmed, memo }
-  │   └─ [취소] → no-op
-  ├─ ScreenRecorder.stop()
-  ├─ NetworkCapture.snapshot()  → HAR 1.2 JSON 생성
-  ├─ ConsoleCapture.snapshot()  → 콘솔 엔트리 배열 생성
+  │   └─ [취소 또는 destroy()] → no-op
+  ├─ 저장할 데이터 잘라 내기       → 녹화는 계속된다:
+  │   ├─ ScreenRecorder.cutForSave()  → 지금까지의 이벤트, 지금부터 새 구간(전체 스냅샷) 시작
+  │   ├─ NetworkCapture.snapshot()    → 지금까지의 엔트리 (새 요청은 계속 기록)
+  │   └─ ConsoleCapture.snapshot()    → 지금까지의 엔트리
+  ├─ HARBuilder.build()         → 표준 HAR 1.2 문서
   ├─ collectEnvironment()       → 브라우저, 화면, 마스킹된 페이지 URL, SDK 버전
   ├─ ProgressBar.show()         → "Saving..."
   │
   ├─ [endpoint 설정된 경우]
-  │   ├─ RemoteDelivery.send()  → POST multipart/form-data
-  │   │   └─ [업로드 실패] → 대신 LocalStorage.save()
-  │   ├─ ProgressBar.hide()
-  │   └─ SharePanel.show(url)   → 링크 복사 버튼 (서버가 url 반환 시)
+  │   └─ RemoteDelivery.send()  → POST multipart/form-data (uploadTimeout이 지나거나 destroy()하면 취소)
+  │       └─ [업로드 실패·시간 초과] → 대신 LocalStorage.save()
   │
   ├─ [endpoint 없는 경우]
   │   └─ LocalStorage.save()    → ZIP 파일 1개 다운로드:
@@ -267,10 +302,10 @@ QARecorder.setup() / init()
   │                                  ├─ qa-env-*.json
   │                                  └─ qa-report-*.html  ← 통합 QA 리포트
   │
-  ├─ [저장 성공] ScreenRecorder.reset() + start()   → 녹화 자동 재시작
-  │             NetworkCapture.clearBuffer()       → 네트워크 로그 초기화
-  │             ConsoleCapture.clearBuffer()       → 콘솔 로그 초기화
-  └─ [저장 실패] ScreenRecorder.resume()            → 녹화 내용을 유지해 다시 저장할 수 있음
+  ├─ [그 사이 destroy()] → 여기서 끝: 버퍼·UI를 건드리지 않고 대체 다운로드도 없음
+  ├─ [저장 성공] 저장한 부분만 지움 — 저장하는 동안 기록된 것은 다음 저장을 위해 남김
+  ├─ [저장 실패] 아무것도 지우지 않음 — 다음 저장에 실패한 부분이 중복 없이 다시 들어감
+  └─ 진행 막대 숨김 → SharePanel(업로드 응답에 url이 있을 때) 또는 alert(대체 저장·실패)
 ```
 
 ---
@@ -293,12 +328,13 @@ QARecorder.setup() / init()
 | **Headers** | General (URL, 메서드, 상태) · 요청 헤더 · 응답 헤더 |
 | **Payload** | Query String 파라미터 · 요청 본문 (JSON pretty-print 포함) |
 | **Response** | 응답 본문 (JSON pretty-print 포함) |
-| **Timing** | Send / Wait(TTFB) / Receive 막대 차트 |
+| **Timing** | 요청의 전체 시간. 단계별 시간은 페이지에서 측정하지 않으므로 그리지 않음 (이전 버전이 만든 리포트는 기존처럼 Send / Wait / Receive 막대를 표시) |
 
 - URL 필터 검색으로 요청 빠르게 찾기
 - 행 클릭 시 **해당 시점으로 즉시 이동**
 - 재생 중 현재 활성 요청 강조 표시
 - 실패한 요청(status 0: 네트워크 오류, CORS, 중단)은 빨간색 `failed`로 표시
+- 기록하지 않은 본문(바이너리, `FormData`)은 본문 대신 그 이유를 표시
 
 ### 콘솔 로그 (오른쪽 패널 — Console 탭)
 
@@ -335,13 +371,19 @@ QARecorder.setup() / init()
 ```bash
 pnpm install
 
-pnpm build                    # 전체 패키지 빌드 (shared → sdk 순서)
-pnpm typecheck                # 전체 패키지 타입 검사
-pnpm -F qa-recorder test      # 테스트 실행 (Vitest + jsdom)
-pnpm -F qa-recorder build     # ESM + UMD 빌드
-pnpm -F qa-recorder dev       # watch 모드
-pnpm -F qa-recorder demo      # 로컬 데모 서버 (http://localhost:5173)
+pnpm build                            # SDK 빌드 (ESM + UMD + 타입 선언 → packages/sdk/dist/)
+pnpm typecheck                        # SDK와 E2E 테스트 타입 검사
+pnpm -F qa-recorder test              # 단위 테스트 (Vitest + jsdom)
+pnpm -F qa-recorder dev               # watch 모드
+pnpm -F qa-recorder demo              # 로컬 데모 서버 (http://localhost:5173)
+pnpm -F qa-recorder verify:package    # 빌드 후: SDK를 패키징해 저장소 밖 독립 프로젝트에 설치하고
+                                      # skipLibCheck 없이 타입 검사
+pnpm -F qa-recorder test:e2e          # 빌드 후: Chromium 브라우저 E2E (Playwright)
 ```
+
+- **데모:** `pnpm demo`는 npm 배포본이 아니라 현재 체크아웃의 SDK(`packages/sdk/src`, Vite 경유)를 씁니다. 페이지 상단 배지에 버전과 커밋이 표시됩니다. [라이브 데모](https://guksu.github.io/qa-recorder/)는 배포한 커밋에서 빌드한 SDK를 쓰며(같은 방식으로 표시), npm 릴리스보다 앞설 수 있습니다.
+- **E2E:** 빌드한 SDK, 작은 테스트 앱, 로컬 API, 느림·실패·무응답 모드가 있는 업로드 endpoint를 제공하는 로컬 fixture 서버(`packages/sdk/e2e/fixture-server.mjs`)로 실행합니다 — 외부 서비스에 의존하지 않습니다. 리포트의 rrweb 스크립트는 같은 버전의 npm 파일로 응답하고, 브라우저는 그대로 무결성(SRI)을 검사합니다. 브라우저는 처음에 `pnpm -F qa-recorder exec playwright install chromium`으로 설치합니다.
+- **CI**(`.github/workflows/ci.yml`)는 풀 리퀘스트마다 타입 검사, 단위 테스트, 빌드, 패키지 검증, Chromium E2E를 실행합니다.
 
 ---
 

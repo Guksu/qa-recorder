@@ -30,10 +30,46 @@ jobs:
         with:
           enablement: true
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build SDK
+        run: pnpm -F qa-recorder build
+
+      # 데모는 npm·CDN의 배포본이 아니라 이 커밋에서 빌드한 SDK를 쓴다 (demo/index.html의 ./sdk/qa-recorder.esm.js).
+      # 어떤 빌드인지 데모 상단에 보이도록 sdk/build-info.json에 버전과 커밋을 기록한다.
+      - name: Assemble site
+        run: |
+          mkdir -p _site/sdk
+          cp -R packages/sdk/demo/. _site/
+          cp packages/sdk/dist/qa-recorder.esm.js packages/sdk/dist/qa-recorder.esm.js.map _site/sdk/
+          node -e '
+            const fs = require("fs");
+            const { version } = require("./packages/sdk/package.json");
+            fs.writeFileSync("_site/sdk/build-info.json", JSON.stringify({
+              version,
+              source: "Built from this commit by the Deploy Demo workflow (not the npm release)",
+              commit: process.env.GITHUB_SHA,
+              dirty: false,
+            }, null, 2));
+          '
+          cat _site/sdk/build-info.json
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: packages/sdk/demo
+          path: _site
 
       - name: Deploy to GitHub Pages
         id: deployment

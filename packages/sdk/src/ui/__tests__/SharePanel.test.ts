@@ -129,3 +129,15 @@ describe('SharePanel', () => {
     expect(() => SharePanel.hide()).not.toThrow();
   });
 });
+
+describe('SharePanel.show — 닫기 함수', () => {
+  it('다른 호출이 패널을 교체했으면 이전 닫기 함수는 새 패널을 닫지 않는다', () => {
+    document.body.innerHTML = '';
+    const dismissOld = SharePanel.show('https://example.com/old');
+    const dismissNew = SharePanel.show('https://example.com/new');
+    dismissOld();
+    expect(document.querySelector('[data-qa="share-panel"]')).not.toBeNull();
+    dismissNew();
+    expect(document.querySelector('[data-qa="share-panel"]')).toBeNull();
+  });
+});
