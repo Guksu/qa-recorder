@@ -410,12 +410,12 @@ pnpm -F qa-recorder dev               # watch mode
 pnpm -F qa-recorder demo              # local demo server (http://localhost:5173)
 pnpm -F qa-recorder verify:package    # after build: pack the SDK, install it into a standalone project
                                       # outside the repo and type-check it without skipLibCheck
-pnpm -F qa-recorder test:e2e          # after build: browser E2E in Chromium (Playwright)
+pnpm -F qa-recorder test:e2e          # after build: browser E2E in Chromium, Firefox and WebKit (Playwright)
 ```
 
 - **Demo:** `pnpm demo` runs the SDK from the current checkout (`packages/sdk/src`, through Vite), not the published npm package; the badge at the top of the page shows the version and commit. The [live demo](https://guksu.github.io/qa-recorder/) runs the SDK built from the commit it was deployed from (shown the same way), which may be ahead of the npm release.
-- **E2E:** the tests run against a local fixture server (`packages/sdk/e2e/fixture-server.mjs`) that serves the built SDK, a small test app, local API endpoints and an upload endpoint with slow, failing and hanging modes — no external services. The report's rrweb script is answered from the npm package of the same version, and the browser still checks its integrity (SRI). Install the browser once with `pnpm -F qa-recorder exec playwright install chromium`.
-- **CI** (`.github/workflows/ci.yml`) runs type checks, unit tests, the build, the packed-package check and the Chromium E2E tests on every pull request.
+- **E2E:** the tests run against a local fixture server (`packages/sdk/e2e/fixture-server.mjs`) that serves the built SDK, a small test app, local API endpoints and an upload endpoint with slow, failing and hanging modes — no external services. The report's rrweb script is answered from the npm package of the same version, and the browser still checks its integrity (SRI). Install the browsers once with `pnpm -F qa-recorder exec playwright install chromium firefox webkit`; to run only some of them, use `--project=chromium` or `E2E_BROWSERS=chromium,firefox`.
+- **CI** (`.github/workflows/ci.yml`) runs type checks, unit tests, the build, the packed-package check, and the E2E tests in Chromium, Firefox and WebKit (one job per browser) on every pull request.
 
 ---
 

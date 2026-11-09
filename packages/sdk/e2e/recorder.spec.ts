@@ -152,7 +152,7 @@ test('녹화 → 로컬 ZIP 저장: rr.json·표준 HAR·환경 정보·리포�
   expect(har.log.entries[1].request.postData?.text).toBe('{"hello":"world","password":"[MASKED]"}');
 
   const env = JSON.parse(pick(files, /qa-env-.*\.json$/)) as { url: string; userAgent: string };
-  expect(env.userAgent).toContain('Chrome');
+  expect(env.userAgent).toBe(await page.evaluate(() => navigator.userAgent)); // 이 브라우저의 user agent
   const report = pick(files, /qa-report-.*\.html$/);
   expect(report).toContain('checkout button does nothing');
 
