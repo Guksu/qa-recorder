@@ -49,8 +49,19 @@ jobs:
         run: pnpm -F qa-recorder verify:package
 
   e2e:
-    name: Browser E2E (Chromium)
+    # 브라우저마다 job을 나눈다. Chromium job 이름은 예전과 같다 (필수 체크 설정이 있으면 그대로 맞는다)
+    name: Browser E2E (${{ matrix.label }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - browser: chromium
+            label: Chromium
+          - browser: firefox
+            label: Firefox
+          - browser: webkit
+            label: WebKit
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -73,11 +84,11 @@ jobs:
       - name: Build
         run: pnpm -F qa-recorder build
 
-      - name: Install Chromium
-        run: pnpm -F qa-recorder exec playwright install --with-deps chromium
+      - name: Install ${{ matrix.label }}
+        run: pnpm -F qa-recorder exec playwright install --with-deps ${{ matrix.browser }}
 
       - name: Run E2E
-        run: pnpm -F qa-recorder test:e2e
+        run: pnpm -F qa-recorder test:e2e --project=${{ matrix.browser }}
         env:
           CI: 'true'
 
@@ -85,6 +96,6 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.browser }}
           path: packages/sdk/playwright-report
           retention-days: 7

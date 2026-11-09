@@ -414,12 +414,12 @@ pnpm -F qa-recorder dev               # watch 모드
 pnpm -F qa-recorder demo              # 로컬 데모 서버 (http://localhost:5173)
 pnpm -F qa-recorder verify:package    # 빌드 후: SDK를 패키징해 저장소 밖 독립 프로젝트에 설치하고
                                       # skipLibCheck 없이 타입 검사
-pnpm -F qa-recorder test:e2e          # 빌드 후: Chromium 브라우저 E2E (Playwright)
+pnpm -F qa-recorder test:e2e          # 빌드 후: Chromium·Firefox·WebKit 브라우저 E2E (Playwright)
 ```
 
 - **데모:** `pnpm demo`는 npm 배포본이 아니라 현재 체크아웃의 SDK(`packages/sdk/src`, Vite 경유)를 씁니다. 페이지 상단 배지에 버전과 커밋이 표시됩니다. [라이브 데모](https://guksu.github.io/qa-recorder/)는 배포한 커밋에서 빌드한 SDK를 쓰며(같은 방식으로 표시), npm 릴리스보다 앞설 수 있습니다.
-- **E2E:** 빌드한 SDK, 작은 테스트 앱, 로컬 API, 느림·실패·무응답 모드가 있는 업로드 endpoint를 제공하는 로컬 fixture 서버(`packages/sdk/e2e/fixture-server.mjs`)로 실행합니다 — 외부 서비스에 의존하지 않습니다. 리포트의 rrweb 스크립트는 같은 버전의 npm 파일로 응답하고, 브라우저는 그대로 무결성(SRI)을 검사합니다. 브라우저는 처음에 `pnpm -F qa-recorder exec playwright install chromium`으로 설치합니다.
-- **CI**(`.github/workflows/ci.yml`)는 풀 리퀘스트마다 타입 검사, 단위 테스트, 빌드, 패키지 검증, Chromium E2E를 실행합니다.
+- **E2E:** 빌드한 SDK, 작은 테스트 앱, 로컬 API, 느림·실패·무응답 모드가 있는 업로드 endpoint를 제공하는 로컬 fixture 서버(`packages/sdk/e2e/fixture-server.mjs`)로 실행합니다 — 외부 서비스에 의존하지 않습니다. 리포트의 rrweb 스크립트는 같은 버전의 npm 파일로 응답하고, 브라우저는 그대로 무결성(SRI)을 검사합니다. 브라우저는 처음에 `pnpm -F qa-recorder exec playwright install chromium firefox webkit`으로 설치합니다. 일부만 실행하려면 `--project=chromium`이나 `E2E_BROWSERS=chromium,firefox`를 씁니다.
+- **CI**(`.github/workflows/ci.yml`)는 풀 리퀘스트마다 타입 검사, 단위 테스트, 빌드, 패키지 검증, Chromium·Firefox·WebKit E2E(브라우저마다 job 하나)를 실행합니다.
 
 ---
 

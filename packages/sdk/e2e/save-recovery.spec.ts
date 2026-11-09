@@ -267,25 +267,40 @@ test('앱이 열린 스트림을 reader.cancel()하면 연결이 닫히고, 받�
   expect(entry.response.content.comment).toMatch(/app cancelled the response body/);
 });
 
-test('녹화 중에도 앱은 응답 본문을 BYOB reader와 pipeThrough로 그대로 읽는다', async ({ page }) => {
-  await start(page, {});
-  const result = await page.evaluate(async () => {
-    const byob = (await fetch('/api/items')).body!.getReader({ mode: 'byob' });
+test('녹화 중에도 앱은 응답 본문을 BYOB reader(브라우저가 지원하면)와 pipeThrough로 그대로 읽는다', async ({ page }) => {
+  /** 이 브라우저의 fetch 본문에서 BYOB reader로 다 읽은 바이트 수 (지원하지 않으면 null) */
+  const readByob = () => page.evaluate(async () => {
+    const body = (await fetch('/api/items')).body!;
+    let byob: ReadableStreamBYOBReader;
+    try {
+      byob = body.getReader({ mode: 'byob' });
+    } catch {
+      await body.cancel();
+      return null;
+    }
     let bytes = 0;
     for (;;) {
       const { done, value } = await byob.read(new Uint8Array(8));
       if (done) break;
       bytes += value!.byteLength;
     }
+    return bytes;
+  });
+  await page.goto('/');
+  const nativeByob = await readByob(); // 녹화기 없이
+  await start(page, {}, false);
+  // 녹화 중에도 녹화기가 없을 때와 같다 (지원하면 같은 바이트 수, 지원하지 않으면 그대로 지원하지 않음)
+  expect(await readByob()).toBe(nativeByob);
+
+  const text = await page.evaluate(async () => {
     const piped = (await fetch('/api/items')).body!.pipeThrough(new TextDecoderStream());
-    let text = '';
+    let out = '';
     for (const reader = piped.getReader(); ;) {
       const { done, value } = await reader.read();
       if (done) break;
-      text += value;
+      out += value;
     }
-    return { bytes, text };
+    return out;
   });
-  expect(result.bytes).toBe(JSON.stringify({ items: [{ id: 1, name: 'apple' }, { id: 2, name: 'pear' }] }).length);
-  expect(JSON.parse(result.text).items).toHaveLength(2);
+  expect(JSON.parse(text).items).toHaveLength(2);
 });
