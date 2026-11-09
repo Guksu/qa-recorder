@@ -80,7 +80,8 @@ describe('body 크기 제한', () => {
 
       expect(entry.response.content.text).not.toContain('SECRET-TOKEN-VALUE');
       expect(entry.response.content.text.startsWith('{"user":"kim","token":"[MASKED]","items":"xxx')).toBe(true);
-      expect(entry.response.content.size).toBe(body.length); // Content-Length 사용
+      // Content-Length는 전송(압축될 수 있는) 크기라 디코딩한 본문 크기로 쓰지 않는다 — 끝까지 읽지 않았으므로 알 수 없음
+      expect(entry.response.content.size).toBe(-1);
       capture.stop();
     });
 

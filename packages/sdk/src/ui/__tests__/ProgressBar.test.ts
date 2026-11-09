@@ -61,3 +61,21 @@ describe('ProgressBar', () => {
     expect(() => ProgressBar.hide()).not.toThrow();
   });
 });
+
+describe('ProgressBar.show — 닫기 함수', () => {
+  it('자신이 띄운 막대만 닫고, 이미 떠 있던 막대는 닫지 않는다', () => {
+    document.body.innerHTML = '';
+    const dismissFirst = ProgressBar.show('first');
+    const dismissSecond = ProgressBar.show('second'); // 이미 표시 중 — 새로 띄우지 않는다
+    dismissSecond();
+    expect(document.querySelector('[data-qa="progress-bar"]')).not.toBeNull();
+    dismissFirst();
+    expect(document.querySelector('[data-qa="progress-bar"]')).toBeNull();
+
+    const dismissStale = dismissFirst;
+    const dismissThird = ProgressBar.show('third');
+    dismissStale(); // 이미 닫은 막대의 닫기 함수는 새 막대를 닫지 않는다
+    expect(document.querySelector('[data-qa="progress-bar"]')).not.toBeNull();
+    dismissThird();
+  });
+});

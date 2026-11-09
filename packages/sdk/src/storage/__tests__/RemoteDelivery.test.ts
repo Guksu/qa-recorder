@@ -1,12 +1,15 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { RemoteDelivery } from '../RemoteDelivery.js';
-import type { HARLog } from '@qa-recorder/shared';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { RemoteDelivery, UploadTimeoutError } from '../RemoteDelivery.js';
+import { isAbortError } from '../../core/abort.js';
+import type { HARDocument } from '../../types/har.js';
 
-function makeHARLog(): HARLog {
+function makeHARLog(): HARDocument {
   return {
-    version: '1.2',
-    creator: { name: 'qa-recorder', version: '0.1.0' },
-    entries: [],
+    log: {
+      version: '1.2',
+      creator: { name: 'qa-recorder', version: '0.1.0' },
+      entries: [],
+    },
   };
 }
 
@@ -166,5 +169,90 @@ describe('RemoteDelivery.send', () => {
       expect(body.get('report')).toBeNull();
       expect(body.get('env')).toBeNull();
     });
+  });
+});
+
+describe('RemoteDelivery.send — 시간 제한과 취소', () => {
+  /** 신호로 취소될 때까지 끝나지 않는 fetch (실제 fetch처럼 AbortError로 끝난다) */
+  function hangingFetch() {
+    return vi.fn((_url: string, init: RequestInit) => new Promise<Response>((_, reject) => {
+      init.signal!.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+    }));
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('timeout을 넘기면 요청을 취소하고 UploadTimeoutError로 실패한다', async () => {
+    vi.useFakeTimers();
+    const fetchMock = hangingFetch();
+    vi.stubGlobal('fetch', fetchMock);
+    const promise = new RemoteDelivery('https://example.com/upload').send(null, makeHARLog(), '', {}, { timeout: 30_000 });
+    const assertion = expect(promise).rejects.toMatchObject({ name: 'UploadTimeoutError', message: 'timed out after 30 s' });
+    await vi.advanceTimersByTimeAsync(30_000);
+    await assertion;
+    await expect(promise).rejects.toBeInstanceOf(UploadTimeoutError);
+    expect((fetchMock.mock.calls[0][1] as RequestInit).signal!.aborted).toBe(true);
+  });
+
+  it('응답 본문을 읽는 동안에도 timeout이 적용된다', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', vi.fn((_url: string, init: RequestInit) => Promise.resolve({
+      ok: true,
+      json: () => new Promise((_, reject) => {
+        init.signal!.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+      }),
+    } as unknown as Response)));
+    const promise = new RemoteDelivery('https://example.com/upload').send(null, makeHARLog(), '', {}, { timeout: 1_000 });
+    const assertion = expect(promise).rejects.toBeInstanceOf(UploadTimeoutError);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await assertion;
+  });
+
+  it('호출한 쪽이 취소하면 AbortError로 실패한다 (시간 초과와 구분)', async () => {
+    vi.stubGlobal('fetch', hangingFetch());
+    const controller = new AbortController();
+    const promise = new RemoteDelivery('https://example.com/upload')
+      .send(null, makeHARLog(), '', {}, { timeout: 60_000, signal: controller.signal });
+    controller.abort();
+    const err = await promise.catch((e: unknown) => e);
+    expect(isAbortError(err)).toBe(true);
+    expect(err).not.toBeInstanceOf(UploadTimeoutError);
+  });
+
+  it('이미 취소된 신호면 요청을 보내지 않는다', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+    controller.abort();
+    const err = await new RemoteDelivery('https://example.com/upload')
+      .send(null, makeHARLog(), '', {}, { signal: controller.signal }).catch((e: unknown) => e);
+    expect(isAbortError(err)).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('timeout이 0이면 시간 제한 없이 기다린다', async () => {
+    vi.useFakeTimers();
+    let resolveFetch!: (r: Response) => void;
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((r) => { resolveFetch = r; })));
+    const promise = new RemoteDelivery('https://example.com/upload').send(null, makeHARLog(), '', {}, { timeout: 0 });
+    await vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1000);
+    resolveFetch(new Response('{"url":"https://example.com/share/1"}'));
+    await expect(promise).resolves.toBe('https://example.com/share/1');
+  });
+
+  it('응답의 url이 문자열이 아니면 무시한다', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{"url":{"x":1}}')));
+    await expect(new RemoteDelivery('https://example.com/upload').send(null, makeHARLog())).resolves.toBeUndefined();
+  });
+
+  it('har 필드는 표준 HAR 문서({ log })를 그대로 담는다', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}')));
+    const har = makeHARLog();
+    await new RemoteDelivery('https://example.com/upload').send(null, har);
+    const body = (fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body as FormData;
+    expect(JSON.parse(await (body.get('har') as Blob).text())).toEqual(har);
   });
 });

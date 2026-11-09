@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { JSDOM } from 'jsdom';
 import { UnifiedViewer } from '../UnifiedViewer.js';
-import type { HARLog, HAREntry } from '@qa-recorder/shared';
+import type { HARLog, HAREntry } from '../../types/har.js';
 import type { ConsoleEntry } from '../../console/ConsoleCapture.js';
 
 function makeEntry(url = 'https://api.example.com/users'): HAREntry {

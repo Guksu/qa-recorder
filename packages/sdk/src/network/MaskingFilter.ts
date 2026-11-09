@@ -1,4 +1,4 @@
-import type { HAREntry, HARNameValue } from '@qa-recorder/shared';
+import type { HAREntry, HARNameValue } from '../types/har.js';
 
 const MASKED = '[MASKED]';
 
@@ -56,7 +56,7 @@ export class MaskingFilter {
         content: { ...response.content },
       },
     };
-    if (request.postData) {
+    if (request.postData?.text !== undefined) {
       masked.request.postData = {
         ...request.postData,
         text: MaskingFilter.maskBody(request.postData.text, request.postData.mimeType, isSensitiveKey),

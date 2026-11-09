@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { LocalStorage } from '../LocalStorage.js';
-import type { HARLog } from '@qa-recorder/shared';
+import type { HARDocument } from '../../types/har.js';
 
 const mocks = vi.hoisted(() => ({
   zipSync: vi.fn(),
@@ -21,11 +21,13 @@ vi.mock('fflate', () => ({
 const zipSucceeds = (_entries: unknown, cb: (err: Error | null, data: Uint8Array) => void) =>
   cb(null, new Uint8Array(4));
 
-function makeHARLog(): HARLog {
+function makeHARLog(): HARDocument {
   return {
-    version: '1.2',
-    creator: { name: 'qa-recorder', version: '0.1.0' },
-    entries: [],
+    log: {
+      version: '1.2',
+      creator: { name: 'qa-recorder', version: '0.1.0' },
+      entries: [],
+    },
   };
 }
 
@@ -209,5 +211,32 @@ describe('LocalStorage.save', () => {
       await p;
       expect(mocks.zip).toHaveBeenCalledOnce();
     });
+  });
+});
+
+describe('LocalStorage.save — 취소', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('다운로드 전에 취소되면 다운로드하지 않고 AbortError로 실패한다', async () => {
+    mocks.zip.mockReset();
+    mocks.zip.mockImplementation(zipSucceeds);
+    const click = vi.fn();
+    vi.stubGlobal('URL', { createObjectURL: vi.fn(() => 'blob:x'), revokeObjectURL: vi.fn() });
+    const realCreate = document.createElement.bind(document);
+    vi.spyOn(document, 'createElement').mockImplementation((tag: string) =>
+      tag === 'a' ? ({ click } as unknown as HTMLAnchorElement) : realCreate(tag));
+    const controller = new AbortController();
+
+    const promise = LocalStorage.save(makeEvents(), makeHARLog(), [], '', undefined, { signal: controller.signal });
+    controller.abort(); // 다음 화면 그리기를 기다리는 동안 취소
+    const err = await promise.catch((e: unknown) => e);
+
+    expect((err as Error).name).toBe('AbortError');
+    expect(click).not.toHaveBeenCalled();
+    expect(mocks.zip).not.toHaveBeenCalled();
   });
 });

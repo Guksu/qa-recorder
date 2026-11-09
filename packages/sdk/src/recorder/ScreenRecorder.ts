@@ -5,6 +5,15 @@ import { MaskingFilter, type KeyMatcher } from '../network/MaskingFilter.js';
 export type RecorderState = 'idle' | 'recording' | 'stopped';
 
 /**
+ * 저장을 시작할 때 잘라 낸 녹화 (cutForSave 참고).
+ * events는 저장할 이벤트이고, segment는 자른 직후 시작된 새 구간의 번호다.
+ */
+export interface SaveCut {
+  readonly events: unknown[];
+  readonly segment: number;
+}
+
+/**
  * rrweb record()에 전달하는 프라이버시 옵션 (미지정 시 rrweb 기본 동작과 동일).
  * maskAllInputs는 rrweb의 빈틈을 메운 maskInputOptions와 textarea 텍스트 마스킹 셀렉터로 바꿔 전달한다
  * (MASK_ALL_INPUT_OPTIONS, MASK_ALL_INPUTS_TEXT_SELECTOR 참고).
@@ -72,6 +81,20 @@ export class ScreenRecorder {
    * 처음부터 다시 세므로, 저장 실패 후 다음 체크아웃 전까지는 두 주기를 넘을 수 있다.
    */
   private prevEvents: unknown[] = [];
+  /** 지금 구간(events)의 번호 — 녹화 시작과 체크아웃마다 1씩 늘어난다 */
+  private segment = 0;
+  /** 직전 구간(prevEvents)의 마지막 구간 번호 (없으면 0) */
+  private prevSegment = 0;
+  /** 마지막으로 만든 구간 번호 */
+  private segmentSeq = 0;
+  /**
+   * record()를 새로 시작할 때마다 늘어나는 번호. emit 콜백은 자신을 만든 record()의 번호를 기억하고,
+   * 그 뒤에 다른 record()가 시작됐으면 늦게 도착한 이벤트(throttle된 mousemove 등)를 버린다
+   * — destroy() 후 다시 init()한 새 녹화에 이전 녹화의 이벤트가 섞이지 않도록.
+   */
+  private generation = 0;
+  /** 다음 emit을 새 구간의 시작으로 다룰지 — record()를 다시 시작해 구간을 나눌 때 사용 (checkoutNow 참고) */
+  private startNewSegmentOnNextEmit = false;
   /** 지금 구간(events)의 JSON 문자 수 — maxReplaySize가 있을 때만 센다 */
   private eventsSize = 0;
   /** 지금 구간의 FullSnapshot까지(앞의 Meta 포함)의 JSON 문자 수 */
@@ -101,11 +124,24 @@ export class ScreenRecorder {
     this.prevEvents = [];
     this.eventsSize = 0;
     this.snapshotSize = 0;
+    this.segment = ++this.segmentSeq;
+    this.prevSegment = 0;
+    this.startNewSegmentOnNextEmit = false;
+    this.startRecord();
+  }
+
+  /** rrweb record()를 시작한다. 버퍼는 건드리지 않는다 */
+  private startRecord(): void {
+    const generation = ++this.generation;
     const opts: Parameters<typeof record>[0] = {
       emit: (event, isCheckout) => {
+        if (generation !== this.generation) return;
         const stored = maskMetaHref(event, this.isSensitiveKey);
-        if (isCheckout) {
+        if (isCheckout || this.startNewSegmentOnNextEmit) {
+          this.startNewSegmentOnNextEmit = false;
           this.prevEvents = this.events;
+          this.prevSegment = this.segment;
+          this.segment = ++this.segmentSeq;
           this.events = [stored];
           this.eventsSize = 0;
         } else {
@@ -128,6 +164,69 @@ export class ScreenRecorder {
 
     this.stopFn = record(opts) ?? null;
     this.state = 'recording';
+  }
+
+  /**
+   * 녹화를 멈추지 않고 지금까지의 녹화를 저장용으로 잘라 낸다.
+   * 잘라 낸 직후 새 FullSnapshot으로 새 구간을 시작하므로, 저장하는 동안 기록되는 이벤트는 새 구간에 쌓이고
+   * 따로 재생할 수 있다. 저장 결과에 따라 commitSave(성공) 또는 rollbackSave(실패)를 호출한다.
+   * 녹화 중이 아니면 throw한다.
+   */
+  cutForSave(): SaveCut {
+    if (this.state !== 'recording') throw new Error('No recording available');
+    const events = this.getEvents();
+    this.checkoutNow();
+    return { events, segment: this.segment };
+  }
+
+  /**
+   * 저장에 성공 — 잘라 낸 시점 이전의 녹화를 버리고, 저장하는 동안 기록된 녹화(잘라 낸 시점의 새 구간부터)는 남긴다.
+   */
+  commitSave(cut: SaveCut): void {
+    if (this.prevSegment < cut.segment) this.prevEvents = [];
+  }
+
+  /**
+   * 저장에 실패 — 잘라 낸 녹화를 되돌려 다음 저장에 함께 들어가게 한다 (중복 없이).
+   * 되돌린 녹화는 직전 구간(prevEvents)에 들어가므로, 일반 직전 구간과 마찬가지로 다음 체크아웃 때 버려진다
+   * — 실패가 반복돼도 메모리가 끝없이 늘지 않는다.
+   */
+  rollbackSave(cut: SaveCut): void {
+    if (this.state === 'idle') return;
+    this.prevEvents = this.prevSegment < cut.segment
+      // 직전 구간은 잘라 낸 녹화의 마지막 구간뿐이다 — 잘라 낸 녹화 전체로 바꾼다
+      ? cut.events
+      // 저장하는 동안 체크아웃이 일어나 직전 구간이 이미 새 구간이다 — 그 앞에 붙인다
+      : [...cut.events, ...this.prevEvents];
+  }
+
+  /**
+   * 지금 새 구간을 시작한다 (rrweb의 시간 기준 체크아웃과 같은 takeFullSnapshot(true)).
+   * rrweb이 체크아웃 이벤트를 emit하지 않으면(예외 등) record()를 다시 시작해 그 첫 이벤트부터 새 구간으로 다룬다
+   * — 동기적으로 이어지므로 기록 공백은 없다.
+   */
+  private checkoutNow(): void {
+    const before = this.segmentSeq;
+    try {
+      record.takeFullSnapshot(true);
+    } catch {
+      /* 아래에서 record()를 다시 시작한다 */
+    }
+    if (this.segmentSeq !== before) return;
+    this.stopFn?.();
+    this.stopFn = null;
+    this.startNewSegmentOnNextEmit = true;
+    this.startRecord();
+    if (this.segmentSeq === before) {
+      // record()가 아무것도 emit하지 않았다 — 빈 새 구간을 직접 연다
+      this.startNewSegmentOnNextEmit = false;
+      this.prevEvents = this.events;
+      this.prevSegment = this.segment;
+      this.segment = ++this.segmentSeq;
+      this.events = [];
+      this.eventsSize = 0;
+      this.snapshotSize = 0;
+    }
   }
 
   /**
@@ -157,6 +256,7 @@ export class ScreenRecorder {
   clearBuffer(): void {
     this.events = [];
     this.prevEvents = [];
+    this.prevSegment = 0;
     this.eventsSize = 0;
     this.snapshotSize = 0;
     // takeFullSnapshot은 record()가 실행 중일 때만 유효 — idle/stopped에서 호출하면 rrweb이 throw

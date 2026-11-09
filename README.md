@@ -33,13 +33,13 @@ No backend required. No browser extension. No screen share permission. Just add 
 | Feature | Description |
 |---|---|
 | **DOM session replay** | Captures every DOM change via `MutationObserver` (rrweb). Works on mobile, WebView, and any browser — no `getDisplayMedia` needed. |
-| **Network capture** | Intercepts `fetch` and `XHR`. Circular buffer, up to 100 entries in HAR 1.2 format. |
+| **Network capture** | Intercepts `fetch` and `XHR`. Circular buffer, up to 100 entries, exported as a standard HAR 1.2 file. Values a page cannot observe (HTTP version, header sizes, per-phase timings) are marked as unknown instead of being made up — see [HAR output](#har-output). |
 | **Console capture** | Captures `console.error` and `console.warn` (add `log` and `info` with `consoleLevels`), uncaught errors and unhandled promise rejections. The app's own `window.onerror` is left untouched. |
 | **Unified QA report** | Single self-contained HTML: session replay (left) + network inspector, console log and environment info (right). Time-synchronized — clicking a network row or console entry seeks to that exact moment. |
 | **Network detail panel** | Click any request row to inspect Headers, Payload, Response, and Timing — Chrome DevTools style. |
 | **Sensitive data masking** | Before anything is stored, the values of passwords, tokens, API keys and other sensitive keys (`maskKeys`) are redacted in request URLs (query and fragment), JSON and form request/response bodies, and the page URL recorded in the replay — along with `Authorization`, `Cookie` and other auth headers. Keys are matched by name only, so a token in a URL path or inside another key's value (a `?next=` redirect, a page URL sent to analytics) is not detected — see `maskKeys`. Text and links inside the page's DOM are not covered by `maskKeys`: `maskAllInputs` and `maskTextSelector` mask input values and text in the replay, and elements with the `rr-block` class are left out (see `blockSelector` for its limits). The SDK's own UI (button, save dialog with the bug memo) is never recorded into the replay. |
-| **Local save** | Downloads a single ZIP file directly — no backend needed. |
-| **Remote upload** | Optionally POST files to your own server. Shows a share-link copy button on success. |
+| **Local save** | Downloads a single ZIP file directly — no backend needed. Recording keeps running while the ZIP is created. |
+| **Remote upload** | Optionally POST files to your own server, with a time limit (`uploadTimeout`). Shows a share-link copy button on success; falls back to a local ZIP on failure. Recording keeps running while the upload is in flight. |
 | **Bug memo** | Optional text note added at save time — embedded in the unified HTML report and sent with remote uploads. |
 | **Environment info** | Browser (user agent), language, time zone, viewport and screen size, device pixel ratio, the page URL (masked with `maskKeys`) and the SDK version are saved with every report — shown in the report's **Environment** tab, stored as `qa-env-*.json` and sent with remote uploads. Document title and referrer are not collected. |
 | **Session continuity** | `enableBackup: true` auto-saves the session to sessionStorage on tab hide and silently restores it after a page refresh or navigation — no prompts. If the session is too large for sessionStorage, a smaller backup is kept (see `enableBackup`). (Note: data is cleared when the tab is closed.) |
@@ -142,11 +142,13 @@ When no `endpoint` is configured, a single ZIP file is downloaded to the user's 
 | `qa-env-{timestamp}.json` | Environment info (browser, language, time zone, viewport, masked page URL, SDK version) |
 | `qa-report-{timestamp}.html` | Unified QA report — session replay + network + console in one file |
 
-If saving fails, the recording is kept and continues, so you can save again.
+Recording does not stop while saving. Everything captured up to the click is saved; what happens on the page while the ZIP is being built (DOM changes, requests, console entries) is kept for the next save. After a successful save only the saved part is cleared, so consecutive saves never repeat or lose data. If saving fails, nothing is cleared: the next save includes the failed part as well, with no duplicates.
 
 ### Remote upload
 
-Set an `endpoint` to POST files to your server instead. On success, if the server returns a `url` field, a share-link copy button is shown automatically. If the upload fails, the same data is downloaded as a local ZIP instead; if that also fails, the recording is kept so you can try again.
+Set an `endpoint` to POST files to your server instead. On success, if the server returns a `url` field, a share-link copy button is shown automatically. If the upload fails — an error response, a network error, or no answer within `uploadTimeout` (default 2 minutes) — the same data is downloaded as a local ZIP instead; if that also fails, the recording is kept so you can try again. As with local saves, recording continues while the upload is in flight.
+
+Calling `destroy()` during an upload aborts the request. That is not treated as a failed upload: no ZIP is downloaded, no message is shown, and a late server response has no effect.
 
 ```ts
 const recorder = new QARecorder({
@@ -166,12 +168,35 @@ The files are sent as `multipart/form-data`:
 ```
 POST /upload
   session  →  qa-session-{timestamp}.rr.json
-  har      →  qa-network-{timestamp}.har
+  har      →  qa-network-{timestamp}.har     (standard HAR 1.2: { "log": { ... } })
   console  →  qa-console-{timestamp}.json   (console log entries)
   report   →  qa-report-{timestamp}.html    (unified QA report)
   env      →  qa-env-{timestamp}.json       (environment info)
   memo     →  (optional) bug memo text entered by the user
 ```
+
+### HAR output
+
+`qa-network-*.har` (in the ZIP and in the `har` upload field) is a standard HAR 1.2 document, validated in the test suite against the HAR 1.2 JSON schema, so it opens in Chrome DevTools, HAR analyzers and other HAR tools:
+
+```json
+{ "log": { "version": "1.2", "creator": { "name": "qa-recorder", "version": "…" }, "entries": [ … ], "comment": "…" } }
+```
+
+> **Changed:** earlier versions wrote the `log` object itself (`{ "version", "creator", "entries" }`) without the top-level `log` key. If your server reads the uploaded `har` field, read `har.log.entries` instead of `har.entries`.
+
+The SDK captures requests from inside the page, where some details are not observable. Instead of filling them with plausible-looking values, they are marked as unknown:
+
+| Field | Value | Why |
+|---|---|---|
+| `request/response.httpVersion` | `""` | `fetch`/XHR do not expose the protocol (HTTP/1.1, h2, h3). |
+| `headersSize`, `response.bodySize` | `-1` | Header sizes and the transferred (possibly compressed) body size are not observable. |
+| `response.content.size` | decoded size in bytes, or `-1` | Known only when the body was read in full; `-1` for binary bodies (not read) and bodies cut at `maxBodySize`. |
+| `request.bodySize` | bytes sent, `0` with no body, or `-1` | `-1` for bodies whose size the page cannot know (e.g. `FormData`, streams). |
+| `cookies` | `[]` | Cookies are not captured (`Cookie`/`Set-Cookie` are not readable by the page and are masked anyway). |
+| `timings` | `send: 0`, `wait: time`, `receive: 0`, others `-1`, plus a `comment` | Only the total time is measured (fetch: until the response headers arrive; XHR: until `loadend`). HAR requires `send`/`wait`/`receive` to add up to `time`, so the total is reported as `wait` and the `comment` says the split was not measured. |
+
+Bodies that were not captured have no `text` and carry a `comment` (binary content, non-text request bodies); a body cut at `maxBodySize` keeps the captured text and notes the cut in `comment`. Masked values appear as `[MASKED]` (percent-encoded as `%5BMASKED%5D` inside URLs, which must be valid URIs). Each entry also keeps a custom `_offsetMs` field (milliseconds since recording started), used by the report's timeline.
 
 ---
 
@@ -182,6 +207,7 @@ All options can be set via `window.__QA_RECORDER_CONFIG__` or passed to `QARecor
 ```ts
 window.__QA_RECORDER_CONFIG__ = {
   endpoint: '',              // Remote upload URL. Leave empty for local save (default).
+  uploadTimeout: 120000,     // Time limit for one upload in ms (default: 2 minutes). 0 or Infinity = no limit.
   maxRequests: 100,          // Max network entries in the circular buffer (default: 100).
   maxBodySize: 102400,       // Max characters kept per request/response body (default: 100K). 0 = no bodies.
   maskHeaders: [             // Headers to redact before saving (default shown).
@@ -214,6 +240,7 @@ window.__QA_RECORDER_CONFIG__ = {
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `endpoint` | `string` | `''` | Remote upload URL. Empty = local download. |
+| `uploadTimeout` | `number` | `120000` | Time limit in milliseconds for one upload to `endpoint`, from sending the request until the response body has been read. When it runs out the request is aborted and treated as a failed upload (local ZIP fallback). `0` or `Infinity` turns the limit off. `destroy()` always aborts an upload in flight, without the fallback. |
 | `maxRequests` | `number` | `100` | Max network entries to keep. |
 | `maxBodySize` | `number` | `102400` | Max characters kept for each request and response body (about the same in bytes for ASCII text). Longer bodies are cut and end with a `…[truncated by qa-recorder …]` note. fetch responses are read only up to this limit, so large downloads and never-ending streams (e.g. SSE) do not pile up in memory. Binary responses (images, audio, video, fonts, PDF, ZIP, octet-stream) are recorded as `"[binary]"` without being read. `maskKeys` masking runs before cutting; a cut response is masked key by key as far as it was read. `0` records no bodies; `Infinity` keeps whole bodies. |
 | `maskHeaders` | `string[]` | `['Authorization', 'Cookie', 'Set-Cookie', 'Proxy-Authorization', 'X-API-Key', 'X-Auth-Token', 'X-CSRF-Token', 'X-XSRF-Token']` | Headers to redact (case-insensitive). Setting this replaces the default list. |
@@ -230,6 +257,14 @@ window.__QA_RECORDER_CONFIG__ = {
 
 ---
 
+## Lifecycle and TypeScript
+
+`QARecorder.setup()` creates a singleton; `new QARecorder(config)` + `init()` gives you an instance you control. `destroy()` stops recording and removes everything the instance added: the `fetch`/`XHR`/`console` patches (only where they are still the recorder's own — a wrapper another library installed on top is left in place), the `error`/`unhandledrejection`/`pagehide` listeners, the button, an open save dialog, the progress bar and the share panel. An upload or local save in flight is cancelled, and its late completion can no longer restart recording or show any UI. You can call `init()` again (or `setup()` after destroying the singleton) to start a fresh recording; nothing from the previous one leaks into it.
+
+The package ships its own type declarations (no other packages needed). Besides `QARecorder` and `QARecorderConfig`, the HAR types (`HARDocument`, `HARLog`, `HAREntry`, …), `RecorderMode`, `ConsoleEntry` and `ConsoleLevel` are exported for typing `getNetworkEntries()` results and uploaded files. `rrweb` and `fflate` are bundled into the build, so the package has no runtime dependencies.
+
+---
+
 ## How It Works
 
 ```
@@ -242,18 +277,18 @@ QARecorder.setup() / init()
 
 User clicks the button
   ├─ ConfirmModal.show()        → { confirmed, memo }
-  │   └─ [cancelled] → no-op
-  ├─ ScreenRecorder.stop()
-  ├─ NetworkCapture.snapshot()  → HAR 1.2 JSON
-  ├─ ConsoleCapture.snapshot()  → console entries array
+  │   └─ [cancelled or destroy()] → no-op
+  ├─ cut for saving             → recording keeps running:
+  │   ├─ ScreenRecorder.cutForSave()  → events so far; a new checkout segment (full snapshot) starts now
+  │   ├─ NetworkCapture.snapshot()    → entries so far (new requests keep being captured)
+  │   └─ ConsoleCapture.snapshot()    → entries so far
+  ├─ HARBuilder.build()         → standard HAR 1.2 document
   ├─ collectEnvironment()       → browser, screen, masked page URL, SDK version
   ├─ ProgressBar.show()         → "Saving..."
   │
   ├─ [endpoint set]
-  │   ├─ RemoteDelivery.send()  → POST multipart/form-data
-  │   │   └─ [upload fails] → LocalStorage.save() instead
-  │   ├─ ProgressBar.hide()
-  │   └─ SharePanel.show(url)   → copy-link button (if server returns url)
+  │   └─ RemoteDelivery.send()  → POST multipart/form-data (aborted after uploadTimeout or on destroy())
+  │       └─ [upload fails or times out] → LocalStorage.save() instead
   │
   ├─ [no endpoint]
   │   └─ LocalStorage.save()    → downloads 1 ZIP file:
@@ -263,10 +298,10 @@ User clicks the button
   │                                  ├─ qa-env-*.json
   │                                  └─ qa-report-*.html  ← unified viewer
   │
-  ├─ [saved]  ScreenRecorder.reset() + start()   → recording resumes immediately
-  │           NetworkCapture.clearBuffer()       → network log reset
-  │           ConsoleCapture.clearBuffer()       → console log reset
-  └─ [failed] ScreenRecorder.resume()            → recording kept, so you can save again
+  ├─ [destroy() meanwhile] → stop here: no buffer changes, no UI, no fallback download
+  ├─ [saved]  drop only the saved part — what was captured during the save stays for the next save
+  ├─ [failed] keep everything — the next save includes the failed part again (no duplicates)
+  └─ ProgressBar hidden → SharePanel (upload with url) or an alert (fallback / failure)
 ```
 
 ---
@@ -289,12 +324,13 @@ The `qa-report-{timestamp}.html` file is a fully self-contained QA report — no
 | **Headers** | General (URL, Method, Status) · Request Headers · Response Headers |
 | **Payload** | Query String Parameters · Request Body (with JSON pretty-printing) |
 | **Response** | Raw response body (with JSON pretty-printing) |
-| **Timing** | Send / Wait (TTFB) / Receive breakdown with bar chart |
+| **Timing** | Total time of the request. The per-phase split is not measured in the page, so it is not drawn (reports made by older versions still show their Send / Wait / Receive bars) |
 
 - URL filter bar to narrow down requests
 - Click any row to **jump to that exact moment** in the session replay
 - Active requests highlighted during playback
 - Failed requests (status 0: network error, CORS, aborted) shown as `failed` in red
+- Bodies that were not captured (binary content, `FormData`) show the reason instead of a body
 
 ### Console Log (right panel — Console tab)
 
@@ -331,13 +367,19 @@ The `qa-report-{timestamp}.html` file is a fully self-contained QA report — no
 ```bash
 pnpm install
 
-pnpm build                    # build all packages (shared, then sdk)
-pnpm typecheck                # type-check all packages
-pnpm -F qa-recorder test      # run tests (Vitest + jsdom)
-pnpm -F qa-recorder build     # build ESM + UMD to dist/
-pnpm -F qa-recorder dev       # watch mode
-pnpm -F qa-recorder demo      # local demo server (http://localhost:5173)
+pnpm build                            # build the SDK (ESM + UMD + type declarations to packages/sdk/dist/)
+pnpm typecheck                        # type-check the SDK and the E2E tests
+pnpm -F qa-recorder test              # unit tests (Vitest + jsdom)
+pnpm -F qa-recorder dev               # watch mode
+pnpm -F qa-recorder demo              # local demo server (http://localhost:5173)
+pnpm -F qa-recorder verify:package    # after build: pack the SDK, install it into a standalone project
+                                      # outside the repo and type-check it without skipLibCheck
+pnpm -F qa-recorder test:e2e          # after build: browser E2E in Chromium (Playwright)
 ```
+
+- **Demo:** `pnpm demo` runs the SDK from the current checkout (`packages/sdk/src`, through Vite), not the published npm package; the badge at the top of the page shows the version and commit. The [live demo](https://guksu.github.io/qa-recorder/) runs the SDK built from the commit it was deployed from (shown the same way), which may be ahead of the npm release.
+- **E2E:** the tests run against a local fixture server (`packages/sdk/e2e/fixture-server.mjs`) that serves the built SDK, a small test app, local API endpoints and an upload endpoint with slow, failing and hanging modes — no external services. The report's rrweb script is answered from the npm package of the same version, and the browser still checks its integrity (SRI). Install the browser once with `pnpm -F qa-recorder exec playwright install chromium`.
+- **CI** (`.github/workflows/ci.yml`) runs type checks, unit tests, the build, the packed-package check and the Chromium E2E tests on every pull request.
 
 ---
 

@@ -25,3 +25,10 @@ npm-debug.log*
 
 # Demo upload artifacts
 packages/sdk/demo/uploads/
+
+# Copied from the repository root by the sdk prepack script
+packages/sdk/LICENSE
+
+# Playwright
+packages/sdk/test-results/
+packages/sdk/playwright-report/

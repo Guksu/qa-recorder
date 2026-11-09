@@ -157,7 +157,9 @@ describe('NetworkCapture', () => {
       expect(await response.json()).toEqual({ access_token: 'a', user: 'kim' });
       const entry = capture.snapshot()[0];
       expect(entry.response.content.text).toBe('{"access_token":"[MASKED]","user":"kim"}');
-      expect(entry.response.bodySize).toBe(body.length);
+      // 디코딩한 본문 크기는 측정값, 네트워크로 받은(압축된) 크기는 페이지에서 알 수 없어 -1
+      expect(entry.response.content.size).toBe(body.length);
+      expect(entry.response.bodySize).toBe(-1);
       capture.stop();
     });
 
@@ -171,7 +173,8 @@ describe('NetworkCapture', () => {
 
       const entry = capture.snapshot()[0];
       expect(entry.response.content.text).toBe('{"id":1}');
-      expect(entry.response.bodySize).toBe(8);
+      expect(entry.response.content.size).toBe(8);
+      expect(entry.response.bodySize).toBe(-1);
       capture.stop();
     });
 
@@ -385,7 +388,7 @@ describe('NetworkCapture', () => {
       xhr.send('user=kim&password=p%40ss');
 
       const entry = capture.snapshot()[0];
-      expect(entry.request.url).toBe('/api/login?token=[MASKED]');
+      expect(entry.request.url).toBe(`${location.origin}/api/login?token=[MASKED]`); // 페이지 기준 절대 URL
       expect(entry.request.queryString).toEqual([{ name: 'token', value: '[MASKED]' }]);
       expect(entry.request.postData?.text).toBe('user=kim&password=[MASKED]');
       expect(entry.response.content.text).toBe('{"refreshToken":"[MASKED]","ok":true}');
@@ -401,7 +404,7 @@ describe('NetworkCapture', () => {
       xhr.open('GET', '/app?lang=ko#/reset?token=abc&step=2');
       xhr.send();
 
-      expect(capture.snapshot()[0].request.url).toBe('/app?lang=ko#/reset?token=[MASKED]&step=2');
+      expect(capture.snapshot()[0].request.url).toBe(`${location.origin}/app?lang=ko#/reset?token=[MASKED]&step=2`);
       expect(MockXHR.lastInstance!.openedWith?.url).toBe('/app?lang=ko#/reset?token=abc&step=2');
       capture.stop();
     });
@@ -649,5 +652,187 @@ describe('NetworkCapture', () => {
       expect(entries[0].request.url).toBe('https://example.com/after');
       capture.stop();
     });
+  });
+});
+
+describe('NetworkCapture 세션과 저장 구간', () => {
+  const nativeFetch = window.fetch;
+  const nativeXHR = window.XMLHttpRequest;
+
+  afterEach(() => {
+    window.fetch = nativeFetch;
+    window.XMLHttpRequest = nativeXHR;
+    vi.unstubAllGlobals();
+  });
+
+  /** 응답을 원하는 시점에 돌려줄 수 있는 fetch */
+  function deferredFetch() {
+    const pending: ((r: Response) => void)[] = [];
+    const fn = vi.fn(() => new Promise<Response>((resolve) => { pending.push(resolve); }));
+    return { fn: fn as unknown as typeof fetch, pending };
+  }
+
+  it('생성 이후에 바뀐 fetch를 start() 시점의 원본으로 쓰고 stop()에서 그것으로 되돌린다', async () => {
+    const capture = new NetworkCapture(100, []);
+    const later = makeMockFetch();
+    window.fetch = later as unknown as typeof fetch;
+    capture.start();
+    await window.fetch('https://example.com/a');
+    expect(later).toHaveBeenCalledOnce();
+    capture.stop();
+    expect(window.fetch).toBe(later);
+  });
+
+  it('stop() 후에 끝난 요청은 기록하지 않는다', async () => {
+    const { fn, pending } = deferredFetch();
+    window.fetch = fn;
+    const capture = new NetworkCapture(100, []);
+    capture.start();
+    const request = window.fetch('https://example.com/slow');
+    capture.stop();
+    pending[0](new Response('{}'));
+    await request;
+    expect(capture.snapshot()).toEqual([]);
+  });
+
+  it('다시 start()한 세션에는 이전 세션에 시작한 요청이 들어가지 않는다', async () => {
+    const { fn, pending } = deferredFetch();
+    window.fetch = fn;
+    const capture = new NetworkCapture(100, []);
+    capture.start();
+    const old = window.fetch('https://example.com/old');
+    capture.stop();
+    capture.start();
+    const fresh = window.fetch('https://example.com/fresh');
+    pending[0](new Response('{}'));
+    pending[1](new Response('{}'));
+    await Promise.all([old, fresh]);
+    expect(capture.snapshot().map((e) => e.request.url)).toEqual(['https://example.com/fresh']);
+    capture.stop();
+  });
+
+  it('stop()은 그 위에 다른 코드가 감싼 fetch를 지우지 않고, 남은 패치는 기록 없이 원본만 호출한다', async () => {
+    const appFetch = makeMockFetch();
+    window.fetch = appFetch as unknown as typeof fetch;
+    const capture = new NetworkCapture(100, []);
+    capture.start();
+    const ours = window.fetch;
+    const outer = ((...args: Parameters<typeof fetch>) => ours(...args)) as typeof fetch;
+    window.fetch = outer;
+
+    capture.stop();
+    expect(window.fetch).toBe(outer);
+    await window.fetch('https://example.com/after-stop');
+    expect(appFetch).toHaveBeenCalledOnce();
+    expect(capture.snapshot()).toEqual([]);
+
+    // 다시 시작해도 남은 이전 패치가 중복으로 기록하지 않는다
+    capture.start();
+    await window.fetch('https://example.com/again');
+    expect(capture.snapshot()).toHaveLength(1);
+    capture.stop();
+  });
+
+  it('discard()는 저장한 엔트리만 빼고 그 뒤에 기록된 엔트리는 남긴다', async () => {
+    vi.stubGlobal('fetch', makeMockFetch());
+    const capture = new NetworkCapture(100, []);
+    capture.start();
+    await window.fetch('https://example.com/saved');
+    const saved = capture.snapshot();
+    await window.fetch('https://example.com/during-save');
+
+    capture.discard(saved);
+    expect(capture.snapshot().map((e) => e.request.url)).toEqual(['https://example.com/during-save']);
+    capture.stop();
+  });
+
+  it('저장하는 동안 maxRequests를 넘어도 버퍼는 maxRequests개를 넘지 않는다', async () => {
+    vi.stubGlobal('fetch', makeMockFetch());
+    const capture = new NetworkCapture(3, []);
+    capture.start();
+    for (let i = 0; i < 3; i++) await window.fetch(`https://example.com/saved/${i}`);
+    const saved = capture.snapshot();
+    for (let i = 0; i < 5; i++) await window.fetch(`https://example.com/new/${i}`);
+    expect(capture.snapshot()).toHaveLength(3);
+    capture.discard(saved);
+    expect(capture.snapshot().map((e) => e.request.url)).toEqual([
+      'https://example.com/new/2', 'https://example.com/new/3', 'https://example.com/new/4',
+    ]);
+    capture.stop();
+  });
+
+  it('rebase()는 남은 엔트리의 _offsetMs를 새 기준 시각으로 다시 계산한다', () => {
+    const capture = new NetworkCapture(100, []);
+    capture.restoreEntries([{
+      startedDateTime: '2026-01-01T00:00:05.000Z', time: 1,
+      request: { method: 'GET', url: 'https://example.com', httpVersion: '', headers: [], queryString: [], bodySize: 0, headersSize: -1 },
+      response: { status: 200, statusText: '', httpVersion: '', headers: [], content: { size: 0, mimeType: '' }, bodySize: -1, headersSize: -1 },
+      timings: { send: 0, wait: 1, receive: 0 },
+      _offsetMs: 99_999,
+    }]);
+    capture.rebase(new Date('2026-01-01T00:00:02.000Z'));
+    expect(capture.snapshot()[0]._offsetMs).toBe(3000);
+  });
+
+  it('요청 body 크기는 보낸 바이트 수로, 알 수 없는 본문(FormData)은 -1로 기록한다', async () => {
+    vi.stubGlobal('fetch', makeMockFetch());
+    const capture = new NetworkCapture(100, []);
+    capture.start();
+    await window.fetch('https://example.com/a', { method: 'POST', body: '가나' });
+    await window.fetch('https://example.com/b', { method: 'POST', body: new Blob(['12345']) });
+    await window.fetch('https://example.com/c', { method: 'POST', body: new FormData() });
+    await window.fetch('https://example.com/d');
+    expect(capture.snapshot().map((e) => e.request.bodySize)).toEqual([6, 5, -1, 0]);
+    expect(capture.snapshot().map((e) => e.request.httpVersion)).toEqual(['', '', '', '']);
+    capture.stop();
+  });
+
+  it('XHR: stop() 후에 끝난 요청은 기록하지 않는다', () => {
+    let listener: (() => void) | undefined;
+    class SlowXHR {
+      status = 200; statusText = 'OK'; responseText = ''; responseType = '';
+      open() {} setRequestHeader() {} send() {}
+      addEventListener(_: string, cb: () => void) { listener = cb; }
+      getAllResponseHeaders() { return ''; }
+      getResponseHeader() { return null; }
+    }
+    window.XMLHttpRequest = SlowXHR as unknown as typeof XMLHttpRequest;
+    const capture = new NetworkCapture(100, []);
+    capture.start();
+    const xhr = new window.XMLHttpRequest();
+    xhr.open('GET', 'https://example.com/slow');
+    xhr.send();
+    capture.stop();
+    listener!();
+    expect(capture.snapshot()).toEqual([]);
+  });
+});
+
+describe('NetworkCapture XHR URL', () => {
+  const nativeXHR = window.XMLHttpRequest;
+  afterEach(() => { window.XMLHttpRequest = nativeXHR; });
+
+  it('상대 경로로 연 XHR도 fetch처럼 페이지 기준의 절대 URL로 기록하고, 원본 XHR에는 받은 그대로 넘긴다', () => {
+    const opened: string[] = [];
+    let loadend: (() => void) | undefined;
+    class FakeXHR {
+      status = 200; statusText = 'OK'; responseText = '{}'; responseType = '';
+      open(_m: string, u: string) { opened.push(u); }
+      setRequestHeader() {}
+      send() { loadend?.(); }
+      addEventListener(_: string, cb: () => void) { loadend = cb; }
+      getAllResponseHeaders() { return 'content-type: application/json\r\n'; }
+      getResponseHeader() { return 'application/json'; }
+    }
+    window.XMLHttpRequest = FakeXHR as unknown as typeof XMLHttpRequest;
+    const capture = new NetworkCapture(100, []);
+    capture.start();
+    const xhr = new window.XMLHttpRequest();
+    xhr.open('POST', '/api/echo?x=1');
+    xhr.send('{}');
+    capture.stop();
+
+    expect(opened).toEqual(['/api/echo?x=1']);
+    expect(capture.snapshot()[0].request.url).toBe(new URL('/api/echo?x=1', window.location.href).href);
   });
 });

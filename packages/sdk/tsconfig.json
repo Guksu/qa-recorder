@@ -10,7 +10,8 @@
     "rootDir": "./src",
     "strict": true,
     "skipLibCheck": true,
-    "importHelpers": true
+    "importHelpers": true,
+    "types": []
   },
   "include": ["src"],
   "exclude": ["node_modules", "dist", "src/**/__tests__"]

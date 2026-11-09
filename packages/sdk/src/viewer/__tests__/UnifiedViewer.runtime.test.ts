@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { JSDOM } from 'jsdom';
 import { UnifiedViewer } from '../UnifiedViewer.js';
-import type { HARLog, HAREntry } from '@qa-recorder/shared';
+import type { HARLog, HAREntry } from '../../types/har.js';
 import type { ConsoleEntry } from '../../console/ConsoleCapture.js';
 
 /** 리포트의 rrweb CDN 스크립트 대신 넣는 가짜 재생기. 테스트가 재생 위치(time)를 직접 바꾼다 */
@@ -185,5 +185,32 @@ describe('UnifiedViewer 실행 (jsdom)', () => {
       expect(doc.querySelectorAll('.con-row')).toHaveLength(1);
       expect(doc.querySelectorAll('.tl-marker')).toHaveLength(2);
     });
+  });
+});
+
+describe('리포트 런타임 — 표준 HAR 엔트리 표시', () => {
+  it('HARBuilder가 만든 엔트리의 측정하지 않은 단계별 시간은 막대로 그리지 않고 이유를 보여 준다', async () => {
+    const { HARBuilder } = await import('../../network/HARBuilder.js');
+    const binary = entry({ url: 'https://api.example.com/logo.png?token=[MASKED]' });
+    binary.response.content = { size: -1, mimeType: 'image/png', text: '[binary]' };
+    const built = HARBuilder.build([binary]).log.entries;
+    const { doc } = render(built);
+
+    const row = doc.querySelector<HTMLElement>('.net-row')!;
+    expect(row.querySelector('.col-name')!.getAttribute('title')).toBe('https://api.example.com/logo.png?token=[MASKED]');
+    row.click();
+
+    const timing = doc.getElementById('pane-timing')!;
+    expect(Array.from(timing.querySelectorAll('.timing-label')).map((l) => l.textContent)).toEqual(['Total']);
+    expect(timing.querySelector('.timing-note')!.textContent).toMatch(/Not measured per phase/);
+    expect(doc.getElementById('pane-headers')!.textContent).toContain('token=[MASKED]');
+    expect(doc.getElementById('pane-response')!.textContent).toMatch(/Body not captured: binary/);
+  });
+
+  it('예전 형식 엔트리(timings.comment 없음)는 기존처럼 단계별 막대를 그린다', () => {
+    const { doc } = render([entry()]);
+    doc.querySelector<HTMLElement>('.net-row')!.click();
+    const labels = Array.from(doc.querySelectorAll('#pane-timing .timing-label')).map((l) => l.textContent);
+    expect(labels).toEqual(['Send', 'Wait (TTFB)', 'Receive', 'Total']);
   });
 });

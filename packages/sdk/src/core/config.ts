@@ -6,13 +6,29 @@ export interface QARecorderConfig {
   /**
    * Remote upload URL. When set, recorded files are POSTed as `multipart/form-data`
    * instead of being downloaded locally. If the server returns `{ url: "..." }`,
-   * a share-link copy button is shown automatically. If the upload fails, the same data
-   * is downloaded as a local ZIP instead; if that also fails, the recording is kept so
-   * the user can try again.
+   * a share-link copy button is shown automatically. If the upload fails (including an
+   * error status or `uploadTimeout`), the same data is downloaded as a local ZIP instead;
+   * if that also fails, the recording is kept so the user can try again.
+   *
+   * Recording continues while the session is being saved; what is captured during the save
+   * is kept for the next save.
    *
    * @default '' (local download)
    */
   endpoint?: string;
+
+  /**
+   * Time limit, in milliseconds, for one upload to `endpoint` — from sending the request until
+   * the response body has been read. When it runs out, the request is aborted and treated as a
+   * failed upload: the same data is downloaded as a local ZIP instead. `0` or `Infinity`
+   * turns the limit off.
+   *
+   * Calling `destroy()` during an upload always aborts it. That is not treated as a failure:
+   * no ZIP is downloaded and no message is shown.
+   *
+   * @default 120000 (2 minutes)
+   */
+  uploadTimeout?: number;
 
   /**
    * Maximum number of network entries to keep in the circular buffer.
@@ -209,6 +225,7 @@ export interface QARecorderConfig {
 
 const DEFAULT_CONFIG: Required<QARecorderConfig> = {
   endpoint: '',
+  uploadTimeout: 120_000,
   maxRequests: 100,
   maxBodySize: 100 * 1024,
   maskHeaders: [

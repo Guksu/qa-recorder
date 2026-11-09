@@ -16,12 +16,21 @@ export interface ConsoleEntry {
   _offsetMs: number;
 }
 
+/**
+ * console 메서드와 window error/unhandledrejection 이벤트로 콘솔 기록을 캡처.
+ * start()부터 stop()까지의 "세션"에만 기록한다. stop()은 console 메서드가 아직 이 인스턴스의 패치일 때만
+ * 되돌리고, 그 위에 다른 코드가 다시 감쌌다면 남은 패치는 원본을 호출하기만 한다 (NetworkCapture와 같은 방식).
+ */
 export class ConsoleCapture {
   private buffer: ConsoleEntry[] = [];
   private originalMethods: Partial<Record<ConsoleLevel, (...args: unknown[]) => void>> = {};
+  private patchedMethods: Partial<Record<ConsoleLevel, (...args: unknown[]) => void>> = {};
   private errorHandler: ((e: ErrorEvent) => void) | null = null;
   private unhandledRejectionHandler: ((e: PromiseRejectionEvent) => void) | null = null;
   private recordingStartedAt: Date | null = null;
+  /** 지금 세션 번호 (stop() 중이면 0) */
+  private session = 0;
+  private sessionSeq = 0;
 
   constructor(
     private readonly maxEntries = 200,
@@ -30,17 +39,21 @@ export class ConsoleCapture {
 
   start(): void {
     // 두 번 시작하면 이미 패치된 console 메서드를 "원본"으로 저장해 stop()이 원래대로 되돌리지 못한다
-    if (this.errorHandler) return;
+    if (this.session !== 0) return;
+    const session = ++this.sessionSeq;
+    this.session = session;
     this.recordingStartedAt = new Date();
 
     for (const level of this.levels) {
-      this.originalMethods[level] = console[level] as (...args: unknown[]) => void;
-      const original = this.originalMethods[level]!;
+      const original = console[level] as (...args: unknown[]) => void;
+      this.originalMethods[level] = original;
       const self = this;
-      (console[level] as (...args: unknown[]) => void) = function (...args: unknown[]) {
-        self.push(level, args);
+      const patched = function (...args: unknown[]) {
+        if (self.session === session) self.push(level, args);
         original.call(console, ...args);
       };
+      this.patchedMethods[level] = patched;
+      (console[level] as (...args: unknown[]) => void) = patched;
     }
 
     // window.onerror를 덮어쓰면 앱이 나중에 onerror를 설정할 때 캡처가 조용히 멈추고, stop()이 앱의 핸들러를 지운다.
@@ -71,11 +84,14 @@ export class ConsoleCapture {
   }
 
   stop(): void {
+    this.session = 0;
     for (const level of this.levels) {
-      if (this.originalMethods[level]) {
-        (console[level] as (...args: unknown[]) => void) = this.originalMethods[level]!;
-        delete this.originalMethods[level];
+      const original = this.originalMethods[level];
+      if (original && console[level] === this.patchedMethods[level]) {
+        (console[level] as (...args: unknown[]) => void) = original;
       }
+      delete this.originalMethods[level];
+      delete this.patchedMethods[level];
     }
 
     if (this.errorHandler) {
@@ -94,6 +110,22 @@ export class ConsoleCapture {
   clearBuffer(): void {
     this.buffer = [];
     this.recordingStartedAt = new Date();
+  }
+
+  /** 저장한 엔트리만 버퍼에서 뺀다 (저장 성공 후). 저장하는 동안 새로 기록된 엔트리는 남는다 */
+  discard(entries: readonly ConsoleEntry[]): void {
+    if (entries.length === 0) return;
+    const saved = new Set(entries);
+    this.buffer = this.buffer.filter((entry) => !saved.has(entry));
+  }
+
+  /** 기록 시작 시점을 바꾸고 남은 엔트리의 _offsetMs를 그 기준으로 다시 계산한다 */
+  rebase(startedAt: Date): void {
+    this.recordingStartedAt = startedAt;
+    for (const entry of this.buffer) {
+      const t = new Date(entry.timestamp).getTime();
+      if (!Number.isNaN(t)) entry._offsetMs = t - startedAt.getTime();
+    }
   }
 
   snapshot(): ConsoleEntry[] {

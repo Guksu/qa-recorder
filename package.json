@@ -6,7 +6,7 @@
     "dev": "pnpm -r --parallel run dev",
     "build": "pnpm -r run build",
     "lint": "pnpm -r --if-present run lint",
-    "typecheck": "pnpm -F @qa-recorder/shared build && pnpm -r run typecheck"
+    "typecheck": "pnpm -r run typecheck"
   },
   "devDependencies": {
     "typescript": "^5.4.0"

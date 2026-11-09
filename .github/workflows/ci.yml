@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   check:
-    name: Typecheck, test, build
+    name: Typecheck, test, build, package
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -34,10 +34,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # sdk의 타입 검사가 @qa-recorder/shared의 dist 타입을 참조하므로 먼저 빌드한다
-      - name: Build shared types
-        run: pnpm -F @qa-recorder/shared build
-
       - name: Typecheck
         run: pnpm -F qa-recorder typecheck
 
@@ -46,3 +42,49 @@ jobs:
 
       - name: Build
         run: pnpm -F qa-recorder build
+
+      # 패키징한 SDK를 저장소 밖의 독립 프로젝트에 설치해 skipLibCheck 없이 타입 검사하고,
+      # tarball에 LICENSE·README·타입이 들어 있는지, 런타임 의존성·workspace 참조가 없는지 확인한다
+      - name: Verify packed package in a standalone consumer
+        run: pnpm -F qa-recorder verify:package
+
+  e2e:
+    name: Browser E2E (Chromium)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # E2E는 현재 체크아웃에서 빌드한 dist/를 로컬 fixture 서버로 서빙한다
+      - name: Build
+        run: pnpm -F qa-recorder build
+
+      - name: Install Chromium
+        run: pnpm -F qa-recorder exec playwright install --with-deps chromium
+
+      - name: Run E2E
+        run: pnpm -F qa-recorder test:e2e
+        env:
+          CI: 'true'
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: packages/sdk/playwright-report
+          retention-days: 7

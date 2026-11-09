@@ -3,6 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { uploadMockPlugin } from './demo-server/uploadMockPlugin';
+import { localSdkPlugin } from './demo-server/localSdkPlugin';
 
 // 업로드 파일은 dev 서버를 시작(재시작 포함)할 때마다 새로 만드는 비공개(0700) 임시 디렉터리에 저장한다.
 // 이 디렉터리는 Vite root(demo/)와 server.fs.allow(워크스페이스 루트) 밖이므로 Vite의 정적 파일 서빙과 /@fs/ 경로는 이 디렉터리를 서빙하지 않는다.
@@ -12,5 +13,6 @@ import { uploadMockPlugin } from './demo-server/uploadMockPlugin';
 const UPLOADS_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-recorder-demo-uploads-'));
 
 export default defineConfig({
-  plugins: [uploadMockPlugin(UPLOADS_DIR)],
+  // 데모는 현재 체크아웃의 SDK 소스를 쓴다 (배포된 npm 패키지가 아니라)
+  plugins: [localSdkPlugin(__dirname), uploadMockPlugin(UPLOADS_DIR)],
 });

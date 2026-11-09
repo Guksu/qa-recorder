@@ -152,7 +152,7 @@ describe('ScreenRecorder 페이지 URL 마스킹 (실제 rrweb)', () => {
       `${location.origin}/reset-password?token=[MASKED]&lang=ko#access_token=[MASKED]&token_type=bearer`,
     );
 
-    const html = UnifiedViewer.generate(events, HARBuilder.build([]), []);
+    const html = UnifiedViewer.generate(events, HARBuilder.build([]).log, []);
     expect(html).toContain('access_token=[MASKED]'); // 이벤트가 리포트에 실제로 임베드됐는지 확인
     for (const output of [JSON.stringify(events), html]) {
       expect(output).not.toContain('RESET-TOKEN-SECRET');

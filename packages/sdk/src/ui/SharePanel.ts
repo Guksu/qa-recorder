@@ -36,11 +36,16 @@ async function copyText(text: string): Promise<boolean> {
 export class SharePanel {
   private static host: HTMLElement | null = null;
 
-  static show(url: string, zIndex = 2147483647): void {
+  /**
+   * 공유 링크 패널을 표시하고, 이 호출이 띄운 패널만 닫는 함수를 반환한다
+   * (그 사이 다른 호출이 패널을 교체했으면 아무것도 하지 않는다).
+   */
+  static show(url: string, zIndex = 2147483647): () => void {
     // 이미 표시 중이면 교체하여 항상 최신 URL을 노출
     if (this.host) this.hide();
 
-    this.host = document.createElement('div');
+    const host = document.createElement('div');
+    this.host = host;
     this.host.setAttribute('data-qa', 'share-panel');
     const shadow = this.host.attachShadow({ mode: 'open' });
 
@@ -72,6 +77,9 @@ export class SharePanel {
     excludeFromRecording(this.host, style, panel);
     shadow.append(style, panel);
     document.body.appendChild(this.host);
+    return () => {
+      if (this.host === host) this.hide();
+    };
   }
 
   static hide(): void {

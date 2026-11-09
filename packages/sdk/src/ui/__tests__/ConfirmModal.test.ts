@@ -72,3 +72,37 @@ describe('ConfirmModal.show', () => {
     expect(document.body.contains(host)).toBe(false);
   });
 });
+
+describe('ConfirmModal.show — 취소 신호', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('신호가 취소되면 확인창을 닫고 confirmed: false로 끝난다', async () => {
+    const controller = new AbortController();
+    const promise = ConfirmModal.show('Save?', { signal: controller.signal });
+    const host = document.querySelector<HTMLElement>('[data-qa="confirm-modal"]')!;
+    host.shadowRoot!.querySelector<HTMLTextAreaElement>('#qa-memo')!.value = 'typed memo';
+
+    controller.abort();
+
+    await expect(promise).resolves.toEqual({ confirmed: false, memo: '' });
+    expect(document.querySelector('[data-qa="confirm-modal"]')).toBeNull();
+  });
+
+  it('이미 취소된 신호면 확인창을 띄우지 않는다', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(ConfirmModal.show('Save?', { signal: controller.signal })).resolves.toEqual({ confirmed: false, memo: '' });
+    expect(document.querySelector('[data-qa="confirm-modal"]')).toBeNull();
+  });
+
+  it('저장을 누른 뒤의 취소는 결과를 바꾸지 않는다', async () => {
+    const controller = new AbortController();
+    const promise = ConfirmModal.show('Save?', { signal: controller.signal });
+    const host = document.querySelector<HTMLElement>('[data-qa="confirm-modal"]')!;
+    host.shadowRoot!.querySelector<HTMLButtonElement>('#confirm')!.click();
+    controller.abort();
+    await expect(promise).resolves.toEqual({ confirmed: true, memo: '' });
+  });
+});
