@@ -957,3 +957,123 @@ describe('NetworkCapture 응답 본문 기록 상태', () => {
     }
   });
 });
+
+describe('NetworkCapture — 앱이 응답 스트림을 취소할 때', () => {
+  const nativeFetch = window.fetch;
+  afterEach(() => { window.fetch = nativeFetch; });
+
+  /** 원본 소스가 취소됐는지(= 실제 연결이 닫힐 수 있는지) 알 수 있는 응답 */
+  function trackedBody(contentType = 'text/event-stream') {
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const state = { sourceCancelled: false as false | unknown };
+    const stream = new ReadableStream<Uint8Array>({
+      start(c) { controller = c; },
+      cancel(reason) { state.sourceCancelled = reason ?? true; },
+    });
+    return {
+      state,
+      response: new Response(stream, { headers: { 'content-type': contentType } }),
+      push: (t: string) => controller.enqueue(new TextEncoder().encode(t)),
+      end: () => controller.close(),
+    };
+  }
+
+  async function capture(body: ReturnType<typeof trackedBody>, maxBodySize = 1_000) {
+    window.fetch = vi.fn(async () => body.response) as unknown as typeof fetch;
+    const cap = new NetworkCapture(100, [], { maxBodySize });
+    cap.start();
+    const res = await window.fetch('https://example.com/events');
+    return { cap, res };
+  }
+
+  it('앱이 reader.cancel()하면 녹화기 사본도 멈춰 원본 소스가 취소된다 (연결이 닫힌다) — 받은 부분은 cancelled로 남긴다', async () => {
+    const body = trackedBody();
+    const { cap, res } = await capture(body);
+    const reader = res.body!.getReader();
+    body.push('data: one\n\n');
+    expect(new TextDecoder().decode((await reader.read()).value)).toBe('data: one\n\n');
+    await new Promise((r) => setTimeout(r, 10));
+
+    await reader.cancel('user closed the feed');
+
+    // tee의 두 쪽이 모두 취소되면 원본 소스가 [앱의 이유, 녹화기의 이유]로 취소된다 (Streams 명세)
+    expect(body.state.sourceCancelled).toEqual(expect.arrayContaining(['user closed the feed']));
+    const [entry] = cap.snapshot();
+    expect(entry.response.content._bodyStatus).toBe('cancelled');
+    expect(entry.response.content.text).toBe('data: one\n\n');
+    cap.stop();
+  });
+
+  it('읽기 전에 body.cancel()해도 원본 소스가 취소된다', async () => {
+    const body = trackedBody();
+    const { cap, res } = await capture(body);
+    await res.body!.cancel();
+    expect(body.state.sourceCancelled).not.toBe(false);
+    expect(cap.snapshot()[0].response.content._bodyStatus).toBe('cancelled');
+    cap.stop();
+  });
+
+  it('body를 건드리지 않고 text()를 쓰거나, body에 접근만 하고 text()를 써도 그대로 동작한다', async () => {
+    const first = trackedBody('text/plain');
+    const a = await capture(first);
+    first.push('plain');
+    first.end();
+    expect(await a.res.text()).toBe('plain');
+    a.cap.stop();
+
+    const second = trackedBody('text/plain');
+    const b = await capture(second);
+    expect(b.res.body).toBe(b.res.body); // 같은 스트림 객체를 돌려준다
+    second.push('after body access');
+    second.end();
+    expect(await b.res.text()).toBe('after body access');
+    await b.cap.waitForBodies(b.cap.snapshot(), 1_000);
+    expect(b.cap.snapshot()[0].response.content.text).toBe('after body access');
+    b.cap.stop();
+  });
+
+  it('스트림으로 끝까지 읽으면 앱과 녹화기 모두 전체 본문을 받고, bodyUsed가 true가 된다', async () => {
+    const body = trackedBody('text/plain');
+    const { cap, res } = await capture(body);
+    const decoded = res.body!.pipeThrough(new TextDecoderStream());
+    body.push('one ');
+    body.push('two');
+    body.end();
+    let text = '';
+    for (const reader = decoded.getReader(); ;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += value;
+    }
+    expect(text).toBe('one two');
+    expect(res.bodyUsed).toBe(true);
+    await cap.waitForBodies(cap.snapshot(), 1_000);
+    expect(cap.snapshot()[0].response.content).toMatchObject({ text: 'one two', _bodyStatus: 'complete' });
+    expect(body.state.sourceCancelled).toBe(false);
+    cap.stop();
+  });
+
+  it('BYOB reader로도 읽을 수 있다', async () => {
+    const body = trackedBody('application/octet-stream+text');
+    const { cap, res } = await capture(body);
+    const reader = res.body!.getReader({ mode: 'byob' });
+    body.push('bytes');
+    const { value } = await reader.read(new Uint8Array(16));
+    expect(new TextDecoder().decode(value)).toBe('bytes');
+    await reader.cancel();
+    expect(body.state.sourceCancelled).not.toBe(false);
+    cap.stop();
+  });
+
+  it('녹화를 멈춘(destroy) 뒤에도 앱은 스트림을 계속 읽고 취소할 수 있다', async () => {
+    const body = trackedBody();
+    const { cap, res } = await capture(body);
+    cap.stop(); // 녹화기 사본 읽기 취소 (aborted)
+    const reader = res.body!.getReader();
+    body.push('still flowing');
+    expect(new TextDecoder().decode((await reader.read()).value)).toBe('still flowing');
+    await reader.cancel();
+    expect(body.state.sourceCancelled).not.toBe(false);
+    expect(cap.snapshot()[0].response.content._bodyStatus).toBe('aborted'); // stop()이 먼저였다
+  });
+});

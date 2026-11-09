@@ -210,6 +210,7 @@ Bodies that were not captured have no `text` and carry a `comment` (binary conte
 | `truncated` | The body was cut at `maxBodySize`. |
 | `error` | Reading the body failed (the response stream errored); `text` is what had arrived, if anything. |
 | `aborted` | Capture stopped before the body was complete: `destroy()`, leaving the page (restored backups), or the request was pushed out of the `maxRequests` buffer. |
+| `cancelled` | The app cancelled the response body stream (`reader.cancel()`, `body.cancel()`) before it ended; `text` is what had arrived. |
 | `binary` | Binary content, not read. |
 | `omitted` | Not recorded because `maxBodySize` is `0`. |
 
@@ -226,7 +227,7 @@ Reports made by older versions have no `_bodyStatus`.
 
 Requests that have not received their response headers yet when you save are not in that report; they are captured when the response arrives and appear in the next one.
 
-Limitation: because the recorder reads a clone, the browser keeps the underlying connection open until both the app and the recorder are done with the body. If the app cancels a still-open stream (`reader.cancel()`), the connection stays open until the recorder's copy finishes or reaches `maxBodySize`. Calling `destroy()` releases it. Masked values appear as `[MASKED]` (percent-encoded as `%5BMASKED%5D` inside URLs, which must be valid URIs). Each entry also keeps a custom `_offsetMs` field (milliseconds since recording started), used by the report's timeline.
+Cancelling a stream: a clone shares the underlying connection with the app's stream, and the browser closes the connection only when both have been cancelled. So while the recorder is still reading a body, `response.body` on that response is a thin pass-through of the real stream: it reads only as the app reads, supports BYOB readers where the browser supports byte streams, and when the app cancels it (`reader.cancel()`, `body.cancel()`, or a cancelled `pipeTo`) the recorder stops its copy first, so the connection closes just as it would without the recorder (`_bodyStatus: "cancelled"`). Responses read with `text()`, `json()` and the like are not affected. Aborting the request with an `AbortSignal` already closed the connection before this change. Masked values appear as `[MASKED]` (percent-encoded as `%5BMASKED%5D` inside URLs, which must be valid URIs). Each entry also keeps a custom `_offsetMs` field (milliseconds since recording started), used by the report's timeline.
 
 ---
 

@@ -236,3 +236,56 @@ test('본문을 기다리는 중에 destroy()하면 저장하지 않고, 앱은 
   expect(downloads).toBe(0);
   expect(dialogs).toEqual([]);
 });
+
+test('앱이 열린 스트림을 reader.cancel()하면 연결이 닫히고, 받은 부분은 cancelled로 리포트에 남는다', async ({ page }) => {
+  await start(page, { pendingBodyTimeout: 300 });
+  // 앱: 스트림을 열고 첫 이벤트를 읽은 뒤 취소한다 (fetch 기반 SSE 클라이언트가 피드를 닫을 때처럼)
+  await page.evaluate(() => {
+    const w = window as unknown as { cancelled?: number };
+    fetch('/api/stream/feed?type=text%2Fevent-stream').then(async (res) => {
+      const reader = res.body!.getReader();
+      await reader.read();
+      await reader.cancel('feed closed');
+      w.cancelled = Date.now();
+    });
+  });
+  await expect.poll(async () => ((await (await page.request.get('/__streams')).json()) as { open: string[] }).open).toContain('feed');
+  await push(page, 'feed', 'data: first\n\n');
+  await expect.poll(() => page.evaluate(() => (window as unknown as { cancelled?: number }).cancelled)).toBeTruthy();
+
+  // 녹화 중이어도 서버 쪽 연결이 닫힌다 (녹화기 사본 때문에 열려 있지 않다)
+  await expect.poll(async () => ((await (await page.request.get('/__streams')).json()) as { open: string[] }).open, { timeout: 5_000 })
+    .not.toContain('feed');
+
+  const download = page.waitForEvent('download');
+  await clickSave(page);
+  const har = JSON.parse(pick(await readZip(await download), /\.har$/)) as Har;
+  expect(harProblems(har)).toEqual([]);
+  const entry = har.log.entries.find((e) => e.request.url.includes('/api/stream/feed'))!;
+  expect(entry.response.content._bodyStatus).toBe('cancelled');
+  expect(entry.response.content.text).toBe('data: first\n\n');
+  expect(entry.response.content.comment).toMatch(/app cancelled the response body/);
+});
+
+test('녹화 중에도 앱은 응답 본문을 BYOB reader와 pipeThrough로 그대로 읽는다', async ({ page }) => {
+  await start(page, {});
+  const result = await page.evaluate(async () => {
+    const byob = (await fetch('/api/items')).body!.getReader({ mode: 'byob' });
+    let bytes = 0;
+    for (;;) {
+      const { done, value } = await byob.read(new Uint8Array(8));
+      if (done) break;
+      bytes += value!.byteLength;
+    }
+    const piped = (await fetch('/api/items')).body!.pipeThrough(new TextDecoderStream());
+    let text = '';
+    for (const reader = piped.getReader(); ;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += value;
+    }
+    return { bytes, text };
+  });
+  expect(result.bytes).toBe(JSON.stringify({ items: [{ id: 1, name: 'apple' }, { id: 2, name: 'pear' }] }).length);
+  expect(JSON.parse(result.text).items).toHaveLength(2);
+});

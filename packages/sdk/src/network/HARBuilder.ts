@@ -29,6 +29,7 @@ const BODY_STATUS_COMMENTS: Partial<Record<HARBodyStatus, string>> = {
   error: 'Body could not be read completely: the response stream failed. text holds what had arrived before the error, if anything.',
   aborted: 'Body capture stopped before the body was complete (recording stopped, the page was left, or the request '
     + 'was pushed out of the maxRequests buffer). text holds what had arrived, if anything.',
+  cancelled: 'The app cancelled the response body stream before it ended; text holds what had arrived by then.',
   omitted: 'Body not recorded: maxBodySize is 0.',
 };
 
@@ -127,7 +128,8 @@ function toHarContent(content: HARContent | undefined): HARContent {
   const status = content?._bodyStatus;
   const out: HARContent = {
     // 다 받지 못한 본문의 크기는 알 수 없다
-    size: status === 'pending' || status === 'aborted' || status === 'error' ? -1 : integerOrUnknown(content?.size),
+    size: status === 'pending' || status === 'aborted' || status === 'cancelled' || status === 'error'
+      ? -1 : integerOrUnknown(content?.size),
     mimeType: content?.mimeType ?? '',
   };
   if (body.text !== undefined) out.text = body.text;
