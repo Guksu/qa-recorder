@@ -459,8 +459,10 @@ describe('QARecorder', () => {
       expect(options.timeout).toBe(5_000);
       expect(options.signal).toBeInstanceOf(AbortSignal);
       expect(options.signal.aborted).toBe(false);
+      // 이 신호는 그 저장 하나의 것이다 — 저장이 끝난 뒤의 destroy()와는 이어지지 않는다
+      // (업로드 중의 destroy()·취소 버튼은 QARecorder.lifecycle.test.ts에서 확인)
       recorder.destroy();
-      expect(options.signal.aborted).toBe(true);
+      expect(options.signal.aborted).toBe(false);
     });
 
     it('업로드 실패 시 같은 데이터로 로컬 ZIP 저장으로 대체하고, 업로드 중에 기록된 것은 남긴다', async () => {

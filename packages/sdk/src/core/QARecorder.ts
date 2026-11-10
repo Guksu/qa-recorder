@@ -39,7 +39,10 @@ interface RollbackLoss {
   consoleEntries: number;
 }
 
-/** 저장 결과. aborted는 destroy()로 저장이 중단된 경우 (아무것도 하지 않는다) */
+/**
+ * 저장 결과. aborted는 저장이 취소된 경우 — 진행 막대의 취소 버튼이면 잘라 낸 기록을 되돌리고,
+ * destroy()면 아무것도 하지 않는다 (confirmAndSave 참고).
+ */
 type SaveOutcome =
   | { kind: 'saved'; url?: string; uploaded: boolean }
   | { kind: 'fallback'; uploadError: unknown }
@@ -47,6 +50,10 @@ type SaveOutcome =
   | { kind: 'aborted' };
 
 /** 저장 실패 안내의 마지막 줄 — 메모리 제한으로 일부를 남기지 못했으면 그렇게 말한다 */
+function hasLoss(loss: RollbackLoss | undefined): boolean {
+  return !!loss && (loss.replayEvents > 0 || loss.requests > 0 || loss.consoleEntries > 0);
+}
+
 function keptMessage(loss: RollbackLoss | undefined): string {
   const parts = [
     loss?.replayEvents ? `${loss.replayEvents} replay events` : '',
@@ -217,32 +224,48 @@ export class QARecorder {
    * 저장에 성공하면 잘라 낸 데이터만 버리고, 실패하면 잘라 낸 데이터를 되돌려 다음 저장에 함께 넣는다.
    * await 뒤에는 항상 signal을 확인해 destroy() 후에는 녹화·버퍼·UI를 건드리지 않는다.
    */
-  private async confirmAndSave(signal: AbortSignal): Promise<void> {
-    const { confirmed, memo } = await ConfirmModal.show('Save this QA session?', { signal });
-    if (!confirmed || signal.aborted) return;
+  private async confirmAndSave(lifecycleSignal: AbortSignal): Promise<void> {
+    const { confirmed, memo } = await ConfirmModal.show('Save this QA session?', { signal: lifecycleSignal });
+    if (!confirmed || lifecycleSignal.aborted) return;
+
+    // 이 저장만 취소하는 신호 — 진행 막대의 취소 버튼과 destroy() 둘 다 이 신호로 업로드·대기·다운로드를 멈춘다
+    const save = new AbortController();
+    const abortSave = () => save.abort();
+    lifecycleSignal.addEventListener('abort', abortSave);
+    const signal = save.signal;
 
     const snapshot = this.cutForSave();
     let outcome: SaveOutcome;
     try {
-      this.dismissProgress = ProgressBar.show('Saving...', this.config.zIndex);
+      this.dismissProgress = ProgressBar.show('Saving...', this.config.zIndex, { onCancel: abortSave });
       // 응답 헤더는 왔지만 본문을 아직 받는 중인 요청은 pendingBodyTimeout까지 기다린다 (끝나지 않는 스트림도 그 이상은 기다리지 않는다).
       // 그때까지 다 받지 못한 본문은 받은 부분만 'pending'으로 리포트에 넣고, 다음 저장에 다시 넣는다
       await this.networkCapture.waitForBodies(snapshot.network, this.config.pendingBodyTimeout, signal);
-      if (signal.aborted) return;
-      snapshot.pendingBodies = this.networkCapture.markPendingBodies(snapshot.network);
-      const har = HARBuilder.build(snapshot.network);
-      const environment = collectEnvironment((url) => MaskingFilter.maskUrl(url, this.urlKeyMatcher));
-      outcome = this.config.endpoint
-        ? await this.uploadOrSaveLocally(this.config.endpoint, snapshot, har, memo, environment, signal)
-        : await this.saveLocally(snapshot, har, memo, environment, signal);
+      if (signal.aborted) {
+        outcome = { kind: 'aborted' };
+      } else {
+        snapshot.pendingBodies = this.networkCapture.markPendingBodies(snapshot.network);
+        const har = HARBuilder.build(snapshot.network);
+        const environment = collectEnvironment((url) => MaskingFilter.maskUrl(url, this.urlKeyMatcher));
+        outcome = this.config.endpoint
+          ? await this.uploadOrSaveLocally(this.config.endpoint, snapshot, har, memo, environment, signal)
+          : await this.saveLocally(snapshot, har, memo, environment, signal);
+      }
     } catch (err) {
       // 리포트 생성 등 예기치 못한 실패도 기록을 잃지 않도록 실패로 다룬다
       outcome = signal.aborted ? { kind: 'aborted' } : { kind: 'failed', saveError: err };
+    } finally {
+      lifecycleSignal.removeEventListener('abort', abortSave);
     }
-    if (outcome.kind === 'aborted' || signal.aborted) return;
+    // destroy(): 녹화·버퍼·UI를 건드리지 않는다
+    if (lifecycleSignal.aborted) return;
 
-    if (outcome.kind === 'failed') {
-      outcome.loss = this.rollbackSave(snapshot);
+    let loss: RollbackLoss | undefined;
+    if (outcome.kind === 'failed' || outcome.kind === 'aborted') {
+      // 실패나 사용자의 취소: 잘라 낸 기록을 되돌려 다음 저장에 함께 넣는다.
+      // 다운로드를 이미 시작했거나 업로드가 끝난 뒤에 누른 취소는 늦었으므로 저장한 것으로 다룬다(outcome이 saved·fallback)
+      loss = this.rollbackSave(snapshot);
+      if (outcome.kind === 'failed') outcome.loss = loss;
     } else {
       this.commitSave(snapshot);
     }
@@ -250,6 +273,11 @@ export class QARecorder {
     // alert는 블로킹이므로 항상 진행 막대를 먼저 숨긴다
     this.dismissProgress?.();
     this.dismissProgress = null;
+    if (outcome.kind === 'aborted') {
+      // 사용자가 취소했다 — 안내하지 않는다. 다만 메모리 제한 때문에 기록 일부를 남기지 못했으면 알린다
+      if (hasLoss(loss)) alert(`Save cancelled.\n${keptMessage(loss)}`);
+      return;
+    }
     this.notify(outcome);
   }
 

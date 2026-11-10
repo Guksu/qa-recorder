@@ -159,6 +159,8 @@ createApp(App).mount('#app');
 
 업로드 중에 `destroy()`를 호출하면 요청을 취소합니다. 이는 업로드 실패로 다루지 않으므로 ZIP을 내려받지 않고 안내도 띄우지 않으며, 서버의 늦은 응답도 아무 영향을 주지 않습니다.
 
+**저장 취소:** 저장하는 동안 보이는 진행 막대에 **Cancel** 버튼이 있습니다. 누르면 저장을 멈춥니다 — 업로드 요청을 끊고, 아직 받는 중인 응답 본문을 더 기다리지 않으며, 아직 내려받지 않은 로컬 ZIP은 내려받지 않습니다. 저장하려던 기록은 저장에 실패했을 때와 같이 (같은 메모리 제한 안에서) 다음 저장을 위해 남기고, 녹화는 계속됩니다. 대체 ZIP을 내려받지 않고 안내도 띄우지 않습니다 — 다만 메모리 제한 때문에 기록 일부를 버렸다면 알립니다. ZIP을 이미 내려받았거나 업로드가 끝난 뒤에 누른 취소는 늦었으므로 그 저장은 끝난 것으로 다룹니다.
+
 ```ts
 const recorder = new QARecorder({
   endpoint: 'https://your-server.com/upload',
@@ -322,7 +324,7 @@ QARecorder.setup() / init()
   │   └─ ConsoleCapture.snapshot()    → 지금까지의 엔트리
   ├─ HARBuilder.build()         → 표준 HAR 1.2 문서
   ├─ collectEnvironment()       → 브라우저, 화면, 마스킹된 페이지 URL, SDK 버전
-  ├─ ProgressBar.show()         → "Saving..."
+  ├─ ProgressBar.show()         → "Saving..." + Cancel 버튼
   │
   ├─ [endpoint 설정된 경우]
   │   └─ RemoteDelivery.send()  → POST multipart/form-data (uploadTimeout이 지나거나 destroy()하면 취소)
@@ -341,6 +343,7 @@ QARecorder.setup() / init()
   │             (본문을 받는 중에 저장된 요청도 다음 리포트를 위해 남김)
   ├─ [저장 실패] 실패한 부분을 재시도를 위해 남김 (중복·추가 스냅샷 없이) — maxReplaySize / maxRequests /
   │             maxConsoleEntries 안에서만, 일부를 버렸으면 안내에 그렇게 알림
+  ├─ [Cancel을 누름] 잘라 낸 부분을 실패 때처럼 다음 저장을 위해 남김 (안내 없음)
   └─ 진행 막대 숨김 → SharePanel(업로드 응답에 url이 있을 때) 또는 alert(대체 저장·실패)
 ```
 
@@ -412,7 +415,7 @@ QARecorder.setup() / init()
 - **저장해도 녹화가 멈추지 않습니다.** 응답 본문을 받는 중이던 요청은 연속한 두 리포트에 들어갈 수 있습니다 ([저장 방식](#저장-방식) 참고). 저장 실패 안내가 메모리 제한 때문에 일부를 버렸다고 알릴 수 있습니다.
 - **`destroy()`는** 열려 있는 저장 확인창과 진행 중인 업로드·로컬 저장을 취소하고, 진행 막대와 공유 패널을 닫습니다. 그 뒤 같은 인스턴스에서 `init()`하면 리플레이처럼 네트워크·콘솔 기록도 비운 채 시작합니다.
 
-2.0에 새로 추가된 것: `uploadTimeout`, `pendingBodyTimeout` 옵션과 TypeScript 타입 export(`HARDocument`, `HAREntry`, `HARBodyStatus`, `ConsoleEntry` …).
+2.0에 새로 추가된 것: 진행 막대의 취소 버튼, `uploadTimeout`, `pendingBodyTimeout` 옵션과 TypeScript 타입 export(`HARDocument`, `HAREntry`, `HARBodyStatus`, `ConsoleEntry` …).
 
 ---
 

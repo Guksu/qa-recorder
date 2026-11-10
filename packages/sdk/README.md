@@ -155,6 +155,8 @@ Set an `endpoint` to POST files to your server instead. On success, if the serve
 
 Calling `destroy()` during an upload aborts the request. That is not treated as a failed upload: no ZIP is downloaded, no message is shown, and a late server response has no effect.
 
+**Cancelling a save:** the progress bar shown while saving has a **Cancel** button. It stops the save — the upload request is aborted, the wait for response bodies still arriving ends, and a local ZIP that has not been downloaded yet is not downloaded — and keeps what would have been saved for the next save, exactly like a failed save (within the same memory limits). Recording keeps running. No fallback ZIP is downloaded and no message is shown, unless the memory limits forced part of the recording to be dropped. A cancel pressed after the ZIP was already downloaded, or after the upload finished, comes too late: that save counts as done.
+
 ```ts
 const recorder = new QARecorder({
   endpoint: 'https://your-server.com/upload',
@@ -318,7 +320,7 @@ User clicks the button
   │   └─ ConsoleCapture.snapshot()    → entries so far
   ├─ HARBuilder.build()         → standard HAR 1.2 document
   ├─ collectEnvironment()       → browser, screen, masked page URL, SDK version
-  ├─ ProgressBar.show()         → "Saving..."
+  ├─ ProgressBar.show()         → "Saving..." with a Cancel button
   │
   ├─ [endpoint set]
   │   └─ RemoteDelivery.send()  → POST multipart/form-data (aborted after uploadTimeout or on destroy())
@@ -337,6 +339,7 @@ User clicks the button
   │           (requests saved with a body still arriving stay too, for the next report)
   ├─ [failed] keep the failed part for the retry (no duplicates, no extra snapshot), within
   │           maxReplaySize / maxRequests / maxConsoleEntries — the message says if some was dropped
+  ├─ [Cancel pressed] keep the cut part for the next save, like a failure, without a message
   └─ ProgressBar hidden → SharePanel (upload with url) or an alert (fallback / failure)
 ```
 
@@ -408,7 +411,7 @@ The `qa-report-{timestamp}.html` file is a fully self-contained QA report — no
 - **Saving does not stop recording any more**, and requests whose response body is still arriving can appear in two consecutive reports (see [Save Modes](#save-modes)). A failure message may now say that part of the recording was dropped to stay within the memory limits.
 - **`destroy()` cancels** an open save dialog and an upload or local save in flight, and removes the progress bar and share panel. Calling `init()` on the same instance afterwards starts with empty network and console logs, like the replay already did.
 
-New in 2.0: the `uploadTimeout` and `pendingBodyTimeout` options, and exported TypeScript types (`HARDocument`, `HAREntry`, `HARBodyStatus`, `ConsoleEntry`, …).
+New in 2.0: a Cancel button on the progress bar, the `uploadTimeout` and `pendingBodyTimeout` options, and exported TypeScript types (`HARDocument`, `HAREntry`, `HARBodyStatus`, `ConsoleEntry`, …).
 
 ---
 
