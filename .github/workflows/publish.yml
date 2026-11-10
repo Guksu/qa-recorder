@@ -1,0 +1,80 @@
+name: Publish to npm
+
+# 직접 실행할 때만 돈다: Actions → Publish to npm → Run workflow
+# 저장소 Secrets에 NPM_TOKEN(qa-recorder에 publish 권한이 있는 npm 토큰)이 있어야 한다.
+# dry_run을 켜면 토큰 없이 배포할 내용만 확인한다 (npm publish --dry-run).
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Only check what would be published (npm publish --dry-run)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write # npm provenance (빌드한 커밋과 워크플로를 npm 패키지 페이지에 증명)
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish qa-recorder
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check the version is not on npm yet
+        working-directory: packages/sdk
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "Publishing qa-recorder@$VERSION"
+          if npm view "qa-recorder@$VERSION" version >/dev/null 2>&1; then
+            echo "::error::qa-recorder@$VERSION is already on npm. Bump the version first."
+            exit 1
+          fi
+
+      - name: Check NPM_TOKEN
+        if: ${{ !inputs.dry_run }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::error::Add an NPM_TOKEN repository secret (Settings → Secrets and variables → Actions)."
+            exit 1
+          fi
+
+      - name: Typecheck
+        run: pnpm -F qa-recorder typecheck
+
+      - name: Build
+        run: pnpm -F qa-recorder build
+
+      # 패키징한 SDK를 저장소 밖 독립 프로젝트에 설치해 skipLibCheck 없이 타입 검사한다
+      - name: Verify packed package
+        run: pnpm -F qa-recorder verify:package
+
+      # prepublishOnly가 단위 테스트와 빌드를, prepack이 README·LICENSE 복사를 한다
+      - name: Publish
+        working-directory: packages/sdk
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --provenance --access public ${{ inputs.dry_run && '--dry-run' || '' }}
