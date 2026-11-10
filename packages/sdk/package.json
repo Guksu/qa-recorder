@@ -17,7 +17,7 @@
   "homepage": "https://github.com/Guksu/qa-recorder#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Guksu/qa-recorder.git"
+    "url": "git+https://github.com/Guksu/qa-recorder.git"
   },
   "bugs": {
     "url": "https://github.com/Guksu/qa-recorder/issues"

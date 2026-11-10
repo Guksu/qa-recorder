@@ -437,6 +437,7 @@ pnpm -F qa-recorder test:e2e          # 빌드 후: Chromium·Firefox·WebKit �
 - **데모:** `pnpm demo`는 npm 배포본이 아니라 현재 체크아웃의 SDK(`packages/sdk/src`, Vite 경유)를 씁니다. 페이지 상단 배지에 버전과 커밋이 표시됩니다. [라이브 데모](https://guksu.github.io/qa-recorder/)는 배포한 커밋에서 빌드한 SDK를 쓰며(같은 방식으로 표시), npm 릴리스보다 앞설 수 있습니다.
 - **E2E:** 빌드한 SDK, 작은 테스트 앱, 로컬 API, 느림·실패·무응답 모드가 있는 업로드 endpoint를 제공하는 로컬 fixture 서버(`packages/sdk/e2e/fixture-server.mjs`)로 실행합니다 — 외부 서비스에 의존하지 않습니다. 리포트의 rrweb 스크립트는 같은 버전의 npm 파일로 응답하고, 브라우저는 그대로 무결성(SRI)을 검사합니다. 브라우저는 처음에 `pnpm -F qa-recorder exec playwright install chromium firefox webkit`으로 설치합니다. 일부만 실행하려면 `--project=chromium`이나 `E2E_BROWSERS=chromium,firefox`를 씁니다.
 - **CI**(`.github/workflows/ci.yml`)는 풀 리퀘스트마다 타입 검사, 단위 테스트, 빌드, 패키지 검증, Chromium·Firefox·WebKit E2E(브라우저마다 job 하나)를 실행합니다.
+- **npm 배포**(`.github/workflows/publish.yml`): `packages/sdk/package.json`과 `packages/sdk/src/core/version.ts`의 버전을 올려 병합한 뒤 **Actions → Publish to npm → Run workflow**를 실행합니다. 저장소 Secrets에 `NPM_TOKEN`(qa-recorder에 publish 권한이 있는 npm 토큰, 2FA가 켜져 있다면 우회가 허용된 토큰)이 있어야 합니다. 이미 npm에 있는 버전이면 배포하지 않고, 타입 검사·빌드·패키지 검증·단위 테스트를 거쳐 [npm provenance](https://docs.npmjs.com/generating-provenance-statements)와 함께 배포합니다. **dry_run**을 켜면 토큰 없이 배포할 내용만 확인합니다.
 
 ---
 
