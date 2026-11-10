@@ -340,3 +340,36 @@ test('확인창이 열린 상태에서 destroy() 후 다시 시작하면 새 녹
   expect(har.log.entries.map((e) => new URL(e.request.url).pathname)).toEqual(['/api/missing']);
   expect(path.basename(uploads[0].fields.session.filename!)).toMatch(/\.rr\.json$/);
 });
+
+test('업로드 중 진행 막대의 취소 버튼을 누르면 요청을 끊고, 녹화는 이어지며 다음 저장에 그 기록이 들어간다', async ({ page }) => {
+  const dialogs = collectDialogs(page);
+  let downloads = 0;
+  page.on('download', () => { downloads++; });
+  await start(page, { endpoint: '/upload?mode=slow&delay=3000' });
+  await page.click('#load');
+  await expect(page.locator('#out')).toContainText('items 200');
+
+  await clickSave(page);
+  await expect(progressBar(page)).toBeVisible();
+  await expect.poll(async () => (await serverState(page)).started).toBe(1);
+  const cancel = page.locator('[data-qa="progress-bar"] .qa-progress-cancel');
+  await expect(cancel).toHaveText('Cancel');
+  await cancel.click();
+
+  await expect(progressBar(page)).toHaveCount(0);
+  await expect.poll(async () => (await serverState(page)).aborted).toBe(1);
+  await page.waitForTimeout(3500); // 서버가 응답했을 시간이 지나도
+  expect(downloads).toBe(0);
+  expect(dialogs).toEqual([]);
+  await expect(sharePanel(page)).toHaveCount(0);
+  await expect(recorderButton(page)).toHaveAttribute('title', 'Stop and save recording');
+
+  // 같은 녹화로 다시 저장하면 취소한 저장의 요청(/api/items)과 그 뒤의 요청(/api/missing)이 한 번씩 들어간다
+  await page.click('#missing');
+  await expect(page.locator('#out')).toContainText('missing 404');
+  await clickSave(page);
+  await expect(sharePanel(page)).toBeVisible({ timeout: 15_000 });
+  const { uploads } = await serverState(page);
+  const har = JSON.parse(uploads.at(-1)!.fields.har.text) as HarJson;
+  expect(har.log.entries.map((e) => new URL(e.request.url).pathname)).toEqual(['/api/items', '/api/missing']);
+});

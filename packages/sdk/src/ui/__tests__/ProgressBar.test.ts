@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ProgressBar } from '../ProgressBar.js';
 
 describe('ProgressBar', () => {
@@ -77,5 +77,38 @@ describe('ProgressBar.show — 닫기 함수', () => {
     dismissStale(); // 이미 닫은 막대의 닫기 함수는 새 막대를 닫지 않는다
     expect(document.querySelector('[data-qa="progress-bar"]')).not.toBeNull();
     dismissThird();
+  });
+});
+
+describe('ProgressBar.show — 취소 버튼', () => {
+  const cancelButton = () =>
+    document.querySelector('[data-qa="progress-bar"]')!.shadowRoot!.querySelector<HTMLButtonElement>('.qa-progress-cancel');
+  const label = () =>
+    document.querySelector('[data-qa="progress-bar"]')!.shadowRoot!.querySelector('.qa-progress-label')!.textContent;
+
+  it('onCancel이 없으면 취소 버튼을 보이지 않는다', () => {
+    document.body.innerHTML = '';
+    const dismiss = ProgressBar.show('Saving...');
+    expect(cancelButton()).toBeNull();
+    dismiss();
+  });
+
+  it('취소 버튼을 누르면 onCancel을 한 번만 부르고, 버튼을 비활성화해 "Cancelling…"으로 바꾼다', () => {
+    document.body.innerHTML = '';
+    const onCancel = vi.fn();
+    const dismiss = ProgressBar.show('Saving...', 2147483647, { onCancel });
+    const button = cancelButton()!;
+    expect(button.textContent).toBe('Cancel');
+    expect(button.getAttribute('aria-label')).toBe('Cancel saving');
+    expect(button.type).toBe('button');
+
+    button.click();
+    button.click();
+
+    expect(onCancel).toHaveBeenCalledOnce();
+    expect(button.disabled).toBe(true);
+    expect(label()).toBe('Cancelling…');
+    dismiss();
+    expect(document.querySelector('[data-qa="progress-bar"]')).toBeNull();
   });
 });

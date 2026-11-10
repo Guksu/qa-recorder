@@ -140,6 +140,21 @@ export const BASE_STYLES = `
     100% { transform: translateX(250%); }
   }
   .qa-progress-label { font-size: 11px; color: #94a3b8; margin-top: 8px; text-align: right; }
+  .qa-progress-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; }
+  .qa-progress-row .qa-progress-label { margin-top: 0; }
+  .qa-progress-cancel {
+    font: inherit;
+    font-size: 11px;
+    color: #e2e8f0;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.16);
+    border-radius: 6px;
+    padding: 3px 10px;
+    cursor: pointer;
+  }
+  .qa-progress-cancel:hover { background: rgba(255,255,255,0.16); }
+  .qa-progress-cancel:focus-visible { outline: 2px solid #f97316; outline-offset: 2px; }
+  .qa-progress-cancel:disabled { opacity: 0.5; cursor: default; }
 
   /* ── Share Panel ── */
   .qa-share-panel {

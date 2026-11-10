@@ -50,6 +50,8 @@ function confirmSave(memo = '') {
 /** fetch 요청 중 업로드만 원하는 시점에 끝낼 수 있게 붙잡아 둔다. 신호로 취소되면 실제 fetch처럼 AbortError로 끝난다 */
 interface PendingUpload {
   signal: AbortSignal;
+  /** 업로드한 multipart 본문 */
+  form: FormData;
   respond: (body: unknown, status?: number) => void;
   fail: (err: Error) => void;
 }
@@ -87,6 +89,7 @@ beforeEach(() => {
       signal.addEventListener('abort', abort);
       uploads.push({
         signal,
+        form: init!.body as FormData,
         respond: (body, status = 200) => resolve(new Response(JSON.stringify(body), { status })),
         fail: reject,
       });
@@ -273,6 +276,104 @@ describe('destroy() 중 진행 중인 저장', () => {
     expect(downloads).toEqual([]);
     expect(progressBar()).toBeNull();
     expect(mocks.record).toHaveBeenCalledOnce();
+  });
+});
+
+describe('진행 막대의 취소 버튼', () => {
+  const cancelButton = () =>
+    document.querySelector('[data-qa="progress-bar"]')!.shadowRoot!.querySelector<HTMLButtonElement>('.qa-progress-cancel')!;
+
+  /** 녹화 중 앱 요청 하나를 남긴다 (취소한 저장의 기록이 다음 저장에 다시 들어가는지 확인용) */
+  async function appRequest(recorder: QARecorder, path: string) {
+    await window.fetch(`https://app.example.com${path}`);
+    expect(internalsOf(recorder).networkCapture.snapshot().some((e) => e.request.url.endsWith(path))).toBe(true);
+  }
+
+  it('업로드 중에 누르면 요청을 취소하고, 대체 ZIP도 안내도 없이 기록을 되돌려 다음 저장에 넣는다', async () => {
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    const recorder = new QARecorder({ endpoint });
+    await recorder.init();
+    await appRequest(recorder, '/before-cancel');
+    const upload = await startUpload(recorder);
+
+    cancelButton().click();
+    await vi.waitFor(() => expect(progressBar()).toBeNull());
+    await flush();
+
+    expect(upload.signal.aborted).toBe(true);
+    expect(downloads).toEqual([]);
+    expect(alertSpy).not.toHaveBeenCalled();
+    expect(sharePanel()).toBeNull();
+    expect(floatingButton()).not.toBeNull(); // 녹화는 계속된다
+    expect(mocks.record).toHaveBeenCalledOnce();
+    expect(internalsOf(recorder).activeSave).toBeNull();
+
+    // 다시 저장하면 취소한 저장의 기록이 (한 번) 함께 올라간다
+    const second = await startUpload(recorder);
+    second.respond({ url: 'https://qa.example.com/share/after-cancel' });
+    await vi.waitFor(() => expect(sharePanel()).not.toBeNull());
+    const har = JSON.parse(await (second.form.get('har') as Blob).text()) as { log: { entries: { request: { url: string } }[] } };
+    expect(har.log.entries.filter((e) => e.request.url.endsWith('/before-cancel'))).toHaveLength(1);
+    recorder.destroy();
+  });
+
+  it('로컬 저장 중(다운로드 전)에 누르면 다운로드하지 않는다', async () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => { frames.push(cb); return frames.length; });
+    const recorder = new QARecorder();
+    await recorder.init();
+    floatingButton()!.click();
+    confirmSave();
+    await vi.waitFor(() => expect(frames).toHaveLength(1));
+
+    cancelButton().click();
+    frames[0](performance.now());
+    await vi.waitFor(() => expect(progressBar()).toBeNull());
+    await flush();
+
+    expect(downloads).toEqual([]);
+    expect(internalsOf(recorder).activeSave).toBeNull();
+    recorder.destroy();
+  });
+
+  it('응답 본문을 기다리는 중에 누르면 업로드를 시작하지 않는다', async () => {
+    let releaseBody!: () => void;
+    const appFetch = vi.fn(async () => new Response(new ReadableStream({ start(c) { releaseBody = () => c.close(); } }),
+      { headers: { 'content-type': 'text/plain' } }));
+    const uploadFetch = window.fetch;
+    window.fetch = ((input: RequestInfo | URL, init?: RequestInit) =>
+      (String(input) === endpoint ? uploadFetch(input, init) : appFetch())) as typeof fetch;
+    const recorder = new QARecorder({ endpoint, pendingBodyTimeout: 60_000 });
+    await recorder.init();
+    await window.fetch('https://app.example.com/slow-body');
+    floatingButton()!.click();
+    confirmSave();
+    await vi.waitFor(() => expect(progressBar()).not.toBeNull());
+
+    cancelButton().click();
+    await vi.waitFor(() => expect(progressBar()).toBeNull());
+    expect(uploads).toHaveLength(0);
+    releaseBody();
+    recorder.destroy();
+  });
+
+  it('다운로드를 이미 시작한 뒤에 누른 취소는 늦었으므로 저장한 것으로 다룬다', async () => {
+    const recorder = new QARecorder();
+    await recorder.init();
+    await appRequest(recorder, '/saved-anyway');
+    // 다운로드(a.click) 직후, 로컬 저장이 끝나기(300ms) 전에 취소를 누른다
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      downloads.push(this.download);
+      cancelButton().click();
+    });
+    floatingButton()!.click();
+    confirmSave();
+    await vi.waitFor(() => expect(downloads).toHaveLength(1), { timeout: 10_000 });
+    await vi.waitFor(() => expect(progressBar()).toBeNull());
+
+    // 저장했으므로 그 기록은 버퍼에서 빠진다
+    expect(internalsOf(recorder).networkCapture.snapshot().some((e) => e.request.url.endsWith('/saved-anyway'))).toBe(false);
+    recorder.destroy();
   });
 });
 
